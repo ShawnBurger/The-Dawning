@@ -1,0 +1,36 @@
+# Build outputs
+/build/
+/out/
+/.vs/
+
+# CMake generated files outside build directories
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+
+# Visual Studio user/local files
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.opensdf
+*.sdf
+
+# Compiler/linker outputs
+*.exe
+*.ilk
+*.obj
+*.pdb
+*.lib
+*.exp
+*.dll
+
+# Handoff/reference payloads kept out of the canonical source tree
+/TheDawning_Codex_Handoff_v3_unpacked/
+*.zip
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak

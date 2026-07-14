@@ -1,0 +1,23 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+*.bat text eol=crlf
+
+*.cpp text eol=lf
+*.h text eol=lf
+*.hlsl text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+*.exe binary
+*.pdb binary
+*.dll binary
+*.lib binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.dds binary
