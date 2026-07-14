@@ -189,31 +189,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     core::Log::Infof("Scene populated: %u entities", gameScene.EntityCount());
 
     // =========================================================================
-    // Initialize path tracer (DXR)
+    // Path tracer state (DXR initializes lazily on first F1 press)
     // =========================================================================
     bool usePathTracing = false;
     bool rtAvailable = false;
+    bool rtInitAttempted = false;
 
-    if (gameScene.InitPathTracer(device))
-    {
-        // Build BLAS for each mesh (requires open command list)
-        device.WaitForCurrentFrame();
-        device.ResetCommandList();
-
-        gameScene.EnsureBLAS(device);
-
-        device.CmdList()->Close();
-        ID3D12CommandList* blasLists[] = { device.CmdList() };
-        device.CmdQueue()->ExecuteCommandLists(1, blasLists);
-        device.WaitForGpu();
-
-        rtAvailable = true;
-        core::Log::Info("Path tracing available (press F1 to toggle)");
-    }
-    else
-    {
-        core::Log::Warn("Path tracing not available — DXR initialization failed");
-    }
+    core::Log::Info("Path tracing will initialize on first F1 press");
 
     // =========================================================================
     // Timer
@@ -247,11 +229,39 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         if (input.mouse.buttonPressed[0] && !window.IsCaptured())
             window.CaptureMouse();
 
-        // F1: toggle path tracing
-        if (input.KeyPressed(VK_F1) && rtAvailable)
+        // F1: initialize/toggle path tracing
+        if (input.KeyPressed(VK_F1))
         {
-            usePathTracing = !usePathTracing;
-            core::Log::Infof("Render mode: %s", usePathTracing ? "PATH TRACING" : "RASTERIZATION");
+            if (!rtInitAttempted)
+            {
+                rtInitAttempted = true;
+
+                if (gameScene.InitPathTracer(device))
+                {
+                    device.WaitForCurrentFrame();
+                    device.ResetCommandList();
+
+                    gameScene.EnsureBLAS(device);
+
+                    device.CmdList()->Close();
+                    ID3D12CommandList* blasLists[] = { device.CmdList() };
+                    device.CmdQueue()->ExecuteCommandLists(1, blasLists);
+                    device.WaitForGpu();
+
+                    rtAvailable = true;
+                    core::Log::Info("Path tracing initialized");
+                }
+                else
+                {
+                    core::Log::Warn("Path tracing not available - DXR initialization failed");
+                }
+            }
+
+            if (rtAvailable)
+            {
+                usePathTracing = !usePathTracing;
+                core::Log::Infof("Render mode: %s", usePathTracing ? "PATH TRACING" : "RASTERIZATION");
+            }
         }
 
         // --- Timer ---
@@ -313,7 +323,9 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
         auto* cmd = device.CmdList();
 
-        if (usePathTracing && rtAvailable)
+        bool renderedPathTracing = usePathTracing && rtAvailable;
+
+        if (renderedPathTracing)
         {
             // --- Path Tracing Mode ---
 
@@ -370,6 +382,9 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             core::Log::Error("GPU device lost — exiting");
             running = false;
         }
+
+        if (renderedPathTracing && !device.IsDeviceLost())
+            device.WaitForGpu();
     }
 
     // =========================================================================

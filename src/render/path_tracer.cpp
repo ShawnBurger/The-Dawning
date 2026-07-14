@@ -227,6 +227,18 @@ void PathTracer::Dispatch(
     if (!m_initialized) return;
     (void)instanceCount;
 
+    if (!m_accel.GetTLASAddress())
+    {
+        core::Log::Error("PathTracer dispatch skipped: TLAS is not built");
+        return;
+    }
+
+    if (!m_pipeline.HasShaderTable())
+    {
+        core::Log::Error("PathTracer dispatch skipped: shader table is not built");
+        return;
+    }
+
     m_frameIndex = device.FrameIndex();
 
     auto* cmd = device.CmdList4();
@@ -246,12 +258,18 @@ void PathTracer::Dispatch(
     // For now, compute a simple inverse (our Mat4x4 may not have a general inverse yet)
     // The ray gen shader will reconstruct ray directions from screen coordinates
     RTPerFrameConstants cb = {};
-    memcpy(cb.invViewProj, viewProj.Data(), sizeof(float) * 16);
+    memcpy(cb.viewProj, viewProj.Data(), sizeof(float) * 16);
     // Note: this is actually viewProj, not the inverse — the shader will handle reconstruction
     // via camera position + screen-space ray direction calculation
 
     core::Vec3f camPos = camera.Position();
+    core::Vec3f camRight = camera.Right();
+    core::Vec3f camForward = camera.Forward();
+    core::Vec3f camUp = camForward.Cross(camRight).Normalized();
     cb.cameraPos[0] = camPos.x; cb.cameraPos[1] = camPos.y; cb.cameraPos[2] = camPos.z;
+    cb.cameraRight[0] = camRight.x; cb.cameraRight[1] = camRight.y; cb.cameraRight[2] = camRight.z;
+    cb.cameraUp[0] = camUp.x; cb.cameraUp[1] = camUp.y; cb.cameraUp[2] = camUp.z;
+    cb.cameraForward[0] = camForward.x; cb.cameraForward[1] = camForward.y; cb.cameraForward[2] = camForward.z;
     cb.lightDir[0] = lightDir.x; cb.lightDir[1] = lightDir.y; cb.lightDir[2] = lightDir.z;
     cb.lightColor[0] = lightColor.x; cb.lightColor[1] = lightColor.y; cb.lightColor[2] = lightColor.z;
     cb.ambientColor[0] = ambientColor.x; cb.ambientColor[1] = ambientColor.y; cb.ambientColor[2] = ambientColor.z;

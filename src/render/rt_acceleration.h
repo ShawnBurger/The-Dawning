@@ -28,6 +28,7 @@ namespace render
 struct BLASEntry
 {
     ComPtr<ID3D12Resource> result;       // Final BLAS buffer (VRAM)
+    ComPtr<ID3D12Resource> scratch;      // Kept alive until compaction/lifetime policy exists
     uint64_t               gpuAddress = 0;
     uint32_t               meshIndex = UINT32_MAX; // Index into resource manager
     bool                   compacted = false;

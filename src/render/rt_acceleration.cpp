@@ -155,6 +155,7 @@ uint32_t RTAcceleration::BuildBLAS(
     // Store in pool
     BLASEntry entry;
     entry.result     = std::move(resultBuffer);
+    entry.scratch    = std::move(scratchBuffer);
     entry.gpuAddress = entry.result->GetGPUVirtualAddress();
 
     uint32_t index = static_cast<uint32_t>(m_blasPool.size());
@@ -164,7 +165,8 @@ uint32_t RTAcceleration::BuildBLAS(
                      index, mesh.vertexCount, mesh.indexCount / 3,
                      static_cast<unsigned long long>(prebuild.ResultDataMaxSizeInBytes));
 
-    // Note: scratch buffer released after this scope (GPU must finish first)
+    // Scratch is retained with the BLAS for now. Releasing it immediately after
+    // recording the build can invalidate GPU work before the command list runs.
     return index;
 }
 

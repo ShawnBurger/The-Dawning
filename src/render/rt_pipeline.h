@@ -26,8 +26,11 @@ namespace render
 // =============================================================================
 struct RTPerFrameConstants
 {
-    float invViewProj[16];       // Inverse view-projection matrix
+    float viewProj[16];          // Reserved for future inverse-VP/reprojection work
     float cameraPos[4];          // Camera world position (w unused)
+    float cameraRight[4];        // Camera right vector (w unused)
+    float cameraUp[4];           // Camera up vector (w unused)
+    float cameraForward[4];      // Camera forward vector (w unused)
     float lightDir[4];           // Directional light direction (w unused)
     float lightColor[4];         // Light color + intensity (w unused)
     float ambientColor[4];       // Ambient color (w unused)
@@ -63,6 +66,7 @@ public:
     // Access
     ID3D12StateObject*     GetStateObject() const  { return m_stateObject.Get(); }
     ID3D12RootSignature*   GetGlobalRootSig() const { return m_globalRootSig.Get(); }
+    bool                   HasShaderTable() const { return m_shaderTable != nullptr; }
 
     // Shader table addresses for DispatchRays
     D3D12_GPU_VIRTUAL_ADDRESS RayGenAddress() const;
@@ -91,6 +95,7 @@ private:
     // Shader table buffer
     ComPtr<ID3D12Resource> m_shaderTable;
     uint64_t m_shaderTableSize = 0;
+    uint32_t m_shaderTableInstanceCount = UINT32_MAX;
 
     // SBT layout offsets
     uint64_t m_rayGenOffset = 0;

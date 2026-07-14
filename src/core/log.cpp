@@ -13,11 +13,13 @@ namespace core { namespace Log {
 static LARGE_INTEGER s_startTime;
 static LARGE_INTEGER s_frequency;
 static bool s_initialized = false;
+static FILE* s_file = nullptr;
 
 void Init()
 {
     QueryPerformanceFrequency(&s_frequency);
     QueryPerformanceCounter(&s_startTime);
+    fopen_s(&s_file, "TheDawning.log", "w");
     s_initialized = true;
     Info("Log system initialized");
 }
@@ -25,6 +27,11 @@ void Init()
 void Shutdown()
 {
     Info("Log system shutdown");
+    if (s_file)
+    {
+        fclose(s_file);
+        s_file = nullptr;
+    }
     s_initialized = false;
 }
 
@@ -52,6 +59,12 @@ static void Output(LogLevel level, const char* msg)
 
     // Also write to stderr for console builds
     fputs(buffer, stderr);
+
+    if (s_file)
+    {
+        fputs(buffer, s_file);
+        fflush(s_file);
+    }
 }
 
 void Info(const char* msg)  { Output(LogLevel::Info, msg); }

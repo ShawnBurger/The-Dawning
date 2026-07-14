@@ -32,6 +32,7 @@ bool RTPipeline::Init(ID3D12Device5* device)
 void RTPipeline::Shutdown()
 {
     m_shaderTable.Reset();
+    m_shaderTableInstanceCount = UINT32_MAX;
     m_stateObject.Reset();
     m_globalRootSig.Reset();
     core::Log::Info("RTPipeline shut down");
@@ -210,7 +211,12 @@ bool RTPipeline::CreateStateObject(ID3D12Device5* device)
 
     // --- Retrieve shader identifiers ---
     ComPtr<ID3D12StateObjectProperties> props;
-    m_stateObject.As(&props);
+    hr = m_stateObject.As(&props);
+    if (FAILED(hr) || !props)
+    {
+        core::Log::Errorf("Failed to query ID3D12StateObjectProperties: 0x%08X", hr);
+        return false;
+    }
 
     auto copyID = [&](const wchar_t* exportName, uint8_t* dest) {
         void* id = props->GetShaderIdentifier(exportName);
@@ -242,6 +248,9 @@ bool RTPipeline::CreateStateObject(ID3D12Device5* device)
 // =============================================================================
 bool RTPipeline::BuildShaderTable(ID3D12Device5* device, uint32_t instanceCount)
 {
+    if (m_shaderTable && m_shaderTableInstanceCount == instanceCount)
+        return true;
+
     const uint64_t idSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // 32
     const uint64_t recordAlign = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT; // 32
     const uint64_t tableAlign  = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;  // 64
@@ -318,6 +327,7 @@ bool RTPipeline::BuildShaderTable(ID3D12Device5* device, uint32_t instanceCount)
     }
 
     m_shaderTable->Unmap(0, nullptr);
+    m_shaderTableInstanceCount = instanceCount;
 
     core::Log::Infof("Shader table built: %llu bytes (%u instances, %u hit groups)",
                      static_cast<unsigned long long>(totalSize),

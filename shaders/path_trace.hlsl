@@ -20,8 +20,11 @@ RWTexture2D<float4>             g_Output : register(u0, space0);
 
 cbuffer PerFrameConstants : register(b0, space0)
 {
-    float4x4 g_ViewProj;        // View-projection (we reconstruct rays from this)
+    float4x4 g_ViewProj;        // Reserved for future inverse-VP/reprojection work
     float4   g_CameraPos;
+    float4   g_CameraRight;
+    float4   g_CameraUp;
+    float4   g_CameraForward;
     float4   g_LightDir;
     float4   g_LightColor;
     float4   g_AmbientColor;
@@ -163,12 +166,9 @@ void RayGen()
     // For now: use a simplified approach — shoot rays through a virtual film plane
     float3 rayOrigin = g_CameraPos.xyz;
 
-    // Extract right/up/forward from the first 3 columns of viewProj
-    // This is an approximation; proper inverse VP would be better
-    // TODO: Pass actual inverse VP or camera basis vectors
-    float3 forward = normalize(float3(g_ViewProj[0][2], g_ViewProj[1][2], g_ViewProj[2][2]));
-    float3 right   = normalize(float3(g_ViewProj[0][0], g_ViewProj[1][0], g_ViewProj[2][0]));
-    float3 up      = normalize(float3(g_ViewProj[0][1], g_ViewProj[1][1], g_ViewProj[2][1]));
+    float3 forward = normalize(g_CameraForward.xyz);
+    float3 right   = normalize(g_CameraRight.xyz);
+    float3 up      = normalize(g_CameraUp.xyz);
 
     float3 rayDir = normalize(
         forward + right * ndc.x * tanHalfFov * aspect + up * ndc.y * tanHalfFov

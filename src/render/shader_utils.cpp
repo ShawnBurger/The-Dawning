@@ -150,6 +150,14 @@ static ComPtr<ID3DBlob> CompileWithDXC(
                              args.data(), static_cast<UINT32>(args.size()),
                              pIncludeHandler.Get(),
                              IID_PPV_ARGS(&pResult));
+    if (FAILED(hr) || !pResult)
+    {
+        char narrowPath[256];
+        WideCharToMultiByte(CP_UTF8, 0, filePath, -1, narrowPath, sizeof(narrowPath), nullptr, nullptr);
+        core::Log::Errorf("DXC: Compile call failed for %s [%s] (0x%08X)",
+                          narrowPath, target, hr);
+        return nullptr;
+    }
 
     // Check for errors
     ComPtr<IDxcBlobUtf8> pErrors;
@@ -173,11 +181,24 @@ static ComPtr<ID3DBlob> CompileWithDXC(
 
     // Get compiled bytecode
     ComPtr<IDxcBlob> pBytecode;
-    pResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pBytecode), nullptr);
+    hr = pResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pBytecode), nullptr);
+    if (FAILED(hr) || !pBytecode)
+    {
+        char narrowPath[256];
+        WideCharToMultiByte(CP_UTF8, 0, filePath, -1, narrowPath, sizeof(narrowPath), nullptr, nullptr);
+        core::Log::Errorf("DXC: no bytecode produced for %s [%s] (0x%08X)",
+                          narrowPath, target, hr);
+        return nullptr;
+    }
 
     // Wrap in ID3DBlob for compatibility with the rest of the engine
     ComPtr<ID3DBlob> blob;
-    D3DCreateBlob(pBytecode->GetBufferSize(), &blob);
+    hr = D3DCreateBlob(pBytecode->GetBufferSize(), &blob);
+    if (FAILED(hr) || !blob)
+    {
+        core::Log::Errorf("D3DCreateBlob failed for DXC output (0x%08X)", hr);
+        return nullptr;
+    }
     memcpy(blob->GetBufferPointer(), pBytecode->GetBufferPointer(),
            pBytecode->GetBufferSize());
 
