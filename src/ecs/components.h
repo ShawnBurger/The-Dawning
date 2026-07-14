@@ -25,7 +25,7 @@ struct Transform
     core::Mat4x4 ToMatrix() const
     {
         core::Mat4x4 s = core::Mat4x4::Scaling(scale.x, scale.y, scale.z);
-        core::Mat4x4 r = core::Mat4x4::FromQuaternion(rotation);
+        core::Mat4x4 r = core::Mat4x4::FromQuaternion(rotation.Normalized());
         core::Mat4x4 t = core::Mat4x4::Translation(position);
         return s * r * t;
     }

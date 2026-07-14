@@ -227,18 +227,17 @@ MeshData GenerateCube(const core::Color& color)
     {
         uint16_t base = static_cast<uint16_t>(data.vertices.size());
 
-        // CW winding: 0-1-2, 0-2-3
         data.vertices.push_back({ p0, normal, color, { 0.0f, 1.0f } });
         data.vertices.push_back({ p1, normal, color, { 0.0f, 0.0f } });
         data.vertices.push_back({ p2, normal, color, { 1.0f, 0.0f } });
         data.vertices.push_back({ p3, normal, color, { 1.0f, 1.0f } });
 
         data.indices.push_back(base + 0);
+        data.indices.push_back(base + 2);
         data.indices.push_back(base + 1);
-        data.indices.push_back(base + 2);
         data.indices.push_back(base + 0);
-        data.indices.push_back(base + 2);
         data.indices.push_back(base + 3);
+        data.indices.push_back(base + 2);
     };
 
     // Front face (+Z) — looking at it from +Z, CW is: BL, TL, TR, BR
@@ -382,13 +381,12 @@ MeshData GenerateSphere(float radius, uint32_t slices, uint32_t stacks,
             uint16_t bl = static_cast<uint16_t>((stack + 1) * cols + slice);
             uint16_t br = static_cast<uint16_t>(bl + 1);
 
-            // CW winding
             data.indices.push_back(tl);
+            data.indices.push_back(br);
             data.indices.push_back(bl);
-            data.indices.push_back(br);
             data.indices.push_back(tl);
-            data.indices.push_back(br);
             data.indices.push_back(tr);
+            data.indices.push_back(br);
         }
     }
 

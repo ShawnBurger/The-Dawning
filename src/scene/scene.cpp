@@ -95,7 +95,7 @@ void Scene::SystemRotation(float dt)
         {
             float angle = spin.radiansPerSecond * dt;
             core::Quatf delta = core::Quatf::FromAxisAngle(spin.axis, angle);
-            transform.rotation = transform.rotation * delta;
+            transform.rotation = (transform.rotation * delta).Normalized();
         }
     );
 }
