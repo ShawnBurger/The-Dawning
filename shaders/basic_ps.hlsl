@@ -1,8 +1,8 @@
 // =============================================================================
 // basic_ps.hlsl — The Dawning V3 Pixel Shader
 // =============================================================================
-// PBR-lite: Lambert diffuse + Blinn-Phong specular with roughness/metallic.
-// Will be upgraded to full Cook-Torrance GGX in Layer 4.
+// Raster material shader: Cook-Torrance/GGX direct lighting with texture-driven
+// albedo and normal maps.
 // =============================================================================
 
 cbuffer CBPerFrame : register(b1)
@@ -30,6 +30,8 @@ cbuffer CBMaterial : register(b2)
 
 Texture2D<float4> materialTextures[128] : register(t0);
 SamplerState linearSampler : register(s0);
+
+static const float PI = 3.14159265358979323846;
 
 struct PSInput
 {
@@ -69,6 +71,32 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
     return dot(mappedNormal, mappedNormal) > 1e-8 ? normalize(mappedNormal) : N;
 }
 
+float3 FresnelSchlick(float cosTheta, float3 F0)
+{
+    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
+}
+
+float DistributionGGX(float NdotH, float materialRoughness)
+{
+    float a = materialRoughness * materialRoughness;
+    float a2 = a * a;
+    float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d + 0.0001);
+}
+
+float GeometrySmithG1(float NdotV, float materialRoughness)
+{
+    float r = materialRoughness + 1.0;
+    float k = (r * r) / 8.0;
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+float GeometrySmith(float NdotV, float NdotL, float materialRoughness)
+{
+    return GeometrySmithG1(NdotV, materialRoughness) *
+           GeometrySmithG1(NdotL, materialRoughness);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     float3 N = normalize(input.normalWS);
@@ -82,32 +110,35 @@ float4 main(PSInput input) : SV_TARGET
     float NdotL = saturate(dot(N, L));
     float NdotH = saturate(dot(N, H));
     float NdotV = saturate(dot(N, V));
+    float VdotH = saturate(dot(V, H));
 
     // Base color from material albedo * vertex color * optional albedo texture
     float3 baseColor = albedo.rgb * input.color.rgb;
     if (useAlbedoTexture != 0)
         baseColor *= materialTextures[albedoTextureIndex].Sample(linearSampler, input.uv).rgb;
 
-    // Fresnel-Schlick approximation
+    float materialRoughness = clamp(roughness, 0.04, 1.0);
+
+    // Cook-Torrance direct lighting
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
-    float3 fresnel = F0 + (1.0 - F0) * pow(1.0 - saturate(dot(H, V)), 5.0);
+    float3 F = FresnelSchlick(VdotH, F0);
+    float D = DistributionGGX(NdotH, materialRoughness);
+    float G = GeometrySmith(NdotV, NdotL, materialRoughness);
 
-    // Diffuse (Lambert, energy-conserving: reduced by metallic)
-    float3 diffuse = baseColor * (1.0 - metallic) * NdotL * lightColor;
-
-    // Specular (Blinn-Phong, roughness-controlled sharpness)
-    // Will be replaced with GGX NDF in Layer 4
-    float specPower = lerp(256.0, 4.0, roughness * roughness);
-    float specIntensity = pow(NdotH, specPower) * NdotL;
-    float3 specular = fresnel * lightColor * specIntensity;
+    float3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.0001);
+    float3 kD = (1.0 - F) * (1.0 - metallic);
+    float3 diffuse = kD * baseColor / PI;
+    float3 direct = (diffuse + specular) * lightColor * NdotL * 1.6;
 
     // Ambient (hemisphere approximation — ground color darker)
     float hemisphereBlend = N.y * 0.5 + 0.5;
     float3 groundColor = ambientColor * 0.3;
-    float3 ambient = baseColor * lerp(groundColor, ambientColor, hemisphereBlend);
+    float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend) * (1.0 - metallic);
+    float3 ambientSpecular = FresnelSchlick(NdotV, F0) * (ambientColor + 0.12) *
+                             lerp(0.25, 1.1, 1.0 - materialRoughness);
 
     // Combine
-    float3 finalColor = diffuse + specular + ambient;
+    float3 finalColor = direct + ambientDiffuse + ambientSpecular;
 
     return float4(finalColor, albedo.a * input.color.a);
 }

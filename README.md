@@ -10,7 +10,7 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
-- Layer 4 material path with albedo and normal textures in raster and DXR.
+- Layer 4 material path with albedo/normal textures and GGX-style shading.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -86,6 +86,8 @@ tables. Raster and DXR materials can also bind normal maps; the demo scene loads
 `ground_normal` / `cube_normal` KTX, PNG, or DDS files when present and
 otherwise uses procedural wave normal textures for the floor and cube. Raster
 and DXR now both use indexed shader-visible texture tables at demo scale.
+Raster lighting uses Cook-Torrance/GGX direct lighting so material roughness and
+metallic response track more closely between preview and path tracing.
 
 ## Runtime Controls
 
