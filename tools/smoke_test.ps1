@@ -99,8 +99,14 @@ if ($RasterOnly) {
         if ($logText -notmatch "Smoke mode enabled \(rt=yes, full=yes") {
             throw "Full-quality smoke did not request full RT quality."
         }
+        if ($logText -notmatch "Initial RT quality mode: Full Path Trace") {
+            throw "Full-quality smoke did not select full path tracing quality."
+        }
         Write-Host "Smoke test passed (path tracing full)."
     } else {
+        if ($logText -notmatch "Initial RT quality mode: Stable Preview") {
+            throw "Stable smoke did not select stable preview quality."
+        }
         Write-Host "Smoke test passed (path tracing stable)."
     }
 }

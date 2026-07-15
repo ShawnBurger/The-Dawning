@@ -448,6 +448,11 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
     render::RTQualityInfo rtQualityInfo = render::GetRTQualityInfo(rtQualityMode);
 
     core::Log::Info("Path tracing will initialize on first F1 press");
+    core::Log::Infof("Initial RT quality mode: %s (%u spp, %u bounce%s)",
+                     rtQualityInfo.name,
+                     rtQualityInfo.samplesPerPixel,
+                     rtQualityInfo.maxBounces,
+                     rtQualityInfo.maxBounces == 1 ? "" : "s");
     core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
 
     auto ensurePathTracing = [&]() -> bool
