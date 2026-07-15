@@ -15,13 +15,42 @@ static LARGE_INTEGER s_frequency;
 static bool s_initialized = false;
 static FILE* s_file = nullptr;
 
+static void BuildLogPath(char* outPath, size_t outPathSize)
+{
+    if (!outPath || outPathSize == 0)
+        return;
+
+    strncpy_s(outPath, outPathSize, "TheDawning.log", _TRUNCATE);
+
+    char modulePath[MAX_PATH] = {};
+    DWORD length = GetModuleFileNameA(nullptr, modulePath, static_cast<DWORD>(sizeof(modulePath)));
+    if (length == 0 || length >= sizeof(modulePath))
+        return;
+
+    char* slash = strrchr(modulePath, '\\');
+    char* forwardSlash = strrchr(modulePath, '/');
+    if (forwardSlash && (!slash || forwardSlash > slash))
+        slash = forwardSlash;
+    if (!slash)
+        return;
+
+    *(slash + 1) = '\0';
+    strncpy_s(outPath, outPathSize, modulePath, _TRUNCATE);
+    strncat_s(outPath, outPathSize, "TheDawning.log", _TRUNCATE);
+}
+
 void Init()
 {
     QueryPerformanceFrequency(&s_frequency);
     QueryPerformanceCounter(&s_startTime);
-    fopen_s(&s_file, "TheDawning.log", "w");
+
+    char logPath[MAX_PATH] = {};
+    BuildLogPath(logPath, sizeof(logPath));
+    fopen_s(&s_file, logPath, "w");
+
     s_initialized = true;
     Info("Log system initialized");
+    Infof("Log file: %s", logPath);
 }
 
 void Shutdown()

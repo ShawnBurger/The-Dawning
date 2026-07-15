@@ -43,6 +43,12 @@ Build output:
 build\Debug\TheDawningV3.exe
 ```
 
+Runtime log:
+
+```text
+build\Debug\TheDawning.log
+```
+
 ## Path Tracing Runtime
 
 Raster mode builds and runs without extra DLLs. For DXR/path tracing shader
