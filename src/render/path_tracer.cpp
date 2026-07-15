@@ -57,18 +57,11 @@ static bool HasVectorChanged(const core::Vec3f& a, const core::Vec3f& b, float e
     return (a - b).LengthSq() > epsilon * epsilon;
 }
 
-struct RTQualitySettings
-{
-    uint32_t samplesPerPixel = 8;
-    uint32_t maxBounces = 1;
-    uint32_t stablePreview = 1;
-};
-
-static RTQualitySettings GetQualitySettings(RTQualityMode mode)
+RTQualityInfo GetRTQualityInfo(RTQualityMode mode)
 {
     if (mode == RTQualityMode::FullPathTrace)
-        return { 4, 3, 0 };
-    return { 8, 1, 1 };
+        return { "Full Path Trace", "FULL", 4, 3, 0 };
+    return { "Stable Preview", "STABLE", 8, 1, 1 };
 }
 
 // =============================================================================
@@ -373,7 +366,7 @@ void PathTracer::Dispatch(
     RTQualityMode qualityMode)
 {
     if (!m_initialized) return;
-    RTQualitySettings quality = GetQualitySettings(qualityMode);
+    RTQualityInfo quality = GetRTQualityInfo(qualityMode);
 
     if (!m_accel.GetTLASAddress())
     {

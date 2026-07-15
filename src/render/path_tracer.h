@@ -28,6 +28,17 @@ enum class RTQualityMode : uint32_t
     FullPathTrace = 1
 };
 
+struct RTQualityInfo
+{
+    const char* name = "Stable Preview";
+    const char* shortName = "STABLE";
+    uint32_t samplesPerPixel = 8;
+    uint32_t maxBounces = 1;
+    uint32_t stablePreview = 1;
+};
+
+RTQualityInfo GetRTQualityInfo(RTQualityMode mode);
+
 class PathTracer
 {
 public:

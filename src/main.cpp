@@ -195,8 +195,10 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     bool rtAvailable = false;
     bool rtInitAttempted = false;
     render::RTQualityMode rtQualityMode = render::RTQualityMode::StablePreview;
+    render::RTQualityInfo rtQualityInfo = render::GetRTQualityInfo(rtQualityMode);
 
     core::Log::Info("Path tracing will initialize on first F1 press");
+    core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality");
 
     // =========================================================================
     // Timer
@@ -235,8 +237,12 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             rtQualityMode = (rtQualityMode == render::RTQualityMode::StablePreview)
                 ? render::RTQualityMode::FullPathTrace
                 : render::RTQualityMode::StablePreview;
-            core::Log::Infof("RT quality mode: %s",
-                rtQualityMode == render::RTQualityMode::StablePreview ? "STABLE PREVIEW" : "FULL PATH TRACE");
+            rtQualityInfo = render::GetRTQualityInfo(rtQualityMode);
+            core::Log::Infof("RT quality mode: %s (%u spp, %u bounce%s)",
+                rtQualityInfo.name,
+                rtQualityInfo.samplesPerPixel,
+                rtQualityInfo.maxBounces,
+                rtQualityInfo.maxBounces == 1 ? "" : "es");
         }
 
         // F1: initialize/toggle path tracing
@@ -282,14 +288,22 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         if (titleTimer >= 0.5f)
         {
             titleTimer = 0.0f;
-            const char* qualityName = rtQualityMode == render::RTQualityMode::StablePreview
-                ? "STABLE" : "FULL";
+            char modeText[64];
+            if (usePathTracing)
+            {
+                snprintf(modeText, sizeof(modeText), "PATH TRACING %s %uspp/%ub",
+                         rtQualityInfo.shortName,
+                         rtQualityInfo.samplesPerPixel,
+                         rtQualityInfo.maxBounces);
+            }
+            else
+            {
+                snprintf(modeText, sizeof(modeText), "RASTERIZED");
+            }
+
             char title[160];
-            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s%s%s [F1 render | F2 quality]",
-                     ts.fps, gameScene.EntityCount(),
-                     usePathTracing ? "PATH TRACING" : "RASTERIZED",
-                     usePathTracing ? " " : "",
-                     usePathTracing ? qualityName : "");
+            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s [F1 render | F2 quality]",
+                     ts.fps, gameScene.EntityCount(), modeText);
             SetWindowTextA(window.GetHWND(), title);
         }
 
