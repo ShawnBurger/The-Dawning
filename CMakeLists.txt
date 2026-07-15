@@ -26,6 +26,7 @@ set(RENDER_SOURCES
     src/render/d3d12_device.cpp
     src/render/shader_utils.cpp
     src/render/mesh.cpp
+    src/render/texture.cpp
     src/render/camera.cpp
     src/render/renderer.cpp
     src/render/debug_overlay.cpp
@@ -38,6 +39,7 @@ set(RENDER_HEADERS
     src/render/d3d12_device.h
     src/render/shader_utils.h
     src/render/mesh.h
+    src/render/texture.h
     src/render/camera.h
     src/render/renderer.h
     src/render/debug_overlay.h

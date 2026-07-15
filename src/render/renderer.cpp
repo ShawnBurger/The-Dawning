@@ -19,6 +19,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateRootSignature(device.Device())) return false;
     if (!CreatePSO(device.Device()))           return false;
     if (!CreateConstantBuffers(device.Device())) return false;
+    if (!CreateTextureHeap(device.Device())) return false;
 
     core::Log::Info("Renderer initialized");
     return true;
@@ -35,6 +36,9 @@ void Renderer::Shutdown()
             m_cbMappedPtrs[i] = nullptr;
         }
     }
+    m_textureHeap.Reset();
+    m_textureDescSize = 0;
+    m_nextTextureDescriptor = 1;
     core::Log::Info("Renderer shut down");
 }
 
@@ -89,7 +93,15 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     if (featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1)
     {
         // v1.1: enables driver optimizations via DATA_STATIC / DESCRIPTORS_VOLATILE flags
-        D3D12_ROOT_PARAMETER1 rootParams[3] = {};
+        D3D12_DESCRIPTOR_RANGE1 textureRange = {};
+        textureRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        textureRange.NumDescriptors                    = 1;
+        textureRange.BaseShaderRegister                = 0;
+        textureRange.RegisterSpace                     = 0;
+        textureRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+        textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER1 rootParams[4] = {};
 
         // Slot 0: Per-object CBV (b0) — changes every draw call (hottest)
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -112,6 +124,12 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[2].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 3: Optional albedo texture SRV (t0)
+        rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
+        rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
@@ -125,7 +143,14 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     else
     {
         // v1.0 fallback
-        D3D12_ROOT_PARAMETER rootParams[3] = {};
+        D3D12_DESCRIPTOR_RANGE textureRange = {};
+        textureRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        textureRange.NumDescriptors                    = 1;
+        textureRange.BaseShaderRegister                = 0;
+        textureRange.RegisterSpace                     = 0;
+        textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER rootParams[4] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -141,6 +166,11 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[2].Descriptor.ShaderRegister = 2;
         rootParams[2].Descriptor.RegisterSpace  = 0;
         rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
+        rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
@@ -169,7 +199,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + 1 static sampler, 6 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 3 root CBVs + texture SRV + 1 static sampler, 7 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -299,6 +329,61 @@ bool Renderer::CreateConstantBuffers(ID3D12Device* device)
     return true;
 }
 
+bool Renderer::CreateTextureHeap(ID3D12Device* device)
+{
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.NumDescriptors = kMaxRasterTextures;
+    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+    HRESULT hr = device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_textureHeap));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create raster texture heap: 0x%08X", hr);
+        return false;
+    }
+
+    m_textureHeap->SetName(L"RasterTextureHeap");
+    m_textureDescSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC nullSrv = {};
+    nullSrv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    nullSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullSrv.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(nullptr, &nullSrv, m_textureHeap->GetCPUDescriptorHandleForHeapStart());
+
+    core::Log::Infof("Raster texture heap created (%u descriptors)", kMaxRasterTextures);
+    return true;
+}
+
+uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
+{
+    if (!device || !m_textureHeap || !texture.IsValid())
+        return UINT32_MAX;
+
+    if (m_nextTextureDescriptor >= kMaxRasterTextures)
+    {
+        core::Log::Error("Raster texture heap is full");
+        return UINT32_MAX;
+    }
+
+    uint32_t descriptorIndex = m_nextTextureDescriptor++;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(descriptorIndex) * m_textureDescSize;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texture.format;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(texture.resource.Get(), &srvDesc, handle);
+
+    core::Log::Infof("Raster texture registered: descriptor=%u (%ux%u)",
+                     descriptorIndex, texture.width, texture.height);
+    return descriptorIndex;
+}
+
 // =============================================================================
 // Upload a constant buffer sub-allocation
 // =============================================================================
@@ -337,6 +422,8 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     m_cbOffset = 0; // Reset ring for this frame
 
     auto* cmd = device.CmdList();
+    ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
+    cmd->SetDescriptorHeaps(1, heaps);
 
     // Set pipeline state
     cmd->SetGraphicsRootSignature(m_rootSig.Get());
@@ -373,11 +460,16 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
 void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         const core::Mat4x4& worldMatrix,
                         const core::Color& albedo,
-                        float roughness, float metallic)
+                        float roughness, float metallic,
+                        const Texture* albedoTexture)
 {
     if (!mesh.IsValid()) return;
 
     auto* cmd = device.CmdList();
+    bool useAlbedoTexture = albedoTexture &&
+        albedoTexture->IsValid() &&
+        albedoTexture->descriptorIndex != UINT32_MAX &&
+        albedoTexture->descriptorIndex < m_nextTextureDescriptor;
 
     // Compute world-view-projection
     core::Mat4x4 wvp = worldMatrix * m_viewProj;
@@ -403,9 +495,15 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.albedo[3] = albedo.a;
     material.roughness = roughness;
     material.metallic  = metallic;
+    material.useAlbedoTexture = useAlbedoTexture ? 1u : 0u;
 
     auto materialAddr = UploadCB(&material, sizeof(material));
     cmd->SetGraphicsRootConstantBufferView(2, materialAddr);
+
+    D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
+    if (useAlbedoTexture)
+        textureHandle.ptr += static_cast<UINT64>(albedoTexture->descriptorIndex) * m_textureDescSize;
+    cmd->SetGraphicsRootDescriptorTable(3, textureHandle);
 
     // Bind geometry and draw
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);

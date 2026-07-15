@@ -13,6 +13,7 @@
 // =============================================================================
 
 #include "../render/mesh.h"
+#include "../render/texture.h"
 #include "../core/types.h"
 #include <cstdint>
 #include <vector>
@@ -45,6 +46,7 @@ struct ResourceHandle
 
 using MeshHandle = ResourceHandle;
 using MaterialHandle = ResourceHandle;
+using TextureHandle = ResourceHandle;
 
 // =============================================================================
 // MaterialData — CPU-side material definition
@@ -77,9 +79,16 @@ public:
     const MaterialData* GetMaterial(MaterialHandle handle) const;
     bool IsValidMaterial(MaterialHandle handle) const;
 
+    // --- Texture management ---
+    TextureHandle AddTexture(render::Texture&& texture, const char* name = nullptr);
+    const render::Texture* GetTexture(TextureHandle handle) const;
+    bool IsValidTexture(TextureHandle handle) const;
+    void RemoveTexture(TextureHandle handle);
+
     // --- Statistics ---
     uint32_t MeshCount() const { return m_meshAliveCount; }
     uint32_t MaterialCount() const { return m_materialAliveCount; }
+    uint32_t TextureCount() const { return m_textureAliveCount; }
 
 private:
     // Mesh pool
@@ -104,6 +113,18 @@ private:
     std::vector<MaterialSlot> m_materialSlots;
     std::vector<uint32_t> m_materialFreeList;
     uint32_t m_materialAliveCount = 0;
+
+    // Texture pool
+    struct TextureSlot
+    {
+        render::Texture texture;
+        char name[32] = {};
+        uint32_t generation = 0;
+        bool alive = false;
+    };
+    std::vector<TextureSlot> m_textureSlots;
+    std::vector<uint32_t> m_textureFreeList;
+    uint32_t m_textureAliveCount = 0;
 };
 
 } // namespace scene

@@ -10,6 +10,7 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
+- Early Layer 4 raster material path with generated RGBA8 albedo textures.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -52,6 +53,14 @@ compilation at runtime, copy these next to `TheDawningV3.exe`:
 
 They can come from the Microsoft DirectX Shader Compiler release or the
 Microsoft.Direct3D.DXC NuGet package.
+
+## Material System Status
+
+Raster materials can bind one albedo texture per draw through texture handles in
+the resource manager. The current scene uses generated checker textures to prove
+the upload, SRV, and shader sampling path. PNG/DDS loading, bindless texture
+arrays, normal maps, and path-traced texture sampling are still upcoming Layer 4
+work.
 
 ## Runtime Controls
 

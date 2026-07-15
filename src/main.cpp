@@ -1,7 +1,7 @@
 // =============================================================================
 // main.cpp — The Dawning V3 Engine Entry Point
 // =============================================================================
-// Layer 3+RT: Core Architecture + Full Path Tracing
+// Layer 4 start: texture-capable raster materials + full path tracing baseline.
 // Dual-mode renderer: rasterization (default) and DXR path tracing (F1 toggle).
 // Path tracer: multi-bounce with NEE, Cook-Torrance BRDF, shadow rays,
 // temporal accumulation. Architectured for future ReSTIR/SER/DLSS upgrade.
@@ -27,7 +27,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     // Initialize core systems
     // =========================================================================
     core::Log::Init();
-    core::Log::Info("=== The Dawning V3 Engine Starting (Layer 3: ECS) ===");
+    core::Log::Info("=== The Dawning V3 Engine Starting (Layer 4: Materials) ===");
 
     // Set working directory to executable directory
     {
@@ -122,6 +122,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     ComPtr<ID3D12Resource> cubeVBUp, cubeIBUp;
     ComPtr<ID3D12Resource> planeVBUp, planeIBUp;
     ComPtr<ID3D12Resource> sphereVBUp, sphereIBUp;
+    ComPtr<ID3D12Resource> groundTexUp, cubeTexUp;
 
     auto cubeData   = render::GenerateCube(core::Color::White());
     auto planeData  = render::GeneratePlane(10.0f, 10.0f, 10, 10, core::Color::White());
@@ -142,6 +143,27 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
 
+    auto groundTexPixels = render::GenerateCheckerTextureRGBA8(
+        512, 512, 32,
+        { 0.82f, 0.86f, 0.91f, 1.0f },
+        { 0.48f, 0.53f, 0.60f, 1.0f });
+    auto cubeTexPixels = render::GenerateCheckerTextureRGBA8(
+        256, 256, 32,
+        { 0.20f, 0.42f, 0.92f, 1.0f },
+        { 0.03f, 0.08f, 0.20f, 1.0f });
+
+    auto groundTexture = render::CreateTexture2DFromRGBA8(
+        device.Device(), device.CmdList(),
+        groundTexPixels.data(), 512, 512,
+        groundTexUp, L"GroundAlbedoTexture");
+    groundTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundTexture);
+
+    auto cubeTexture = render::CreateTexture2DFromRGBA8(
+        device.Device(), device.CmdList(),
+        cubeTexPixels.data(), 256, 256,
+        cubeTexUp, L"BluePanelAlbedoTexture");
+    cubeTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeTexture);
+
     // Execute uploads
     device.CmdList()->Close();
     ID3D12CommandList* uploadLists[] = { device.CmdList() };
@@ -153,9 +175,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     auto hCube   = res.AddMesh(std::move(cubeMesh), "Cube");
     auto hPlane  = res.AddMesh(std::move(planeMesh), "Plane");
     auto hSphere = res.AddMesh(std::move(sphereMesh), "Sphere");
+    auto hGroundTex = res.AddTexture(std::move(groundTexture), "GroundGrid");
+    auto hCubeTex = res.AddTexture(std::move(cubeTexture), "BluePanels");
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
                      hCube.Index(), hPlane.Index(), hSphere.Index());
+    core::Log::Infof("Textures registered: ground=%u cube=%u",
+                     hGroundTex.Index(), hCubeTex.Index());
 
     // =========================================================================
     // Create scene entities via ECS
@@ -163,12 +189,12 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
     // Ground plane (static, dark grey, rough)
     gameScene.CreateRenderable("GroundPlane", hPlane,
-        ecs::Material{ { 0.3f, 0.3f, 0.3f, 1.0f }, 0.9f, 0.0f },
+        ecs::Material{ { 0.54f, 0.57f, 0.62f, 1.0f }, 0.9f, 0.0f, hGroundTex.value },
         ecs::Transform{ { 0, 0, 0 }, core::Quatf::Identity(), { 1, 1, 1 } });
 
     // Center cube (spinning, blue metal)
     gameScene.CreateSpinner("BlueCube", hCube,
-        ecs::Material{ { 0.2f, 0.4f, 0.8f, 1.0f }, 0.3f, 0.9f },
+        ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f, hCubeTex.value },
         ecs::Transform{ { 0, 0.5f, 0 }, core::Quatf::Identity(), { 1, 1, 1 } },
         0.5f);
 

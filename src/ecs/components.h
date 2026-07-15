@@ -54,9 +54,10 @@ struct MeshInstance
 // =============================================================================
 struct Material
 {
-    core::Color albedo    = core::Color::White();
-    float       roughness = 0.5f;
-    float       metallic  = 0.0f;
+    core::Color albedo              = core::Color::White();
+    float       roughness           = 0.5f;
+    float       metallic            = 0.0f;
+    uint32_t    albedoTextureHandle = UINT32_MAX;
 };
 
 // =============================================================================

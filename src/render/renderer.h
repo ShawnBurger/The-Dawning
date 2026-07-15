@@ -17,6 +17,7 @@
 #include "d3d12_device.h"
 #include "mesh.h"
 #include "camera.h"
+#include "texture.h"
 #include "../core/types.h"
 #include <cstdint>
 
@@ -50,7 +51,8 @@ struct CBMaterial
     float albedo[4];     // RGBA
     float roughness;
     float metallic;
-    float pad[2];
+    uint32_t useAlbedoTexture;
+    float pad;
 };
 
 // Align size to 256 bytes for CBV placement
@@ -76,7 +78,11 @@ public:
                   const core::Mat4x4& worldMatrix,
                   const core::Color& albedo = core::Color::White(),
                   float roughness = 0.5f,
-                  float metallic = 0.0f);
+                  float metallic = 0.0f,
+                  const Texture* albedoTexture = nullptr);
+
+    // Register a texture SRV for raster material sampling.
+    uint32_t RegisterTexture(ID3D12Device* device, const Texture& texture);
 
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
@@ -87,6 +93,7 @@ private:
     bool CreateRootSignature(ID3D12Device* device);
     bool CreatePSO(ID3D12Device* device);
     bool CreateConstantBuffers(ID3D12Device* device);
+    bool CreateTextureHeap(ID3D12Device* device);
 
     // Upload a constant buffer and return its GPU virtual address
     D3D12_GPU_VIRTUAL_ADDRESS UploadCB(const void* data, uint32_t dataSize);
@@ -94,6 +101,12 @@ private:
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
     ComPtr<ID3D12PipelineState> m_pso;
+
+    // Shader-visible texture descriptors. Slot 0 is a null SRV fallback.
+    static constexpr uint32_t kMaxRasterTextures = 128;
+    ComPtr<ID3D12DescriptorHeap> m_textureHeap;
+    uint32_t m_textureDescSize = 0;
+    uint32_t m_nextTextureDescriptor = 1;
 
     // Per-frame upload buffers for constants (one per frame in flight)
     static constexpr uint32_t kCBRingSize = 256 * 1024; // 256KB per frame

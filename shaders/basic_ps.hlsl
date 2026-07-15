@@ -22,8 +22,12 @@ cbuffer CBMaterial : register(b2)
     float4 albedo;         // Base color (RGB) + alpha
     float  roughness;      // 0 = mirror, 1 = matte
     float  metallic;       // 0 = dielectric, 1 = metal
-    float2 matPad;
+    uint   useAlbedoTexture;
+    float  matPad;
 };
+
+Texture2D<float4> albedoTexture : register(t0);
+SamplerState linearSampler : register(s0);
 
 struct PSInput
 {
@@ -45,8 +49,10 @@ float4 main(PSInput input) : SV_TARGET
     float NdotH = saturate(dot(N, H));
     float NdotV = saturate(dot(N, V));
 
-    // Base color from material albedo * vertex color
+    // Base color from material albedo * vertex color * optional albedo texture
     float3 baseColor = albedo.rgb * input.color.rgb;
+    if (useAlbedoTexture != 0)
+        baseColor *= albedoTexture.Sample(linearSampler, input.uv).rgb;
 
     // Fresnel-Schlick approximation
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);

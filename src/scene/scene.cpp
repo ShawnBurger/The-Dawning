@@ -131,12 +131,17 @@ void Scene::RenderEntities(render::D3D12Device& device, render::Renderer& render
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
         if (!gpuMesh || !gpuMesh->IsValid()) continue;
 
+        const render::Texture* albedoTexture = nullptr;
+        if (material.albedoTextureHandle != UINT32_MAX)
+            albedoTexture = m_resources.GetTexture(TextureHandle(material.albedoTextureHandle));
+
         // Compute world matrix from transform
         core::Mat4x4 worldMatrix = transform.ToMatrix();
 
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,
-                          material.albedo, material.roughness, material.metallic);
+                          material.albedo, material.roughness, material.metallic,
+                          albedoTexture);
     }
 }
 
