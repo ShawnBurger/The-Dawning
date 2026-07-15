@@ -62,7 +62,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     // Slot 1: Output UAV descriptor table (u0)
     D3D12_DESCRIPTOR_RANGE uavRange = {};
     uavRange.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    uavRange.NumDescriptors     = 1;
+    uavRange.NumDescriptors     = 2;
     uavRange.BaseShaderRegister = 0;
     uavRange.RegisterSpace      = 0;
     uavRange.OffsetInDescriptorsFromTableStart = 0;
@@ -125,7 +125,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     }
 
     m_globalRootSig->SetName(L"RT_GlobalRootSig");
-    core::Log::Info("RT global root signature created (6 params: TLAS, UAV, CB, Materials, Normals, Instances)");
+    core::Log::Info("RT global root signature created (6 params: TLAS, 2 UAVs, CB, Materials, Normals, Instances)");
     return true;
 }
 

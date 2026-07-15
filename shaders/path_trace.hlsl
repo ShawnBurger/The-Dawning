@@ -17,6 +17,7 @@
 // =============================================================================
 RaytracingAccelerationStructure g_Scene : register(t0, space0);
 RWTexture2D<float4>             g_Output : register(u0, space0);
+RWTexture2D<float4>             g_DisplayOutput : register(u1, space0);
 
 cbuffer PerFrameConstants : register(b0, space0)
 {
@@ -148,6 +149,46 @@ float GeometrySmith(float NdotV, float NdotL, float roughness)
     return GeometrySmithG1(NdotV, roughness) * GeometrySmithG1(NdotL, roughness);
 }
 
+float3 ToneMapForOutput(float3 color)
+{
+    color = max(color, float3(0, 0, 0));
+    color *= 1.25f;
+    return color / (color + float3(1, 1, 1));
+}
+
+float3 SkyRadiance(float3 direction)
+{
+    float t = 0.5f * (direction.y + 1.0f);
+    return lerp(float3(0.8f, 0.85f, 0.9f), float3(0.3f, 0.5f, 0.9f), t) * 0.5f;
+}
+
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+float3 ClampFireflySample(float3 sampleRadiance, float3 previousRadiance, uint frameIndex)
+{
+    float sampleLum = Luminance(sampleRadiance);
+    if (sampleLum <= 0.0001f)
+        return sampleRadiance;
+
+    if (frameIndex == 0)
+    {
+        const float firstFrameLimit = 8.0f;
+        if (sampleLum > firstFrameLimit)
+            sampleRadiance *= firstFrameLimit / sampleLum;
+        return sampleRadiance;
+    }
+
+    float previousLum = Luminance(previousRadiance);
+    float maxLum = max(1.5f, previousLum * 3.0f + 0.25f);
+    if (sampleLum > maxLum)
+        sampleRadiance *= maxLum / sampleLum;
+
+    return sampleRadiance;
+}
+
 // =============================================================================
 // Ray Generation Shader
 // =============================================================================
@@ -159,6 +200,12 @@ void RayGen()
 
     // Initialize RNG
     uint rngState = InitRNG(launchIndex, g_FrameIndex);
+
+    const uint SAMPLES_PER_PIXEL = 8;
+    float3 frameRadiance = float3(0, 0, 0);
+
+    for (uint sampleIndex = 0; sampleIndex < SAMPLES_PER_PIXEL; sampleIndex++)
+    {
 
     // Compute ray direction from pixel coordinates
     // NDC: [-1, 1] with jitter for anti-aliasing
@@ -224,10 +271,7 @@ void RayGen()
         // Miss — sky
         if (payload.hitT < 0.0f)
         {
-            // Simple sky gradient
-            float t = 0.5f * (currentDir.y + 1.0f);
-            float3 skyColor = lerp(float3(0.8, 0.85, 0.9), float3(0.3, 0.5, 0.9), t);
-            radiance += throughput * skyColor * 0.5f;
+            radiance += throughput * SkyRadiance(currentDir);
             break;
         }
 
@@ -286,9 +330,18 @@ void RayGen()
             }
         }
 
-        // Add ambient term (rough approximation of multi-bounce GI)
-        float3 ambient = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic);
-        radiance += throughput * ambient * (bounce == 0 ? 0.3f : 0.1f);
+        // Stable preview fill: approximate missing diffuse GI and sky reflection
+        // without tracing another noisy secondary bounce.
+        float3 envDiffuse = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
+        float3 envReflection = SkyRadiance(reflect(-V, N));
+        float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), mat.albedo.rgb, mat.metallic);
+        float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
+        float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
+        float3 envSpecular = envReflection * envF * envGloss;
+        radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
+
+        if (bounce + 1 >= g_MaxBounces)
+            break;
 
         // =============================================================
         // Sample BSDF for next bounce direction
@@ -298,13 +351,13 @@ void RayGen()
         // Probabilistically choose diffuse vs specular based on metallic
         float specProb = 0.5f + 0.5f * mat.metallic;
         float3 newDir;
-        float pdf;
+        bool choseSpecular = Random(rngState) <= specProb;
+        float branchPdf = choseSpecular ? specProb : (1.0f - specProb);
 
-        if (Random(rngState) > specProb)
+        if (!choseSpecular)
         {
             // Diffuse bounce (cosine-weighted hemisphere)
             newDir = SampleCosineHemisphere(u, N);
-            pdf = saturate(dot(N, newDir)) / PI;
 
             // Update throughput
             float3 F0 = lerp(float3(0.04, 0.04, 0.04), mat.albedo.rgb, mat.metallic);
@@ -320,7 +373,6 @@ void RayGen()
 
             // Lerp toward perfect reflection based on roughness
             newDir = normalize(lerp(reflected, newDir, mat.roughness * mat.roughness));
-            pdf = 1.0f; // Approximate
 
             float3 F0 = lerp(float3(0.04, 0.04, 0.04), mat.albedo.rgb, mat.metallic);
             float3 F = FresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
@@ -328,7 +380,8 @@ void RayGen()
         }
 
         // Correct for sampling probability
-        throughput /= (Random(rngState) > specProb) ? (1.0f - specProb) : specProb;
+        throughput /= max(branchPdf, 0.001f);
+        throughput = min(throughput, float3(4.0f, 4.0f, 4.0f));
 
         // Russian Roulette after first bounce
         if (bounce > 0)
@@ -344,15 +397,21 @@ void RayGen()
         currentDir    = newDir;
     }
 
-    // Clamp to prevent fireflies
-    radiance = min(radiance, float3(10, 10, 10));
+    frameRadiance += radiance;
+    }
 
-    // Simple temporal accumulation (future: proper reprojection with motion vectors)
-    float4 prevColor = g_Output[launchIndex];
-    float blend = (g_FrameIndex == 0) ? 1.0f : 0.1f; // 10% new, 90% history
-    float4 finalColor = lerp(prevColor, float4(radiance, 1.0f), blend);
+    float3 radiance = frameRadiance / float(SAMPLES_PER_PIXEL);
 
-    g_Output[launchIndex] = finalColor;
+    // Accumulate linear HDR radiance; tone mapping happens only for display.
+    float4 prevHistory = g_Output[launchIndex];
+    float3 filteredRadiance = ClampFireflySample(radiance, prevHistory.rgb, g_FrameIndex);
+    float blend = (g_FrameIndex < 32) ? (1.0f / float(g_FrameIndex + 1)) : 0.04f;
+    float3 accumulatedRadiance = (g_FrameIndex == 0)
+        ? filteredRadiance
+        : lerp(prevHistory.rgb, filteredRadiance, blend);
+
+    g_Output[launchIndex] = float4(accumulatedRadiance, 1.0f);
+    g_DisplayOutput[launchIndex] = float4(ToneMapForOutput(accumulatedRadiance), 1.0f);
 }
 
 // =============================================================================

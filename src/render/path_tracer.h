@@ -65,8 +65,9 @@ private:
     RTAcceleration m_accel;
     RTPipeline     m_pipeline;
 
-    // RT output texture (UAV for writing, SRV for reading)
+    // RT output textures: HDR history for accumulation, 8-bit display for copy.
     ComPtr<ID3D12Resource> m_outputTexture;
+    ComPtr<ID3D12Resource> m_displayTexture;
     uint32_t m_outputWidth = 0;
     uint32_t m_outputHeight = 0;
 
@@ -91,7 +92,13 @@ private:
     uint8_t* m_triangleNormalMapped = nullptr;
     uint32_t m_maxTriangleNormals = 0;
 
+    core::Vec3f m_prevCameraPos = {};
+    core::Vec3f m_prevCameraRight = {};
+    core::Vec3f m_prevCameraUp = {};
+    core::Vec3f m_prevCameraForward = {};
+    uint32_t m_accumFrameIndex = 0;
     uint32_t m_frameIndex = 0;
+    bool     m_hasPrevCamera = false;
     bool     m_initialized = false;
 };
 

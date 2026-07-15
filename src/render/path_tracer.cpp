@@ -52,6 +52,11 @@ static bool CreateMappedUploadBuffer(
     return true;
 }
 
+static bool HasVectorChanged(const core::Vec3f& a, const core::Vec3f& b, float epsilon = 1e-5f)
+{
+    return (a - b).LengthSq() > epsilon * epsilon;
+}
+
 // =============================================================================
 // Init / Shutdown
 // =============================================================================
@@ -110,6 +115,7 @@ void PathTracer::Shutdown()
     m_accel.Shutdown();
 
     m_outputTexture.Reset();
+    m_displayTexture.Reset();
     m_srvUavHeap.Reset();
     m_materialBuffer.Reset();
     m_instanceDataBuffer.Reset();
@@ -118,6 +124,8 @@ void PathTracer::Shutdown()
 
     m_maxInstanceData = 0;
     m_maxTriangleNormals = 0;
+    m_accumFrameIndex = 0;
+    m_hasPrevCamera = false;
     m_initialized = false;
     core::Log::Info("PathTracer shut down");
 }
@@ -150,20 +158,20 @@ bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint
     m_outputWidth  = width;
     m_outputHeight = height;
 
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
     D3D12_RESOURCE_DESC texDesc = {};
     texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width            = width;
     texDesc.Height           = height;
     texDesc.DepthOrArraySize = 1;
     texDesc.MipLevels        = 1;
-    texDesc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
     texDesc.SampleDesc       = { 1, 0 };
     texDesc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     texDesc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    D3D12_HEAP_PROPERTIES heapProps = {};
-    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
-
+    texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     HRESULT hr = device->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE,
         &texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -174,19 +182,40 @@ bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint
         core::Log::Errorf("Failed to create RT output texture: 0x%08X", hr);
         return false;
     }
-    m_outputTexture->SetName(L"RT_OutputTexture");
+    m_outputTexture->SetName(L"RT_HDRHistoryTexture");
 
-    // Create UAV in descriptor heap slot 0
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    hr = device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE,
+        &texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        nullptr, IID_PPV_ARGS(&m_displayTexture));
+
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create RT display texture: 0x%08X", hr);
+        return false;
+    }
+    m_displayTexture->SetName(L"RT_DisplayTexture");
+
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format               = DXGI_FORMAT_R8G8B8A8_UNORM;
     uavDesc.ViewDimension        = D3D12_UAV_DIMENSION_TEXTURE2D;
     uavDesc.Texture2D.MipSlice   = 0;
 
+    // UAV slot 0: HDR linear radiance history
+    uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     device->CreateUnorderedAccessView(
         m_outputTexture.Get(), nullptr, &uavDesc,
         m_srvUavHeap->GetCPUDescriptorHandleForHeapStart());
 
-    core::Log::Infof("RT output texture created: %ux%u", width, height);
+    // UAV slot 1: tone-mapped 8-bit display output
+    UINT descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE displayHandle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
+    displayHandle.ptr += descriptorSize;
+    uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    device->CreateUnorderedAccessView(
+        m_displayTexture.Get(), nullptr, &uavDesc, displayHandle);
+
+    core::Log::Infof("RT output textures created: %ux%u (HDR history + display)", width, height);
     return true;
 }
 
@@ -194,7 +223,10 @@ void PathTracer::Resize(ID3D12Device5* device, uint32_t width, uint32_t height)
 {
     if (width == m_outputWidth && height == m_outputHeight) return;
     m_outputTexture.Reset();
+    m_displayTexture.Reset();
     CreateOutputTexture(device, width, height);
+    m_accumFrameIndex = 0;
+    m_hasPrevCamera = false;
 }
 
 // =============================================================================
@@ -377,6 +409,28 @@ void PathTracer::Dispatch(
     core::Vec3f camRight = camera.Right();
     core::Vec3f camForward = camera.Forward();
     core::Vec3f camUp = camForward.Cross(camRight).Normalized();
+
+    bool cameraChanged = !m_hasPrevCamera ||
+        HasVectorChanged(camPos, m_prevCameraPos) ||
+        HasVectorChanged(camRight, m_prevCameraRight) ||
+        HasVectorChanged(camUp, m_prevCameraUp) ||
+        HasVectorChanged(camForward, m_prevCameraForward);
+
+    if (cameraChanged)
+    {
+        m_accumFrameIndex = 0;
+    }
+    else if (m_accumFrameIndex < UINT32_MAX)
+    {
+        m_accumFrameIndex++;
+    }
+
+    m_prevCameraPos = camPos;
+    m_prevCameraRight = camRight;
+    m_prevCameraUp = camUp;
+    m_prevCameraForward = camForward;
+    m_hasPrevCamera = true;
+
     cb.cameraPos[0] = camPos.x; cb.cameraPos[1] = camPos.y; cb.cameraPos[2] = camPos.z;
     cb.cameraRight[0] = camRight.x; cb.cameraRight[1] = camRight.y; cb.cameraRight[2] = camRight.z;
     cb.cameraUp[0] = camUp.x; cb.cameraUp[1] = camUp.y; cb.cameraUp[2] = camUp.z;
@@ -385,9 +439,8 @@ void PathTracer::Dispatch(
     cb.lightColor[0] = lightColor.x; cb.lightColor[1] = lightColor.y; cb.lightColor[2] = lightColor.z;
     cb.ambientColor[0] = ambientColor.x; cb.ambientColor[1] = ambientColor.y; cb.ambientColor[2] = ambientColor.z;
 
-    static uint32_t s_globalFrame = 0;
-    cb.frameIndex    = s_globalFrame++;
-    cb.maxBounces    = 3;
+    cb.frameIndex    = m_accumFrameIndex;
+    cb.maxBounces    = 1;
     cb.renderWidth   = m_outputWidth;
     cb.renderHeight  = m_outputHeight;
 
@@ -455,11 +508,13 @@ void PathTracer::Dispatch(
 
     cmd->DispatchRays(&dispatchDesc);
 
-    // UAV barrier before reading the output
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    barrier.UAV.pResource = m_outputTexture.Get();
-    cmd->ResourceBarrier(1, &barrier);
+    // UAV barriers before copying the tone-mapped display output.
+    D3D12_RESOURCE_BARRIER barriers[2] = {};
+    barriers[0].Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barriers[0].UAV.pResource = m_outputTexture.Get();
+    barriers[1].Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barriers[1].UAV.pResource = m_displayTexture.Get();
+    cmd->ResourceBarrier(2, barriers);
 }
 
 // =============================================================================
@@ -467,14 +522,14 @@ void PathTracer::Dispatch(
 // =============================================================================
 void PathTracer::CopyToBackBuffer(D3D12Device& device)
 {
-    if (!m_outputTexture) return;
+    if (!m_displayTexture) return;
 
     auto* cmd = device.CmdList();
 
     // Transition output: UAV → COPY_SOURCE
     D3D12_RESOURCE_BARRIER barriers[2] = {};
     barriers[0].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barriers[0].Transition.pResource   = m_outputTexture.Get();
+    barriers[0].Transition.pResource   = m_displayTexture.Get();
     barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     barriers[0].Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
     barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -489,7 +544,7 @@ void PathTracer::CopyToBackBuffer(D3D12Device& device)
     cmd->ResourceBarrier(2, barriers);
 
     // Copy
-    cmd->CopyResource(device.CurrentBackBuffer(), m_outputTexture.Get());
+    cmd->CopyResource(device.CurrentBackBuffer(), m_displayTexture.Get());
 
     // Transition output back: COPY_SOURCE → UAV
     barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
