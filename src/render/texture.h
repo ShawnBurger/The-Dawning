@@ -22,6 +22,7 @@ struct Texture
     ComPtr<ID3D12Resource> resource;
     uint32_t width = 0;
     uint32_t height = 0;
+    uint32_t mipCount = 1;
     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
     uint32_t descriptorIndex = UINT32_MAX;
 
@@ -36,6 +37,21 @@ Texture CreateTexture2DFromRGBA8(
     uint32_t height,
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name = nullptr);
+
+Texture CreateTexture2DFromDDSFile(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const char* filePath,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name = nullptr);
+
+bool WriteCheckerDDSTextureRGBA8(
+    const char* filePath,
+    uint32_t width,
+    uint32_t height,
+    uint32_t checkSize,
+    core::Color a,
+    core::Color b);
 
 std::vector<uint32_t> GenerateCheckerTextureRGBA8(
     uint32_t width,

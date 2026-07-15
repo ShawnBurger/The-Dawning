@@ -16,6 +16,7 @@
 #include "render/d3d12_device.h"
 #include "render/renderer.h"
 #include "render/debug_overlay.h"
+#include "render/texture.h"
 #include "render/camera.h"
 #include "render/mesh.h"
 #include "render/path_tracer.h"
@@ -143,25 +144,57 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
 
-    auto groundTexPixels = render::GenerateCheckerTextureRGBA8(
-        512, 512, 32,
-        { 0.82f, 0.86f, 0.91f, 1.0f },
-        { 0.48f, 0.53f, 0.60f, 1.0f });
-    auto cubeTexPixels = render::GenerateCheckerTextureRGBA8(
-        256, 256, 32,
-        { 0.20f, 0.42f, 0.92f, 1.0f },
-        { 0.03f, 0.08f, 0.20f, 1.0f });
+    CreateDirectoryA("assets", nullptr);
+    CreateDirectoryA("assets\\textures", nullptr);
 
-    auto groundTexture = render::CreateTexture2DFromRGBA8(
+    const char* groundDDSPath = "assets\\textures\\ground_grid.dds";
+    const char* cubeDDSPath = "assets\\textures\\blue_panels.dds";
+
+    if (GetFileAttributesA(groundDDSPath) == INVALID_FILE_ATTRIBUTES)
+    {
+        render::WriteCheckerDDSTextureRGBA8(
+            groundDDSPath, 512, 512, 32,
+            { 0.82f, 0.86f, 0.91f, 1.0f },
+            { 0.48f, 0.53f, 0.60f, 1.0f });
+    }
+    if (GetFileAttributesA(cubeDDSPath) == INVALID_FILE_ATTRIBUTES)
+    {
+        render::WriteCheckerDDSTextureRGBA8(
+            cubeDDSPath, 256, 256, 32,
+            { 0.20f, 0.42f, 0.92f, 1.0f },
+            { 0.03f, 0.08f, 0.20f, 1.0f });
+    }
+
+    auto groundTexture = render::CreateTexture2DFromDDSFile(
         device.Device(), device.CmdList(),
-        groundTexPixels.data(), 512, 512,
-        groundTexUp, L"GroundAlbedoTexture");
+        groundDDSPath, groundTexUp, L"GroundAlbedoTexture");
+    if (!groundTexture.IsValid())
+    {
+        auto groundTexPixels = render::GenerateCheckerTextureRGBA8(
+            512, 512, 32,
+            { 0.82f, 0.86f, 0.91f, 1.0f },
+            { 0.48f, 0.53f, 0.60f, 1.0f });
+        groundTexture = render::CreateTexture2DFromRGBA8(
+            device.Device(), device.CmdList(),
+            groundTexPixels.data(), 512, 512,
+            groundTexUp, L"GroundAlbedoTexture");
+    }
     groundTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundTexture);
 
-    auto cubeTexture = render::CreateTexture2DFromRGBA8(
+    auto cubeTexture = render::CreateTexture2DFromDDSFile(
         device.Device(), device.CmdList(),
-        cubeTexPixels.data(), 256, 256,
-        cubeTexUp, L"BluePanelAlbedoTexture");
+        cubeDDSPath, cubeTexUp, L"BluePanelAlbedoTexture");
+    if (!cubeTexture.IsValid())
+    {
+        auto cubeTexPixels = render::GenerateCheckerTextureRGBA8(
+            256, 256, 32,
+            { 0.20f, 0.42f, 0.92f, 1.0f },
+            { 0.03f, 0.08f, 0.20f, 1.0f });
+        cubeTexture = render::CreateTexture2DFromRGBA8(
+            device.Device(), device.CmdList(),
+            cubeTexPixels.data(), 256, 256,
+            cubeTexUp, L"BluePanelAlbedoTexture");
+    }
     cubeTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeTexture);
 
     // Execute uploads

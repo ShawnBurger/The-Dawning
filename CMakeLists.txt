@@ -112,6 +112,14 @@ add_custom_command(TARGET TheDawningV3 POST_BUILD
     COMMENT "Copying shaders to output directory"
 )
 
+add_custom_command(TARGET TheDawningV3 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:TheDawningV3>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:TheDawningV3>/assets"
+    COMMENT "Copying assets to output directory"
+)
+
 # =============================================================================
 # Source groups for Visual Studio
 # =============================================================================
