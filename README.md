@@ -60,9 +60,10 @@ Raster materials can bind one albedo texture per draw through texture handles in
 the resource manager. The current scene first looks for PNG albedo textures in
 `assets/textures/` via Windows Imaging Component, then falls back to DDS files.
 If the starter DDS files are missing from the executable directory, the app
-writes generated checker DDS files and loads those. KTX loading, full mip
-chains, bindless texture arrays, normal maps, and path-traced texture sampling
-are still upcoming Layer 4 work.
+writes generated checker DDS files and loads those. RGBA/WIC textures generate
+CPU mip chains, and DDS files upload all declared mip levels. KTX loading,
+bindless texture arrays, normal maps, and path-traced texture sampling are still
+upcoming Layer 4 work.
 
 ## Runtime Controls
 

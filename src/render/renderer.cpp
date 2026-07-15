@@ -376,11 +376,11 @@ uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
     srvDesc.Format = texture.format;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.MipLevels = texture.mipCount;
     device->CreateShaderResourceView(texture.resource.Get(), &srvDesc, handle);
 
-    core::Log::Infof("Raster texture registered: descriptor=%u (%ux%u)",
-                     descriptorIndex, texture.width, texture.height);
+    core::Log::Infof("Raster texture registered: descriptor=%u (%ux%u, mips=%u)",
+                     descriptorIndex, texture.width, texture.height, texture.mipCount);
     return descriptorIndex;
 }
 

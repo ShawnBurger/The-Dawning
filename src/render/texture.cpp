@@ -6,9 +6,11 @@
 #include "../core/log.h"
 #include <windows.h>
 #include <wincodec.h>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace render
 {
@@ -22,6 +24,11 @@ static constexpr uint32_t MakeFourCC(char a, char b, char c, char d)
 }
 
 static uint32_t AlignTo(uint32_t value, uint32_t alignment)
+{
+    return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+static uint64_t AlignTo64(uint64_t value, uint64_t alignment)
 {
     return (value + alignment - 1u) & ~(alignment - 1u);
 }
@@ -136,24 +143,142 @@ static bool ComputeSurfaceInfo(
     return true;
 }
 
-static Texture CreateTexture2DFromMemory(
+struct TextureSubresource
+{
+    const uint8_t* data = nullptr;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t rowBytes = 0;
+    uint32_t numRows = 0;
+};
+
+static uint32_t CalculateMipCount(uint32_t width, uint32_t height)
+{
+    uint32_t count = 1;
+    while (width > 1 || height > 1)
+    {
+        width = (std::max)(1u, width / 2u);
+        height = (std::max)(1u, height / 2u);
+        ++count;
+    }
+    return count;
+}
+
+static uint32_t AverageRGBA8(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    const uint32_t r = (((a >> 0) & 0xffu) + ((b >> 0) & 0xffu) +
+                        ((c >> 0) & 0xffu) + ((d >> 0) & 0xffu) + 2u) / 4u;
+    const uint32_t g = (((a >> 8) & 0xffu) + ((b >> 8) & 0xffu) +
+                        ((c >> 8) & 0xffu) + ((d >> 8) & 0xffu) + 2u) / 4u;
+    const uint32_t bl = (((a >> 16) & 0xffu) + ((b >> 16) & 0xffu) +
+                         ((c >> 16) & 0xffu) + ((d >> 16) & 0xffu) + 2u) / 4u;
+    const uint32_t al = (((a >> 24) & 0xffu) + ((b >> 24) & 0xffu) +
+                         ((c >> 24) & 0xffu) + ((d >> 24) & 0xffu) + 2u) / 4u;
+    return r | (g << 8) | (bl << 16) | (al << 24);
+}
+
+static std::vector<std::vector<uint32_t>> GenerateMipChainRGBA8(
+    const uint32_t* pixels,
+    uint32_t width,
+    uint32_t height)
+{
+    std::vector<std::vector<uint32_t>> mips;
+    if (!pixels || width == 0 || height == 0)
+        return mips;
+
+    const uint32_t mipCount = CalculateMipCount(width, height);
+    mips.reserve(mipCount);
+    mips.emplace_back(pixels, pixels + static_cast<size_t>(width) * height);
+
+    uint32_t srcWidth = width;
+    uint32_t srcHeight = height;
+    while (srcWidth > 1 || srcHeight > 1)
+    {
+        const uint32_t dstWidth = (std::max)(1u, srcWidth / 2u);
+        const uint32_t dstHeight = (std::max)(1u, srcHeight / 2u);
+        const auto& src = mips.back();
+        std::vector<uint32_t> dst(static_cast<size_t>(dstWidth) * dstHeight);
+
+        for (uint32_t y = 0; y < dstHeight; ++y)
+        {
+            for (uint32_t x = 0; x < dstWidth; ++x)
+            {
+                const uint32_t sx0 = (std::min)(srcWidth - 1u, x * 2u);
+                const uint32_t sy0 = (std::min)(srcHeight - 1u, y * 2u);
+                const uint32_t sx1 = (std::min)(srcWidth - 1u, sx0 + 1u);
+                const uint32_t sy1 = (std::min)(srcHeight - 1u, sy0 + 1u);
+
+                const uint32_t a = src[static_cast<size_t>(sy0) * srcWidth + sx0];
+                const uint32_t b = src[static_cast<size_t>(sy0) * srcWidth + sx1];
+                const uint32_t c = src[static_cast<size_t>(sy1) * srcWidth + sx0];
+                const uint32_t d = src[static_cast<size_t>(sy1) * srcWidth + sx1];
+                dst[static_cast<size_t>(y) * dstWidth + x] = AverageRGBA8(a, b, c, d);
+            }
+        }
+
+        mips.push_back(std::move(dst));
+        srcWidth = dstWidth;
+        srcHeight = dstHeight;
+    }
+
+    return mips;
+}
+
+static std::vector<TextureSubresource> BuildRGBA8Subresources(
+    const std::vector<std::vector<uint32_t>>& mips,
+    uint32_t width,
+    uint32_t height)
+{
+    std::vector<TextureSubresource> subresources;
+    subresources.reserve(mips.size());
+
+    uint32_t mipWidth = width;
+    uint32_t mipHeight = height;
+    for (const auto& mip : mips)
+    {
+        TextureSubresource sub = {};
+        sub.data = reinterpret_cast<const uint8_t*>(mip.data());
+        sub.width = mipWidth;
+        sub.height = mipHeight;
+        sub.rowBytes = mipWidth * 4u;
+        sub.numRows = mipHeight;
+        subresources.push_back(sub);
+
+        mipWidth = (std::max)(1u, mipWidth / 2u);
+        mipHeight = (std::max)(1u, mipHeight / 2u);
+    }
+
+    return subresources;
+}
+
+static Texture CreateTexture2DFromSubresources(
     ID3D12Device* device,
     ID3D12GraphicsCommandList* cmdList,
-    const uint8_t* data,
+    const TextureSubresource* subresources,
     uint32_t width,
     uint32_t height,
     DXGI_FORMAT format,
-    uint32_t srcRowBytes,
-    uint32_t srcNumRows,
+    uint32_t mipCount,
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name)
 {
     Texture texture;
-    if (!device || !cmdList || !data || width == 0 || height == 0 ||
-        format == DXGI_FORMAT_UNKNOWN || srcRowBytes == 0 || srcNumRows == 0)
+    if (!device || !cmdList || !subresources || width == 0 || height == 0 ||
+        format == DXGI_FORMAT_UNKNOWN || mipCount == 0 || mipCount > UINT16_MAX)
     {
-        core::Log::Error("CreateTexture2DFromMemory: invalid input");
+        core::Log::Error("CreateTexture2DFromSubresources: invalid input");
         return texture;
+    }
+
+    for (uint32_t i = 0; i < mipCount; ++i)
+    {
+        const auto& sub = subresources[i];
+        if (!sub.data || sub.width == 0 || sub.height == 0 ||
+            sub.rowBytes == 0 || sub.numRows == 0)
+        {
+            core::Log::Errorf("Texture subresource %u is invalid", i);
+            return texture;
+        }
     }
 
     D3D12_RESOURCE_DESC texDesc = {};
@@ -161,7 +286,7 @@ static Texture CreateTexture2DFromMemory(
     texDesc.Width = width;
     texDesc.Height = height;
     texDesc.DepthOrArraySize = 1;
-    texDesc.MipLevels = 1;
+    texDesc.MipLevels = static_cast<uint16_t>(mipCount);
     texDesc.Format = format;
     texDesc.SampleDesc = { 1, 0 };
     texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -182,8 +307,21 @@ static Texture CreateTexture2DFromMemory(
 
     if (name) texture.resource->SetName(name);
 
-    const uint32_t uploadPitch = AlignTo(srcRowBytes, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
-    const uint64_t uploadSize = static_cast<uint64_t>(uploadPitch) * srcNumRows;
+    struct UploadPlacement
+    {
+        uint64_t offset = 0;
+        uint32_t rowPitch = 0;
+    };
+
+    std::vector<UploadPlacement> placements(mipCount);
+    uint64_t uploadSize = 0;
+    for (uint32_t mip = 0; mip < mipCount; ++mip)
+    {
+        uploadSize = AlignTo64(uploadSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+        placements[mip].offset = uploadSize;
+        placements[mip].rowPitch = AlignTo(subresources[mip].rowBytes, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+        uploadSize += static_cast<uint64_t>(placements[mip].rowPitch) * subresources[mip].numRows;
+    }
 
     D3D12_RESOURCE_DESC uploadDesc = {};
     uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -221,29 +359,41 @@ static Texture CreateTexture2DFromMemory(
         return texture;
     }
 
-    for (uint32_t y = 0; y < srcNumRows; ++y)
+    for (uint32_t mip = 0; mip < mipCount; ++mip)
     {
-        std::memcpy(mapped + static_cast<size_t>(y) * uploadPitch,
-                    data + static_cast<size_t>(y) * srcRowBytes,
-                    srcRowBytes);
+        const auto& sub = subresources[mip];
+        const auto& placement = placements[mip];
+        uint8_t* dstBase = mapped + placement.offset;
+        for (uint32_t y = 0; y < sub.numRows; ++y)
+        {
+            std::memcpy(dstBase + static_cast<size_t>(y) * placement.rowPitch,
+                        sub.data + static_cast<size_t>(y) * sub.rowBytes,
+                        sub.rowBytes);
+        }
     }
     outUpload->Unmap(0, nullptr);
 
-    D3D12_TEXTURE_COPY_LOCATION dst = {};
-    dst.pResource = texture.resource.Get();
-    dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dst.SubresourceIndex = 0;
+    for (uint32_t mip = 0; mip < mipCount; ++mip)
+    {
+        const auto& sub = subresources[mip];
+        const auto& placement = placements[mip];
 
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource = outUpload.Get();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    srcLoc.PlacedFootprint.Offset = 0;
-    srcLoc.PlacedFootprint.Footprint.Format = format;
-    srcLoc.PlacedFootprint.Footprint.Width = width;
-    srcLoc.PlacedFootprint.Footprint.Height = height;
-    srcLoc.PlacedFootprint.Footprint.Depth = 1;
-    srcLoc.PlacedFootprint.Footprint.RowPitch = uploadPitch;
-    cmdList->CopyTextureRegion(&dst, 0, 0, 0, &srcLoc, nullptr);
+        D3D12_TEXTURE_COPY_LOCATION dst = {};
+        dst.pResource = texture.resource.Get();
+        dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dst.SubresourceIndex = mip;
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+        srcLoc.pResource = outUpload.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Offset = placement.offset;
+        srcLoc.PlacedFootprint.Footprint.Format = format;
+        srcLoc.PlacedFootprint.Footprint.Width = sub.width;
+        srcLoc.PlacedFootprint.Footprint.Height = sub.height;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = placement.rowPitch;
+        cmdList->CopyTextureRegion(&dst, 0, 0, 0, &srcLoc, nullptr);
+    }
 
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -255,10 +405,11 @@ static Texture CreateTexture2DFromMemory(
 
     texture.width = width;
     texture.height = height;
-    texture.mipCount = 1;
+    texture.mipCount = mipCount;
     texture.format = format;
 
-    core::Log::Infof("Texture created: %ux%u format=%u", width, height, static_cast<uint32_t>(format));
+    core::Log::Infof("Texture created: %ux%u mips=%u format=%u",
+                     width, height, mipCount, static_cast<uint32_t>(format));
     return texture;
 }
 
@@ -271,15 +422,22 @@ Texture CreateTexture2DFromRGBA8(
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name)
 {
-    return CreateTexture2DFromMemory(
+    auto mipPixels = GenerateMipChainRGBA8(pixels, width, height);
+    if (mipPixels.empty())
+    {
+        core::Log::Error("CreateTexture2DFromRGBA8: invalid source pixels");
+        return {};
+    }
+
+    auto subresources = BuildRGBA8Subresources(mipPixels, width, height);
+    return CreateTexture2DFromSubresources(
         device,
         cmdList,
-        reinterpret_cast<const uint8_t*>(pixels),
+        subresources.data(),
         width,
         height,
         DXGI_FORMAT_R8G8B8A8_UNORM,
-        width * 4,
-        height,
+        static_cast<uint32_t>(subresources.size()),
         outUpload,
         name);
 }
@@ -450,36 +608,65 @@ Texture CreateTexture2DFromDDSFile(
         return texture;
     }
 
-    uint32_t rowBytes = 0;
-    uint32_t numRows = 0;
-    uint64_t totalBytes = 0;
-    if (!ComputeSurfaceInfo(header->width, header->height, format, rowBytes, numRows, totalBytes))
+    const uint32_t maxMipCount = CalculateMipCount(header->width, header->height);
+    uint32_t mipCount = header->mipMapCount > 0 ? header->mipMapCount : 1;
+    if (mipCount > maxMipCount)
     {
-        core::Log::Errorf("Could not compute DDS surface info: %s", filePath);
+        core::Log::Errorf("DDS texture has invalid mip count: %s", filePath);
         return texture;
     }
 
-    if (bytes.size() < dataOffset + totalBytes)
+    std::vector<TextureSubresource> subresources;
+    subresources.reserve(mipCount);
+
+    size_t mipOffset = dataOffset;
+    uint32_t mipWidth = header->width;
+    uint32_t mipHeight = header->height;
+    for (uint32_t mip = 0; mip < mipCount; ++mip)
     {
-        core::Log::Errorf("DDS texture data is truncated: %s", filePath);
-        return texture;
+        uint32_t rowBytes = 0;
+        uint32_t numRows = 0;
+        uint64_t totalBytes = 0;
+        if (!ComputeSurfaceInfo(mipWidth, mipHeight, format, rowBytes, numRows, totalBytes))
+        {
+            core::Log::Errorf("Could not compute DDS surface info: %s", filePath);
+            return texture;
+        }
+
+        if (mipOffset > bytes.size() || totalBytes > bytes.size() - mipOffset)
+        {
+            core::Log::Errorf("DDS texture data is truncated: %s", filePath);
+            return texture;
+        }
+
+        TextureSubresource sub = {};
+        sub.data = bytes.data() + mipOffset;
+        sub.width = mipWidth;
+        sub.height = mipHeight;
+        sub.rowBytes = rowBytes;
+        sub.numRows = numRows;
+        subresources.push_back(sub);
+
+        mipOffset += static_cast<size_t>(totalBytes);
+        mipWidth = (std::max)(1u, mipWidth / 2u);
+        mipHeight = (std::max)(1u, mipHeight / 2u);
     }
 
-    texture = CreateTexture2DFromMemory(
+    texture = CreateTexture2DFromSubresources(
         device,
         cmdList,
-        bytes.data() + dataOffset,
+        subresources.data(),
         header->width,
         header->height,
         format,
-        rowBytes,
-        numRows,
+        mipCount,
         outUpload,
         name);
 
     if (texture.IsValid())
-        core::Log::Infof("DDS loaded: %s (%ux%u, format=%u)",
-                         filePath, texture.width, texture.height, static_cast<uint32_t>(format));
+        core::Log::Infof("DDS loaded: %s (%ux%u, mips=%u, format=%u)",
+                         filePath, texture.width, texture.height, texture.mipCount,
+                         static_cast<uint32_t>(format));
     return texture;
 }
 
@@ -597,20 +784,21 @@ Texture CreateTexture2DFromWICFile(
         return texture;
     }
 
-    texture = CreateTexture2DFromMemory(
+    std::vector<uint32_t> rgbaPixels(static_cast<size_t>(width) * height);
+    std::memcpy(rgbaPixels.data(), pixels.data(), pixels.size());
+
+    texture = CreateTexture2DFromRGBA8(
         device,
         cmdList,
-        pixels.data(),
+        rgbaPixels.data(),
         width,
-        height,
-        DXGI_FORMAT_R8G8B8A8_UNORM,
-        rowBytes,
         height,
         outUpload,
         name);
 
     if (texture.IsValid())
-        core::Log::Infof("WIC texture loaded: %s (%ux%u)", filePath, texture.width, texture.height);
+        core::Log::Infof("WIC texture loaded: %s (%ux%u, mips=%u)",
+                         filePath, texture.width, texture.height, texture.mipCount);
 
     return texture;
 }
@@ -627,6 +815,10 @@ bool WriteCheckerDDSTextureRGBA8(
         return false;
 
     auto pixels = GenerateCheckerTextureRGBA8(width, height, checkSize, a, b);
+    auto mips = GenerateMipChainRGBA8(pixels.data(), width, height);
+    if (mips.empty())
+        return false;
+
     std::ofstream out(filePath, std::ios::binary | std::ios::trunc);
     if (!out)
     {
@@ -640,9 +832,12 @@ bool WriteCheckerDDSTextureRGBA8(
     static constexpr uint32_t DDSD_WIDTH = 0x4;
     static constexpr uint32_t DDSD_PITCH = 0x8;
     static constexpr uint32_t DDSD_PIXELFORMAT = 0x1000;
+    static constexpr uint32_t DDSD_MIPMAPCOUNT = 0x20000;
     static constexpr uint32_t DDPF_ALPHAPIXELS = 0x1;
     static constexpr uint32_t DDPF_RGB = 0x40;
+    static constexpr uint32_t DDSCAPS_COMPLEX = 0x8;
     static constexpr uint32_t DDSCAPS_TEXTURE = 0x1000;
+    static constexpr uint32_t DDSCAPS_MIPMAP = 0x400000;
 
     DDSHeader header = {};
     header.size = sizeof(DDSHeader);
@@ -650,7 +845,7 @@ bool WriteCheckerDDSTextureRGBA8(
     header.height = height;
     header.width = width;
     header.pitchOrLinearSize = width * 4;
-    header.mipMapCount = 1;
+    header.mipMapCount = static_cast<uint32_t>(mips.size());
     header.ddspf.size = sizeof(DDSPixelFormat);
     header.ddspf.flags = DDPF_RGB | DDPF_ALPHAPIXELS;
     header.ddspf.rgbBitCount = 32;
@@ -659,17 +854,27 @@ bool WriteCheckerDDSTextureRGBA8(
     header.ddspf.bBitMask = 0x00ff0000;
     header.ddspf.aBitMask = 0xff000000;
     header.caps = DDSCAPS_TEXTURE;
+    if (mips.size() > 1)
+    {
+        header.flags |= DDSD_MIPMAPCOUNT;
+        header.caps |= DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+    }
 
     out.write(reinterpret_cast<const char*>(&kDDSMagic), sizeof(kDDSMagic));
     out.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    out.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size() * sizeof(uint32_t)));
+    for (const auto& mip : mips)
+    {
+        out.write(reinterpret_cast<const char*>(mip.data()),
+                  static_cast<std::streamsize>(mip.size() * sizeof(uint32_t)));
+    }
     if (!out)
     {
         core::Log::Warnf("Failed while writing starter DDS texture: %s", filePath);
         return false;
     }
 
-    core::Log::Infof("Starter DDS texture written: %s", filePath);
+    core::Log::Infof("Starter DDS texture written: %s (%ux%u, mips=%u)",
+                     filePath, width, height, static_cast<uint32_t>(mips.size()));
     return true;
 }
 
