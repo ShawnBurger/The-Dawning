@@ -59,8 +59,9 @@ After building, run a short automated render test:
 
 The smoke test launches `build\Debug\TheDawningV3.exe --smoke --smoke-rt`,
 waits for the engine to enter path tracing, exits cleanly, and fails if the
-runtime log contains errors. Use `-RasterOnly` to test the raster path or
-`-FullQuality` to exercise the higher path-tracing quality mode.
+runtime log contains errors or expected render milestones are missing. Use
+`-RasterOnly` to test the raster path or `-FullQuality` to exercise the higher
+path-tracing quality mode.
 
 ## Path Tracing Runtime
 
