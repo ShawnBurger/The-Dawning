@@ -59,6 +59,7 @@ set(SHADER_FILES
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
     shaders/path_trace.hlsl
+    shaders/display_common.hlsli
 )
 
 set(ECS_HEADERS

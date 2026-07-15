@@ -495,7 +495,8 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
     core::Timer timer;
     timer.Init();
 
-    const float clearColor[4] = { 0.1f, 0.1f, 0.15f, 1.0f };
+    // Display-space clear color approximates the tone-mapped path tracing sky.
+    const float clearColor[4] = { 0.50f, 0.55f, 0.62f, 1.0f };
 
     core::Log::Info("=== Entering main loop (WASD+Mouse, click to capture, ESC to release) ===");
 

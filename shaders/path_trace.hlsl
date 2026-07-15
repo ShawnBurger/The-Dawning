@@ -12,6 +12,8 @@
 // Target: SM 6.3 (lib_6_3), DXR 1.1
 // =============================================================================
 
+#include "display_common.hlsli"
+
 // =============================================================================
 // Global root signature bindings
 // =============================================================================
@@ -182,13 +184,6 @@ float GeometrySmithG1(float NdotV, float roughness)
 float GeometrySmith(float NdotV, float NdotL, float roughness)
 {
     return GeometrySmithG1(NdotV, roughness) * GeometrySmithG1(NdotL, roughness);
-}
-
-float3 ToneMapForOutput(float3 color)
-{
-    color = max(color, float3(0, 0, 0));
-    color *= 1.25f;
-    return color / (color + float3(1, 1, 1));
 }
 
 float3 SkyRadiance(float3 direction)
@@ -521,7 +516,7 @@ void RayGen()
     float3 accumulatedRadiance = filteredRadiance;
 
     g_Output[launchIndex] = float4(accumulatedRadiance, 1.0f);
-    g_DisplayOutput[launchIndex] = float4(ToneMapForOutput(accumulatedRadiance), 1.0f);
+    g_DisplayOutput[launchIndex] = float4(DawningToneMapForDisplay(accumulatedRadiance), 1.0f);
 }
 
 // =============================================================================

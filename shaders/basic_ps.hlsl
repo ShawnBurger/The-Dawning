@@ -5,6 +5,8 @@
 // albedo and normal maps.
 // =============================================================================
 
+#include "display_common.hlsli"
+
 cbuffer CBPerFrame : register(b1)
 {
     float3 lightDir;       // Normalized direction TO the light
@@ -128,17 +130,17 @@ float4 main(PSInput input) : SV_TARGET
     float3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.0001);
     float3 kD = (1.0 - F) * (1.0 - metallic);
     float3 diffuse = kD * baseColor / PI;
-    float3 direct = (diffuse + specular) * lightColor * NdotL * 1.6;
+    float3 direct = (diffuse + specular) * lightColor * NdotL;
 
     // Ambient (hemisphere approximation — ground color darker)
     float hemisphereBlend = N.y * 0.5 + 0.5;
     float3 groundColor = ambientColor * 0.3;
     float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend) * (1.0 - metallic);
-    float3 ambientSpecular = FresnelSchlick(NdotV, F0) * (ambientColor + 0.12) *
-                             lerp(0.25, 1.1, 1.0 - materialRoughness);
+    float3 ambientSpecular = FresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
+                             lerp(0.2, 0.8, 1.0 - materialRoughness);
 
     // Combine
     float3 finalColor = direct + ambientDiffuse + ambientSpecular;
 
-    return float4(finalColor, albedo.a * input.color.a);
+    return float4(DawningToneMapForDisplay(finalColor), albedo.a * input.color.a);
 }
