@@ -239,7 +239,8 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device)
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
         if (!gpuMesh || gpuMesh->rtTriangleNormals.empty() ||
-            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size())
+            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size() ||
+            gpuMesh->rtTrianglePositions.size() != gpuMesh->rtTriangleNormals.size())
             continue;
 
         uint32_t blasIdx = m_meshToBLAS[meshIdx];
@@ -299,11 +300,16 @@ void Scene::PathTraceEntities(
     std::vector<render::RTInstanceData> instanceData;
     std::vector<render::RTTriangleNormalData> triangleNormals;
     std::vector<render::RTTriangleUVData> triangleUVs;
+    std::vector<render::RTTrianglePositionData> trianglePositions;
     std::vector<const render::Texture*> albedoTextures;
+    std::vector<const render::Texture*> normalTextures;
     materials.reserve(meshPool->Count());
     instanceData.reserve(meshPool->Count());
 
-    auto resolveAlbedoTextureIndex = [&](uint32_t handleValue) -> uint32_t
+    auto resolveTextureIndex = [&](uint32_t handleValue,
+                                   std::vector<const render::Texture*>& textures,
+                                   uint32_t maxTextures,
+                                   const char* label) -> uint32_t
     {
         if (handleValue == UINT32_MAX)
             return UINT32_MAX;
@@ -312,20 +318,20 @@ void Scene::PathTraceEntities(
         if (!texture || !texture->IsValid())
             return UINT32_MAX;
 
-        for (uint32_t i = 0; i < albedoTextures.size(); ++i)
+        for (uint32_t i = 0; i < textures.size(); ++i)
         {
-            if (albedoTextures[i] == texture)
+            if (textures[i] == texture)
                 return i;
         }
 
-        if (albedoTextures.size() >= render::kMaxRTAlbedoTextures)
+        if (textures.size() >= maxTextures)
         {
-            core::Log::Warn("Path tracer albedo texture table is full; material texture skipped");
+            core::Log::Warnf("Path tracer %s texture table is full; material texture skipped", label);
             return UINT32_MAX;
         }
 
-        albedoTextures.push_back(texture);
-        return static_cast<uint32_t>(albedoTextures.size() - 1);
+        textures.push_back(texture);
+        return static_cast<uint32_t>(textures.size() - 1);
     };
 
     for (uint32_t i = 0; i < meshPool->Count(); i++)
@@ -345,11 +351,17 @@ void Scene::PathTraceEntities(
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
         if (!gpuMesh || gpuMesh->rtTriangleNormals.empty() ||
-            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size())
+            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size() ||
+            gpuMesh->rtTrianglePositions.size() != gpuMesh->rtTriangleNormals.size())
             continue;
 
         const auto& mat = m_registry.GetByIndex<ecs::Material>(entityIdx);
-        const uint32_t albedoTextureIndex = resolveAlbedoTextureIndex(mat.albedoTextureHandle);
+        const uint32_t albedoTextureIndex =
+            resolveTextureIndex(mat.albedoTextureHandle, albedoTextures,
+                                render::kMaxRTAlbedoTextures, "albedo");
+        const uint32_t normalTextureIndex =
+            resolveTextureIndex(mat.normalTextureHandle, normalTextures,
+                                render::kMaxRTNormalTextures, "normal");
 
         render::RTMaterialData rtMat = {};
         rtMat.albedo[0]  = mat.albedo.r;
@@ -360,11 +372,14 @@ void Scene::PathTraceEntities(
         rtMat.metallic    = mat.metallic;
         rtMat.albedoTextureIndex = albedoTextureIndex == UINT32_MAX ? 0u : albedoTextureIndex;
         rtMat.useAlbedoTexture = albedoTextureIndex == UINT32_MAX ? 0u : 1u;
+        rtMat.normalTextureIndex = normalTextureIndex == UINT32_MAX ? 0u : normalTextureIndex;
+        rtMat.useNormalTexture = normalTextureIndex == UINT32_MAX ? 0u : 1u;
         materials.push_back(rtMat);
 
         render::RTInstanceData rtInstance = {};
         rtInstance.triangleNormalOffset = static_cast<uint32_t>(triangleNormals.size());
         rtInstance.triangleUVOffset = static_cast<uint32_t>(triangleUVs.size());
+        rtInstance.trianglePositionOffset = static_cast<uint32_t>(trianglePositions.size());
         instanceData.push_back(rtInstance);
 
         triangleNormals.insert(triangleNormals.end(),
@@ -373,6 +388,9 @@ void Scene::PathTraceEntities(
         triangleUVs.insert(triangleUVs.end(),
                            gpuMesh->rtTriangleUVs.begin(),
                            gpuMesh->rtTriangleUVs.end());
+        trianglePositions.insert(trianglePositions.end(),
+                                 gpuMesh->rtTrianglePositions.begin(),
+                                 gpuMesh->rtTrianglePositions.end());
     }
 
     m_pathTracer.Dispatch(device, camera, lightDir, lightColor, ambientColor,
@@ -380,7 +398,9 @@ void Scene::PathTraceEntities(
                           instanceData.data(), static_cast<uint32_t>(instanceData.size()),
                           triangleNormals.data(), static_cast<uint32_t>(triangleNormals.size()),
                           triangleUVs.data(), static_cast<uint32_t>(triangleUVs.size()),
+                          trianglePositions.data(), static_cast<uint32_t>(trianglePositions.size()),
                           albedoTextures.data(), static_cast<uint32_t>(albedoTextures.size()),
+                          normalTextures.data(), static_cast<uint32_t>(normalTextures.size()),
                           static_cast<uint32_t>(materials.size()),
                           qualityMode);
 }

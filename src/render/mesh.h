@@ -49,12 +49,22 @@ struct RTTriangleUVData
     float uv2[4];
 };
 
+// Per-triangle positions consumed by the DXR closest-hit shader for tangent
+// frame reconstruction when sampling normal maps.
+struct RTTrianglePositionData
+{
+    float p0[4];
+    float p1[4];
+    float p2[4];
+};
+
 // Per-TLAS-instance metadata consumed by the DXR closest-hit shader.
 struct RTInstanceData
 {
     uint32_t triangleNormalOffset = 0;
     uint32_t triangleUVOffset = 0;
-    uint32_t pad[2] = {};
+    uint32_t trianglePositionOffset = 0;
+    uint32_t pad = 0;
 };
 
 // Input layout description matching the Vertex struct
@@ -81,6 +91,7 @@ struct Mesh
     DXGI_FORMAT indexFormat = DXGI_FORMAT_R16_UINT; // R16_UINT or R32_UINT
     std::vector<RTTriangleNormalData> rtTriangleNormals;
     std::vector<RTTriangleUVData> rtTriangleUVs;
+    std::vector<RTTrianglePositionData> rtTrianglePositions;
 
     bool IsValid() const { return vertexBuffer && indexBuffer && indexCount > 0; }
 };

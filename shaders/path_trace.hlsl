@@ -45,6 +45,8 @@ struct MaterialData
     float  metallic;
     uint   albedoTextureIndex;
     uint   useAlbedoTexture;
+    uint   normalTextureIndex;
+    uint   useNormalTexture;
 };
 StructuredBuffer<MaterialData> g_Materials : register(t1, space0);
 
@@ -60,7 +62,8 @@ struct InstanceData
 {
     uint  triangleNormalOffset;
     uint  triangleUVOffset;
-    uint2 pad;
+    uint  trianglePositionOffset;
+    uint  pad;
 };
 StructuredBuffer<InstanceData> g_InstanceData : register(t3, space0);
 
@@ -72,7 +75,16 @@ struct TriangleUVData
 };
 StructuredBuffer<TriangleUVData> g_TriangleUVs : register(t4, space0);
 
+struct TrianglePositionData
+{
+    float4 p0;
+    float4 p1;
+    float4 p2;
+};
+StructuredBuffer<TrianglePositionData> g_TrianglePositions : register(t5, space0);
+
 Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
+Texture2D<float4> g_NormalTextures[64] : register(t0, space5);
 SamplerState g_TextureSampler : register(s0, space0);
 
 // =============================================================================
@@ -96,6 +108,12 @@ struct ShadowPayload
 // Utility functions
 // =============================================================================
 static const float PI = 3.14159265358979323846f;
+
+float3 SafeNormalize(float3 value, float3 fallback)
+{
+    float lenSq = dot(value, value);
+    return lenSq > 1e-8f ? value * rsqrt(lenSq) : fallback;
+}
 
 // PCG hash for random number generation
 uint PCGHash(uint input)
@@ -215,6 +233,64 @@ float3 ResolveAlbedo(MaterialData mat, float2 uv)
         albedo *= g_AlbedoTextures[textureIndex].SampleLevel(g_TextureSampler, uv, 0.0f).rgb;
     }
     return saturate(albedo);
+}
+
+float3 TransformObjectToWorldPoint(float3 objectPosition)
+{
+    float3x4 objToWorld = ObjectToWorld3x4();
+    float4 p = float4(objectPosition, 1.0f);
+    return float3(
+        dot(objToWorld[0], p),
+        dot(objToWorld[1], p),
+        dot(objToWorld[2], p));
+}
+
+float3 ApplyNormalMap(
+    MaterialData mat,
+    float3 baseNormal,
+    float3 worldP0,
+    float3 worldP1,
+    float3 worldP2,
+    float2 uv0,
+    float2 uv1,
+    float2 uv2,
+    float2 surfaceUV)
+{
+    float3 N = normalize(baseNormal);
+    if (mat.useNormalTexture == 0 || mat.normalTextureIndex >= 64)
+        return N;
+
+    float3 up = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+    float3 T = SafeNormalize(cross(up, N), float3(1.0f, 0.0f, 0.0f));
+    float3 B = SafeNormalize(cross(N, T), float3(0.0f, 0.0f, 1.0f));
+
+    float3 edge1 = worldP1 - worldP0;
+    float3 edge2 = worldP2 - worldP0;
+    float2 duv1 = uv1 - uv0;
+    float2 duv2 = uv2 - uv0;
+    float det = duv1.x * duv2.y - duv1.y * duv2.x;
+
+    if (abs(det) >= 1e-6f)
+    {
+        float invDet = 1.0f / det;
+        float3 derivedT = (edge1 * duv2.y - edge2 * duv1.y) * invDet;
+        float3 derivedB = (-edge1 * duv2.x + edge2 * duv1.x) * invDet;
+        derivedT = derivedT - N * dot(N, derivedT);
+        if (dot(derivedT, derivedT) > 1e-8f)
+        {
+            T = normalize(derivedT);
+            B = SafeNormalize(cross(N, T), B);
+            if (dot(B, derivedB) < 0.0f)
+                B = -B;
+        }
+    }
+
+    uint textureIndex = NonUniformResourceIndex(mat.normalTextureIndex);
+    float3 tangentNormal = g_NormalTextures[textureIndex].SampleLevel(g_TextureSampler, surfaceUV, 0.0f).xyz * 2.0f - 1.0f;
+    tangentNormal.z = max(tangentNormal.z, 0.0f);
+
+    float3 mappedNormal = tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N;
+    return SafeNormalize(mappedNormal, N);
 }
 
 // =============================================================================
@@ -466,6 +542,7 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     InstanceData instanceData = g_InstanceData[payload.instanceID];
     TriangleNormalData tri = g_TriangleNormals[instanceData.triangleNormalOffset + PrimitiveIndex()];
     TriangleUVData triUV = g_TriangleUVs[instanceData.triangleUVOffset + PrimitiveIndex()];
+    TrianglePositionData triPos = g_TrianglePositions[instanceData.trianglePositionOffset + PrimitiveIndex()];
     float3 objectNormal = normalize(tri.n0.xyz * bary.x + tri.n1.xyz * bary.y + tri.n2.xyz * bary.z);
     float2 surfaceUV = triUV.uv0.xy * bary.x + triUV.uv1.xy * bary.y + triUV.uv2.xy * bary.z;
 
@@ -477,6 +554,18 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     ));
 
     // If the normal faces away from the ray, flip it
+    if (dot(worldNormal, WorldRayDirection()) > 0)
+        worldNormal = -worldNormal;
+
+    float3 worldP0 = TransformObjectToWorldPoint(triPos.p0.xyz);
+    float3 worldP1 = TransformObjectToWorldPoint(triPos.p1.xyz);
+    float3 worldP2 = TransformObjectToWorldPoint(triPos.p2.xyz);
+    MaterialData mat = g_Materials[payload.instanceID];
+    worldNormal = ApplyNormalMap(mat, worldNormal,
+                                 worldP0, worldP1, worldP2,
+                                 triUV.uv0.xy, triUV.uv1.xy, triUV.uv2.xy,
+                                 surfaceUV);
+
     if (dot(worldNormal, WorldRayDirection()) > 0)
         worldNormal = -worldNormal;
 

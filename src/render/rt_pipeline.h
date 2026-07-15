@@ -22,6 +22,7 @@ namespace render
 {
 
 constexpr uint32_t kMaxRTAlbedoTextures = 64;
+constexpr uint32_t kMaxRTNormalTextures = 64;
 
 // =============================================================================
 // Per-frame constants for the path tracer (uploaded each frame)
@@ -55,6 +56,8 @@ struct RTMaterialData
     float metallic;
     uint32_t albedoTextureIndex;
     uint32_t useAlbedoTexture;
+    uint32_t normalTextureIndex;
+    uint32_t useNormalTexture;
 };
 
 // =============================================================================

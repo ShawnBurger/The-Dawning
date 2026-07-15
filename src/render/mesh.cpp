@@ -111,6 +111,14 @@ static void StoreUV(float out[4], const core::Vec2f& uv)
     out[3] = 0.0f;
 }
 
+static void StorePosition(float out[4], const core::Vec3f& position)
+{
+    out[0] = position.x;
+    out[1] = position.y;
+    out[2] = position.z;
+    out[3] = 1.0f;
+}
+
 template <typename IndexT>
 static void BuildRTTriangleMetadata(
     Mesh& mesh,
@@ -119,8 +127,10 @@ static void BuildRTTriangleMetadata(
 {
     mesh.rtTriangleNormals.clear();
     mesh.rtTriangleUVs.clear();
+    mesh.rtTrianglePositions.clear();
     mesh.rtTriangleNormals.reserve(indexCount / 3);
     mesh.rtTriangleUVs.reserve(indexCount / 3);
+    mesh.rtTrianglePositions.reserve(indexCount / 3);
 
     for (uint32_t i = 0; i + 2 < indexCount; i += 3)
     {
@@ -147,6 +157,12 @@ static void BuildRTTriangleMetadata(
         StoreUV(uv.uv1, v1.uv);
         StoreUV(uv.uv2, v2.uv);
         mesh.rtTriangleUVs.push_back(uv);
+
+        RTTrianglePositionData pos = {};
+        StorePosition(pos.p0, v0.position);
+        StorePosition(pos.p1, v1.position);
+        StorePosition(pos.p2, v2.position);
+        mesh.rtTrianglePositions.push_back(pos);
     }
 }
 

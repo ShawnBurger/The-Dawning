@@ -68,8 +68,12 @@ public:
                   uint32_t triangleNormalCount,
                   const RTTriangleUVData* triangleUVs,
                   uint32_t triangleUVCount,
+                  const RTTrianglePositionData* trianglePositions,
+                  uint32_t trianglePositionCount,
                   const Texture* const* albedoTextures,
                   uint32_t albedoTextureCount,
+                  const Texture* const* normalTextures,
+                  uint32_t normalTextureCount,
                   uint32_t instanceCount,
                   RTQualityMode qualityMode);
 
@@ -86,10 +90,15 @@ private:
     bool EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount);
     bool EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount);
     bool EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangleCount);
-    void ClearAlbedoTextureDescriptors(ID3D12Device5* device);
-    uint32_t UpdateAlbedoTextureDescriptors(ID3D12Device5* device,
-                                            const Texture* const* textures,
-                                            uint32_t textureCount);
+    bool EnsureTrianglePositionBuffer(ID3D12Device5* device, uint32_t triangleCount);
+    void ClearMaterialTextureDescriptors(ID3D12Device5* device);
+    uint32_t UpdateTextureDescriptors(ID3D12Device5* device,
+                                      const Texture* const* textures,
+                                      uint32_t textureCount,
+                                      uint32_t firstDescriptor,
+                                      uint32_t maxDescriptors,
+                                      uint32_t& boundCount,
+                                      ID3D12Resource** boundResources);
 
     RTAcceleration m_accel;
     RTPipeline     m_pipeline;
@@ -105,6 +114,8 @@ private:
     uint32_t m_srvUavDescSize = 0;
     uint32_t m_boundAlbedoTextureCount = 0;
     std::array<ID3D12Resource*, kMaxRTAlbedoTextures> m_boundAlbedoTextureResources = {};
+    uint32_t m_boundNormalTextureCount = 0;
+    std::array<ID3D12Resource*, kMaxRTNormalTextures> m_boundNormalTextureResources = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
@@ -127,6 +138,10 @@ private:
     ComPtr<ID3D12Resource> m_triangleUVBuffer;
     uint8_t* m_triangleUVMapped = nullptr;
     uint32_t m_maxTriangleUVs = 0;
+
+    ComPtr<ID3D12Resource> m_trianglePositionBuffer;
+    uint8_t* m_trianglePositionMapped = nullptr;
+    uint32_t m_maxTrianglePositions = 0;
 
     core::Vec3f m_prevCameraPos = {};
     core::Vec3f m_prevCameraRight = {};

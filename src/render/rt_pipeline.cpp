@@ -49,11 +49,12 @@ void RTPipeline::Shutdown()
 //   [4] SRV - triangle normal StructuredBuffer (t2, space0)
 //   [5] SRV - instance metadata StructuredBuffer (t3, space0)
 //   [6] SRV - triangle UV StructuredBuffer (t4, space0)
-//   [7] SRV descriptor table - albedo textures (t0, space4)
+//   [7] SRV - triangle positions (t5)
+//   [8] SRV descriptor table - albedo textures (t0, space4), normal textures (t0, space5)
 // =============================================================================
 bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
 {
-    D3D12_ROOT_PARAMETER rootParams[8] = {};
+    D3D12_ROOT_PARAMETER rootParams[9] = {};
 
     // Slot 0: TLAS SRV (t0)
     rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -104,18 +105,30 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[6].Descriptor.RegisterSpace  = 0;
     rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Slot 7: Albedo texture descriptor table (t0, space4)
-    D3D12_DESCRIPTOR_RANGE textureRange = {};
-    textureRange.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    textureRange.NumDescriptors     = kMaxRTAlbedoTextures;
-    textureRange.BaseShaderRegister = 0;
-    textureRange.RegisterSpace      = 4;
-    textureRange.OffsetInDescriptorsFromTableStart = 0;
+    // Slot 7: Triangle position StructuredBuffer SRV (t5)
+    rootParams[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[7].Descriptor.ShaderRegister = 5;
+    rootParams[7].Descriptor.RegisterSpace  = 0;
+    rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    rootParams[7].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[7].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[7].DescriptorTable.pDescriptorRanges   = &textureRange;
-    rootParams[7].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+    // Slot 8: Material texture descriptor table (albedo t0 space4, normal t0 space5)
+    D3D12_DESCRIPTOR_RANGE textureRanges[2] = {};
+    textureRanges[0].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRanges[0].NumDescriptors     = kMaxRTAlbedoTextures;
+    textureRanges[0].BaseShaderRegister = 0;
+    textureRanges[0].RegisterSpace      = 4;
+    textureRanges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    textureRanges[1].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRanges[1].NumDescriptors     = kMaxRTNormalTextures;
+    textureRanges[1].BaseShaderRegister = 0;
+    textureRanges[1].RegisterSpace      = 5;
+    textureRanges[1].OffsetInDescriptorsFromTableStart = kMaxRTAlbedoTextures;
+
+    rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[8].DescriptorTable.NumDescriptorRanges = _countof(textureRanges);
+    rootParams[8].DescriptorTable.pDescriptorRanges   = textureRanges;
+    rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -161,7 +174,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     }
 
     m_globalRootSig->SetName(L"RT_GlobalRootSig");
-    core::Log::Info("RT global root signature created (8 params: TLAS, UAVs, CB, materials, normals, instances, UVs, albedo textures)");
+    core::Log::Info("RT global root signature created (9 params: TLAS, UAVs, CB, materials, normals, instances, UVs, positions, material textures)");
     return true;
 }
 

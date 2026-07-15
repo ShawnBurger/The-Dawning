@@ -10,7 +10,7 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
-- Early Layer 4 raster material path with generated RGBA8 albedo textures.
+- Layer 4 material path with albedo and normal textures in raster and DXR.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -63,9 +63,9 @@ If the starter DDS files are missing from the executable directory, the app
 writes generated checker DDS files and loads those. RGBA/WIC textures generate
 CPU mip chains, and DDS files upload all declared mip levels. Raster and DXR
 path-traced materials now sample albedo textures from their respective texture
-tables. Raster materials can also bind normal maps; the demo scene currently
-uses procedural wave normal textures. KTX loading, bindless texture arrays, and
-DXR normal-map shading are still upcoming Layer 4 work.
+tables. Raster and DXR materials can also bind normal maps; the demo scene
+currently uses procedural wave normal textures for the floor and cube. KTX
+loading and bindless texture arrays are still upcoming Layer 4 work.
 
 ## Runtime Controls
 

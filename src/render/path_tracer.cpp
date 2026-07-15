@@ -10,6 +10,10 @@
 namespace render
 {
 
+static constexpr uint32_t kRTUavDescriptorCount = 2;
+static constexpr uint32_t kRTAlbedoDescriptorBase = kRTUavDescriptorCount;
+static constexpr uint32_t kRTNormalDescriptorBase = kRTAlbedoDescriptorBase + kMaxRTAlbedoTextures;
+
 static bool CreateMappedUploadBuffer(
     ID3D12Device5* device,
     uint64_t byteSize,
@@ -125,6 +129,12 @@ void PathTracer::Shutdown()
         m_triangleUVMapped = nullptr;
     }
 
+    if (m_trianglePositionBuffer && m_trianglePositionMapped)
+    {
+        m_trianglePositionBuffer->Unmap(0, nullptr);
+        m_trianglePositionMapped = nullptr;
+    }
+
     m_pipeline.Shutdown();
     m_accel.Shutdown();
 
@@ -135,14 +145,18 @@ void PathTracer::Shutdown()
     m_instanceDataBuffer.Reset();
     m_triangleNormalBuffer.Reset();
     m_triangleUVBuffer.Reset();
+    m_trianglePositionBuffer.Reset();
     for (auto& cb : m_constantBuffer) cb.Reset();
 
     m_srvUavDescSize = 0;
     m_boundAlbedoTextureCount = 0;
     m_boundAlbedoTextureResources.fill(nullptr);
+    m_boundNormalTextureCount = 0;
+    m_boundNormalTextureResources.fill(nullptr);
     m_maxInstanceData = 0;
     m_maxTriangleNormals = 0;
     m_maxTriangleUVs = 0;
+    m_maxTrianglePositions = 0;
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
     m_hasPrevQuality = false;
@@ -156,7 +170,7 @@ void PathTracer::Shutdown()
 bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = 2 + kMaxRTAlbedoTextures;
+    heapDesc.NumDescriptors = kRTNormalDescriptorBase + kMaxRTNormalTextures;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -168,11 +182,11 @@ bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
     }
     m_srvUavHeap->SetName(L"RT_SrvUavHeap");
     m_srvUavDescSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    ClearAlbedoTextureDescriptors(device);
+    ClearMaterialTextureDescriptors(device);
     return true;
 }
 
-void PathTracer::ClearAlbedoTextureDescriptors(ID3D12Device5* device)
+void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
 {
     if (!device || !m_srvUavHeap || m_srvUavDescSize == 0)
         return;
@@ -183,47 +197,74 @@ void PathTracer::ClearAlbedoTextureDescriptors(ID3D12Device5* device)
     nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     nullSrv.Texture2D.MipLevels = 1;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += static_cast<SIZE_T>(2) * m_srvUavDescSize;
-    for (uint32_t i = 0; i < kMaxRTAlbedoTextures; ++i)
+    auto clearRange = [&](uint32_t firstDescriptor, uint32_t descriptorCount)
     {
-        device->CreateShaderResourceView(nullptr, &nullSrv, handle);
-        handle.ptr += m_srvUavDescSize;
-    }
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<SIZE_T>(firstDescriptor) * m_srvUavDescSize;
+        for (uint32_t i = 0; i < descriptorCount; ++i)
+        {
+            device->CreateShaderResourceView(nullptr, &nullSrv, handle);
+            handle.ptr += m_srvUavDescSize;
+        }
+    };
+
+    clearRange(kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures);
+    clearRange(kRTNormalDescriptorBase, kMaxRTNormalTextures);
+
     m_boundAlbedoTextureCount = 0;
     m_boundAlbedoTextureResources.fill(nullptr);
+    m_boundNormalTextureCount = 0;
+    m_boundNormalTextureResources.fill(nullptr);
 }
 
-uint32_t PathTracer::UpdateAlbedoTextureDescriptors(
+uint32_t PathTracer::UpdateTextureDescriptors(
     ID3D12Device5* device,
     const Texture* const* textures,
-    uint32_t textureCount)
+    uint32_t textureCount,
+    uint32_t firstDescriptor,
+    uint32_t maxDescriptors,
+    uint32_t& boundCount,
+    ID3D12Resource** boundResources)
 {
     if (!device || !m_srvUavHeap || m_srvUavDescSize == 0)
         return 0;
 
-    const uint32_t boundCount = (std::min)(textureCount, kMaxRTAlbedoTextures);
-    bool unchanged = boundCount == m_boundAlbedoTextureCount;
-    for (uint32_t i = 0; i < kMaxRTAlbedoTextures; ++i)
+    const uint32_t desiredCount = (std::min)(textureCount, maxDescriptors);
+    bool unchanged = desiredCount == boundCount;
+    for (uint32_t i = 0; i < maxDescriptors; ++i)
     {
         ID3D12Resource* desired = nullptr;
-        if (i < boundCount && textures && textures[i] && textures[i]->IsValid())
+        if (i < desiredCount && textures && textures[i] && textures[i]->IsValid())
             desired = textures[i]->resource.Get();
-        if (m_boundAlbedoTextureResources[i] != desired)
+        if (boundResources[i] != desired)
         {
             unchanged = false;
             break;
         }
     }
     if (unchanged)
-        return boundCount;
+        return desiredCount;
 
-    ClearAlbedoTextureDescriptors(device);
+    D3D12_SHADER_RESOURCE_VIEW_DESC nullSrv = {};
+    nullSrv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    nullSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullSrv.Texture2D.MipLevels = 1;
 
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += static_cast<SIZE_T>(2) * m_srvUavDescSize;
+    handle.ptr += static_cast<SIZE_T>(firstDescriptor) * m_srvUavDescSize;
 
-    for (uint32_t i = 0; i < boundCount; ++i)
+    for (uint32_t i = 0; i < maxDescriptors; ++i)
+    {
+        device->CreateShaderResourceView(nullptr, &nullSrv, handle);
+        boundResources[i] = nullptr;
+        handle.ptr += m_srvUavDescSize;
+    }
+
+    handle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(firstDescriptor) * m_srvUavDescSize;
+
+    for (uint32_t i = 0; i < desiredCount; ++i)
     {
         const Texture* texture = textures ? textures[i] : nullptr;
         if (!texture || !texture->IsValid())
@@ -232,7 +273,7 @@ uint32_t PathTracer::UpdateAlbedoTextureDescriptors(
             continue;
         }
 
-        m_boundAlbedoTextureResources[i] = texture->resource.Get();
+        boundResources[i] = texture->resource.Get();
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Format = texture->format;
@@ -243,8 +284,8 @@ uint32_t PathTracer::UpdateAlbedoTextureDescriptors(
         handle.ptr += m_srvUavDescSize;
     }
 
-    m_boundAlbedoTextureCount = boundCount;
-    return boundCount;
+    boundCount = desiredCount;
+    return desiredCount;
 }
 
 // =============================================================================
@@ -456,6 +497,24 @@ bool PathTracer::EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangle
                                     m_triangleUVBuffer, &m_triangleUVMapped);
 }
 
+bool PathTracer::EnsureTrianglePositionBuffer(ID3D12Device5* device, uint32_t triangleCount)
+{
+    if (triangleCount == 0) return false;
+    if (m_trianglePositionBuffer && triangleCount <= m_maxTrianglePositions) return true;
+
+    if (m_trianglePositionBuffer && m_trianglePositionMapped)
+    {
+        m_trianglePositionBuffer->Unmap(0, nullptr);
+        m_trianglePositionMapped = nullptr;
+    }
+    m_trianglePositionBuffer.Reset();
+
+    m_maxTrianglePositions = triangleCount + 256;
+    uint64_t bufSize = sizeof(RTTrianglePositionData) * static_cast<uint64_t>(m_maxTrianglePositions);
+    return CreateMappedUploadBuffer(device, bufSize, L"RT_TrianglePositionBuffer",
+                                    m_trianglePositionBuffer, &m_trianglePositionMapped);
+}
+
 void PathTracer::Dispatch(
     D3D12Device& device,
     const Camera& camera,
@@ -470,8 +529,12 @@ void PathTracer::Dispatch(
     uint32_t triangleNormalCount,
     const RTTriangleUVData* triangleUVs,
     uint32_t triangleUVCount,
+    const RTTrianglePositionData* trianglePositions,
+    uint32_t trianglePositionCount,
     const Texture* const* albedoTextures,
     uint32_t albedoTextureCount,
+    const Texture* const* normalTextures,
+    uint32_t normalTextureCount,
     uint32_t instanceCount,
     RTQualityMode qualityMode)
 {
@@ -497,17 +560,17 @@ void PathTracer::Dispatch(
         return;
     }
 
-    if (!materials || !instanceData || !triangleNormals || !triangleUVs ||
-        triangleNormalCount == 0 || triangleUVCount == 0)
+    if (!materials || !instanceData || !triangleNormals || !triangleUVs || !trianglePositions ||
+        triangleNormalCount == 0 || triangleUVCount == 0 || trianglePositionCount == 0)
     {
         core::Log::Error("PathTracer dispatch skipped: missing RT scene metadata");
         return;
     }
 
-    if (triangleUVCount != triangleNormalCount)
+    if (triangleUVCount != triangleNormalCount || trianglePositionCount != triangleNormalCount)
     {
-        core::Log::Errorf("PathTracer dispatch skipped: triangle metadata mismatch (normals=%u uvs=%u)",
-                          triangleNormalCount, triangleUVCount);
+        core::Log::Errorf("PathTracer dispatch skipped: triangle metadata mismatch (normals=%u uvs=%u positions=%u)",
+                          triangleNormalCount, triangleUVCount, trianglePositionCount);
         return;
     }
 
@@ -593,7 +656,8 @@ void PathTracer::Dispatch(
 
     if (!EnsureInstanceDataBuffer(device.Device5(), instanceDataCount) ||
         !EnsureTriangleNormalBuffer(device.Device5(), triangleNormalCount) ||
-        !EnsureTriangleUVBuffer(device.Device5(), triangleUVCount))
+        !EnsureTriangleUVBuffer(device.Device5(), triangleUVCount) ||
+        !EnsureTrianglePositionBuffer(device.Device5(), trianglePositionCount))
     {
         core::Log::Error("PathTracer dispatch skipped: failed to prepare RT geometry buffers");
         return;
@@ -602,7 +666,13 @@ void PathTracer::Dispatch(
     memcpy(m_instanceDataMapped, instanceData, sizeof(RTInstanceData) * instanceDataCount);
     memcpy(m_triangleNormalMapped, triangleNormals, sizeof(RTTriangleNormalData) * triangleNormalCount);
     memcpy(m_triangleUVMapped, triangleUVs, sizeof(RTTriangleUVData) * triangleUVCount);
-    UpdateAlbedoTextureDescriptors(device.Device5(), albedoTextures, albedoTextureCount);
+    memcpy(m_trianglePositionMapped, trianglePositions, sizeof(RTTrianglePositionData) * trianglePositionCount);
+    UpdateTextureDescriptors(device.Device5(), albedoTextures, albedoTextureCount,
+                             kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures,
+                             m_boundAlbedoTextureCount, m_boundAlbedoTextureResources.data());
+    UpdateTextureDescriptors(device.Device5(), normalTextures, normalTextureCount,
+                             kRTNormalDescriptorBase, kMaxRTNormalTextures,
+                             m_boundNormalTextureCount, m_boundNormalTextureResources.data());
 
     // --- Set up for DispatchRays ---
     cmd->SetComputeRootSignature(m_pipeline.GetGlobalRootSig());
@@ -633,10 +703,13 @@ void PathTracer::Dispatch(
     // [6] Triangle UV buffer
     cmd->SetComputeRootShaderResourceView(6,
         m_triangleUVBuffer->GetGPUVirtualAddress());
-    // [7] Albedo texture descriptor table
-    D3D12_GPU_DESCRIPTOR_HANDLE albedoTextureTable = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
-    albedoTextureTable.ptr += static_cast<UINT64>(2) * m_srvUavDescSize;
-    cmd->SetComputeRootDescriptorTable(7, albedoTextureTable);
+    // [7] Triangle position buffer
+    cmd->SetComputeRootShaderResourceView(7,
+        m_trianglePositionBuffer->GetGPUVirtualAddress());
+    // [8] Material texture descriptor table (albedo, then normal)
+    D3D12_GPU_DESCRIPTOR_HANDLE textureTable = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
+    textureTable.ptr += static_cast<UINT64>(kRTAlbedoDescriptorBase) * m_srvUavDescSize;
+    cmd->SetComputeRootDescriptorTable(8, textureTable);
 
     // --- DispatchRays ---
     D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
