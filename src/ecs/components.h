@@ -58,6 +58,7 @@ struct Material
     float       roughness           = 0.5f;
     float       metallic            = 0.0f;
     uint32_t    albedoTextureHandle = UINT32_MAX;
+    uint32_t    normalTextureHandle = UINT32_MAX;
 };
 
 // =============================================================================

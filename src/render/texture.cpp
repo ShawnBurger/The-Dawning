@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <wincodec.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -900,6 +901,47 @@ std::vector<uint32_t> GenerateCheckerTextureRGBA8(
         {
             bool odd = ((x / checkSize) + (y / checkSize)) & 1u;
             pixels[static_cast<size_t>(y) * width + x] = odd ? cb : ca;
+        }
+    }
+
+    return pixels;
+}
+
+std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    float frequency,
+    float strength)
+{
+    if (width == 0) width = 1;
+    if (height == 0) height = 1;
+    if (frequency <= 0.0f) frequency = 4.0f;
+    if (strength < 0.0f) strength = 0.0f;
+
+    std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
+    const float twoPi = core::PI * 2.0f;
+    const float invW = width > 1 ? 1.0f / static_cast<float>(width - 1) : 0.0f;
+    const float invH = height > 1 ? 1.0f / static_cast<float>(height - 1) : 0.0f;
+
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            const float u = static_cast<float>(x) * invW;
+            const float v = static_cast<float>(y) * invH;
+            const float phaseU = u * frequency * twoPi;
+            const float phaseV = v * frequency * twoPi;
+            const float dhdu = std::cos(phaseU) * std::sin(phaseV) * frequency * twoPi;
+            const float dhdv = std::sin(phaseU) * std::cos(phaseV) * frequency * twoPi;
+
+            core::Vec3f n(-dhdu * strength, -dhdv * strength, 1.0f);
+            n = n.Normalized();
+            pixels[static_cast<size_t>(y) * width + x] = PackRGBA8({
+                n.x * 0.5f + 0.5f,
+                n.y * 0.5f + 0.5f,
+                n.z * 0.5f + 0.5f,
+                1.0f
+            });
         }
     }
 

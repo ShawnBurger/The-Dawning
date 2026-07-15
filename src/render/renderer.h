@@ -52,7 +52,7 @@ struct CBMaterial
     float roughness;
     float metallic;
     uint32_t useAlbedoTexture;
-    float pad;
+    uint32_t useNormalTexture;
 };
 
 // Align size to 256 bytes for CBV placement
@@ -79,7 +79,8 @@ public:
                   const core::Color& albedo = core::Color::White(),
                   float roughness = 0.5f,
                   float metallic = 0.0f,
-                  const Texture* albedoTexture = nullptr);
+                  const Texture* albedoTexture = nullptr,
+                  const Texture* normalTexture = nullptr);
 
     // Register a texture SRV for raster material sampling.
     uint32_t RegisterTexture(ID3D12Device* device, const Texture& texture);

@@ -67,4 +67,10 @@ std::vector<uint32_t> GenerateCheckerTextureRGBA8(
     core::Color a,
     core::Color b);
 
+std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    float frequency,
+    float strength);
+
 } // namespace render

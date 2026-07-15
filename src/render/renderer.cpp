@@ -49,8 +49,10 @@ void Renderer::Shutdown()
 //   Slot 0: Root CBV at b0 (per-object) — 2 DWORDs, hot, changes every draw
 //   Slot 1: Root CBV at b1 (per-frame)  — 2 DWORDs, warm, changes once/frame
 //   Slot 2: Root CBV at b2 (material)   — 2 DWORDs, warm, changes per material
+//   Slot 3: Descriptor table for albedo texture (t0)
+//   Slot 4: Descriptor table for normal texture (t1)
 //   Static sampler at s0
-// Total: 6 DWORDs — well within 64 DWORD limit
+// Total: 8 DWORDs - well within 64 DWORD limit
 // =============================================================================
 bool Renderer::CreateRootSignature(ID3D12Device* device)
 {
@@ -93,15 +95,18 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     if (featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1)
     {
         // v1.1: enables driver optimizations via DATA_STATIC / DESCRIPTORS_VOLATILE flags
-        D3D12_DESCRIPTOR_RANGE1 textureRange = {};
-        textureRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        textureRange.NumDescriptors                    = 1;
-        textureRange.BaseShaderRegister                = 0;
-        textureRange.RegisterSpace                     = 0;
-        textureRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
-        textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+        D3D12_DESCRIPTOR_RANGE1 albedoRange = {};
+        albedoRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        albedoRange.NumDescriptors                    = 1;
+        albedoRange.BaseShaderRegister                = 0;
+        albedoRange.RegisterSpace                     = 0;
+        albedoRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+        albedoRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[4] = {};
+        D3D12_DESCRIPTOR_RANGE1 normalRange = albedoRange;
+        normalRange.BaseShaderRegister = 1;
+
+        D3D12_ROOT_PARAMETER1 rootParams[5] = {};
 
         // Slot 0: Per-object CBV (b0) — changes every draw call (hottest)
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -127,8 +132,14 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // Slot 3: Optional albedo texture SRV (t0)
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
-        rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
+        rootParams[3].DescriptorTable.pDescriptorRanges   = &albedoRange;
         rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        // Slot 4: Optional normal texture SRV (t1)
+        rootParams[4].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[4].DescriptorTable.pDescriptorRanges   = &normalRange;
+        rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -143,14 +154,17 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     else
     {
         // v1.0 fallback
-        D3D12_DESCRIPTOR_RANGE textureRange = {};
-        textureRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        textureRange.NumDescriptors                    = 1;
-        textureRange.BaseShaderRegister                = 0;
-        textureRange.RegisterSpace                     = 0;
-        textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+        D3D12_DESCRIPTOR_RANGE albedoRange = {};
+        albedoRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        albedoRange.NumDescriptors                    = 1;
+        albedoRange.BaseShaderRegister                = 0;
+        albedoRange.RegisterSpace                     = 0;
+        albedoRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER rootParams[4] = {};
+        D3D12_DESCRIPTOR_RANGE normalRange = albedoRange;
+        normalRange.BaseShaderRegister = 1;
+
+        D3D12_ROOT_PARAMETER rootParams[5] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -169,8 +183,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
 
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
-        rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
+        rootParams[3].DescriptorTable.pDescriptorRanges   = &albedoRange;
         rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        rootParams[4].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[4].DescriptorTable.pDescriptorRanges   = &normalRange;
+        rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
@@ -199,7 +218,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + texture SRV + 1 static sampler, 7 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 3 root CBVs + albedo/normal SRVs + 1 static sampler, 8 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -461,7 +480,8 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         const core::Mat4x4& worldMatrix,
                         const core::Color& albedo,
                         float roughness, float metallic,
-                        const Texture* albedoTexture)
+                        const Texture* albedoTexture,
+                        const Texture* normalTexture)
 {
     if (!mesh.IsValid()) return;
 
@@ -470,6 +490,10 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
         albedoTexture->IsValid() &&
         albedoTexture->descriptorIndex != UINT32_MAX &&
         albedoTexture->descriptorIndex < m_nextTextureDescriptor;
+    bool useNormalTexture = normalTexture &&
+        normalTexture->IsValid() &&
+        normalTexture->descriptorIndex != UINT32_MAX &&
+        normalTexture->descriptorIndex < m_nextTextureDescriptor;
 
     // Compute world-view-projection
     core::Mat4x4 wvp = worldMatrix * m_viewProj;
@@ -496,6 +520,7 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.roughness = roughness;
     material.metallic  = metallic;
     material.useAlbedoTexture = useAlbedoTexture ? 1u : 0u;
+    material.useNormalTexture = useNormalTexture ? 1u : 0u;
 
     auto materialAddr = UploadCB(&material, sizeof(material));
     cmd->SetGraphicsRootConstantBufferView(2, materialAddr);
@@ -504,6 +529,11 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     if (useAlbedoTexture)
         textureHandle.ptr += static_cast<UINT64>(albedoTexture->descriptorIndex) * m_textureDescSize;
     cmd->SetGraphicsRootDescriptorTable(3, textureHandle);
+
+    D3D12_GPU_DESCRIPTOR_HANDLE normalHandle = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
+    if (useNormalTexture)
+        normalHandle.ptr += static_cast<UINT64>(normalTexture->descriptorIndex) * m_textureDescSize;
+    cmd->SetGraphicsRootDescriptorTable(4, normalHandle);
 
     // Bind geometry and draw
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);

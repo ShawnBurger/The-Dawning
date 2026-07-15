@@ -124,6 +124,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     ComPtr<ID3D12Resource> planeVBUp, planeIBUp;
     ComPtr<ID3D12Resource> sphereVBUp, sphereIBUp;
     ComPtr<ID3D12Resource> groundTexUp, cubeTexUp;
+    ComPtr<ID3D12Resource> groundNormalTexUp, cubeNormalTexUp;
 
     auto cubeData   = render::GenerateCube(core::Color::White());
     auto planeData  = render::GeneratePlane(10.0f, 10.0f, 10, 10, core::Color::White());
@@ -224,6 +225,20 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     }
     cubeTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeTexture);
 
+    auto groundNormalPixels = render::GenerateWaveNormalTextureRGBA8(512, 512, 8.0f, 0.008f);
+    render::Texture groundNormalTexture = render::CreateTexture2DFromRGBA8(
+        device.Device(), device.CmdList(),
+        groundNormalPixels.data(), 512, 512,
+        groundNormalTexUp, L"GroundNormalTexture");
+    groundNormalTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundNormalTexture);
+
+    auto cubeNormalPixels = render::GenerateWaveNormalTextureRGBA8(256, 256, 6.0f, 0.012f);
+    render::Texture cubeNormalTexture = render::CreateTexture2DFromRGBA8(
+        device.Device(), device.CmdList(),
+        cubeNormalPixels.data(), 256, 256,
+        cubeNormalTexUp, L"CubeNormalTexture");
+    cubeNormalTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeNormalTexture);
+
     // Execute uploads
     device.CmdList()->Close();
     ID3D12CommandList* uploadLists[] = { device.CmdList() };
@@ -237,11 +252,14 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     auto hSphere = res.AddMesh(std::move(sphereMesh), "Sphere");
     auto hGroundTex = res.AddTexture(std::move(groundTexture), "GroundGrid");
     auto hCubeTex = res.AddTexture(std::move(cubeTexture), "BluePanels");
+    auto hGroundNormalTex = res.AddTexture(std::move(groundNormalTexture), "GroundWaveNormal");
+    auto hCubeNormalTex = res.AddTexture(std::move(cubeNormalTexture), "CubeWaveNormal");
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
                      hCube.Index(), hPlane.Index(), hSphere.Index());
-    core::Log::Infof("Textures registered: ground=%u cube=%u",
-                     hGroundTex.Index(), hCubeTex.Index());
+    core::Log::Infof("Textures registered: ground=%u cube=%u groundNormal=%u cubeNormal=%u",
+                     hGroundTex.Index(), hCubeTex.Index(),
+                     hGroundNormalTex.Index(), hCubeNormalTex.Index());
 
     // =========================================================================
     // Create scene entities via ECS
@@ -249,12 +267,12 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
     // Ground plane (static, dark grey, rough)
     gameScene.CreateRenderable("GroundPlane", hPlane,
-        ecs::Material{ { 0.54f, 0.57f, 0.62f, 1.0f }, 0.9f, 0.0f, hGroundTex.value },
+        ecs::Material{ { 0.54f, 0.57f, 0.62f, 1.0f }, 0.9f, 0.0f, hGroundTex.value, hGroundNormalTex.value },
         ecs::Transform{ { 0, 0, 0 }, core::Quatf::Identity(), { 1, 1, 1 } });
 
     // Center cube (spinning, blue metal)
     gameScene.CreateSpinner("BlueCube", hCube,
-        ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f, hCubeTex.value },
+        ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f, hCubeTex.value, hCubeNormalTex.value },
         ecs::Transform{ { 0, 0.5f, 0 }, core::Quatf::Identity(), { 1, 1, 1 } },
         0.5f);
 
