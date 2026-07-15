@@ -251,7 +251,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
                 rtQualityInfo.name,
                 rtQualityInfo.samplesPerPixel,
                 rtQualityInfo.maxBounces,
-                rtQualityInfo.maxBounces == 1 ? "" : "es");
+                rtQualityInfo.maxBounces == 1 ? "" : "s");
         }
 
         if (input.KeyPressed(VK_F3))
