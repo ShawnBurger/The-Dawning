@@ -22,13 +22,84 @@
 #include "render/path_tracer.h"
 #include "scene/scene.h"
 
-int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+namespace
+{
+
+struct AppOptions
+{
+    bool smoke = false;
+    bool smokeRT = false;
+    bool smokeFullQuality = false;
+    bool showOverlay = true;
+    double smokeSeconds = 4.0;
+    double smokeRTDelaySeconds = 0.25;
+};
+
+bool HasOption(const std::string& args, const char* option)
+{
+    return args.find(option) != std::string::npos;
+}
+
+double ReadDoubleOption(const std::string& args, const char* option, double fallback)
+{
+    size_t pos = args.find(option);
+    if (pos == std::string::npos)
+        return fallback;
+
+    pos += std::strlen(option);
+    char* end = nullptr;
+    const double value = std::strtod(args.c_str() + pos, &end);
+    return end != args.c_str() + pos ? value : fallback;
+}
+
+AppOptions ParseOptions(const char* commandLine)
+{
+    AppOptions options;
+    const std::string args = commandLine ? commandLine : "";
+
+    options.smoke = HasOption(args, "--smoke");
+    options.smokeRT = HasOption(args, "--smoke-rt");
+    options.smokeFullQuality = HasOption(args, "--smoke-full");
+    options.showOverlay = !HasOption(args, "--no-overlay");
+    options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
+    options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
+
+    if (options.smoke && !HasOption(args, "--show-overlay"))
+        options.showOverlay = false;
+    if (options.smokeFullQuality)
+        options.smokeRT = true;
+    if (options.smokeSeconds < 0.5)
+        options.smokeSeconds = 0.5;
+    if (options.smokeRTDelaySeconds < 0.0)
+        options.smokeRTDelaySeconds = 0.0;
+    if (options.smokeRT && options.smokeSeconds <= options.smokeRTDelaySeconds + 0.5)
+        options.smokeSeconds = options.smokeRTDelaySeconds + 0.5;
+
+    return options;
+}
+
+} // namespace
+
+int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
 {
     // =========================================================================
     // Initialize core systems
     // =========================================================================
     core::Log::Init();
     core::Log::Info("=== The Dawning V3 Engine Starting (Layer 4: Materials) ===");
+
+    const AppOptions options = ParseOptions(commandLine);
+    if (options.smoke)
+    {
+        core::Log::Infof("Smoke mode enabled (rt=%s, full=%s, seconds=%.2f)",
+                         options.smokeRT ? "yes" : "no",
+                         options.smokeFullQuality ? "yes" : "no",
+                         options.smokeSeconds);
+    }
 
     // Set working directory to executable directory
     {
@@ -93,7 +164,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
     render::DebugOverlay debugOverlay;
     bool debugOverlayReady = debugOverlay.Init(device);
-    bool showDebugOverlay = true;
+    bool showDebugOverlay = options.showOverlay;
     if (!debugOverlayReady)
     {
         core::Log::Warn("Debug overlay failed to initialize - continuing without it");
@@ -372,10 +443,51 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     bool rtAvailable = false;
     bool rtInitAttempted = false;
     render::RTQualityMode rtQualityMode = render::RTQualityMode::StablePreview;
+    if (options.smokeFullQuality)
+        rtQualityMode = render::RTQualityMode::FullPathTrace;
     render::RTQualityInfo rtQualityInfo = render::GetRTQualityInfo(rtQualityMode);
 
     core::Log::Info("Path tracing will initialize on first F1 press");
     core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
+
+    auto ensurePathTracing = [&]() -> bool
+    {
+        if (!rtInitAttempted)
+        {
+            rtInitAttempted = true;
+
+            if (gameScene.InitPathTracer(device))
+            {
+                device.WaitForCurrentFrame();
+                device.ResetCommandList();
+
+                gameScene.EnsureBLAS(device);
+
+                device.CmdList()->Close();
+                ID3D12CommandList* blasLists[] = { device.CmdList() };
+                device.CmdQueue()->ExecuteCommandLists(1, blasLists);
+                device.WaitForGpu();
+
+                rtAvailable = true;
+                core::Log::Info("Path tracing initialized");
+            }
+            else
+            {
+                core::Log::Warn("Path tracing not available - DXR initialization failed");
+            }
+        }
+
+        return rtAvailable;
+    };
+
+    auto togglePathTracing = [&]()
+    {
+        if (ensurePathTracing())
+        {
+            usePathTracing = !usePathTracing;
+            core::Log::Infof("Render mode: %s", usePathTracing ? "PATH TRACING" : "RASTERIZATION");
+        }
+    };
 
     // =========================================================================
     // Timer
@@ -391,6 +503,8 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     // Main loop
     // =========================================================================
     bool running = true;
+    bool smokeRTStarted = false;
+    int exitCode = 0;
     while (running)
     {
         // --- Input ---
@@ -430,41 +544,39 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
         // F1: initialize/toggle path tracing
         if (input.KeyPressed(VK_F1))
-        {
-            if (!rtInitAttempted)
-            {
-                rtInitAttempted = true;
-
-                if (gameScene.InitPathTracer(device))
-                {
-                    device.WaitForCurrentFrame();
-                    device.ResetCommandList();
-
-                    gameScene.EnsureBLAS(device);
-
-                    device.CmdList()->Close();
-                    ID3D12CommandList* blasLists[] = { device.CmdList() };
-                    device.CmdQueue()->ExecuteCommandLists(1, blasLists);
-                    device.WaitForGpu();
-
-                    rtAvailable = true;
-                    core::Log::Info("Path tracing initialized");
-                }
-                else
-                {
-                    core::Log::Warn("Path tracing not available - DXR initialization failed");
-                }
-            }
-
-            if (rtAvailable)
-            {
-                usePathTracing = !usePathTracing;
-                core::Log::Infof("Render mode: %s", usePathTracing ? "PATH TRACING" : "RASTERIZATION");
-            }
-        }
+            togglePathTracing();
 
         // --- Timer ---
         core::TimeStep ts = timer.Tick();
+
+        if (options.smoke)
+        {
+            if (options.smokeRT && !smokeRTStarted &&
+                ts.totalTime >= options.smokeRTDelaySeconds)
+            {
+                smokeRTStarted = true;
+                if (ensurePathTracing())
+                {
+                    if (!usePathTracing)
+                    {
+                        usePathTracing = true;
+                        core::Log::Info("Smoke mode: path tracing enabled");
+                    }
+                }
+                else
+                {
+                    core::Log::Error("Smoke mode failed: path tracing unavailable");
+                    exitCode = 2;
+                    running = false;
+                }
+            }
+
+            if (ts.totalTime >= options.smokeSeconds)
+            {
+                core::Log::Info("Smoke mode complete");
+                running = false;
+            }
+        }
 
         static float titleTimer = 0.0f;
         titleTimer += static_cast<float>(ts.dt);
@@ -629,6 +741,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         if (device.IsDeviceLost())
         {
             core::Log::Error("GPU device lost — exiting");
+            exitCode = 3;
             running = false;
         }
 
@@ -651,5 +764,5 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     core::Log::Info("=== The Dawning V3 Engine stopped ===");
     core::Log::Shutdown();
 
-    return 0;
+    return exitCode;
 }

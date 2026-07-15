@@ -49,6 +49,19 @@ Runtime log:
 build\Debug\TheDawning.log
 ```
 
+## Smoke Test
+
+After building, run a short automated render test:
+
+```powershell
+.\tools\smoke_test.cmd
+```
+
+The smoke test launches `build\Debug\TheDawningV3.exe --smoke --smoke-rt`,
+waits for the engine to enter path tracing, exits cleanly, and fails if the
+runtime log contains errors. Use `-RasterOnly` to test the raster path or
+`-FullQuality` to exercise the higher path-tracing quality mode.
+
 ## Path Tracing Runtime
 
 Raster mode builds and runs without extra DLLs. For DXR/path tracing shader
