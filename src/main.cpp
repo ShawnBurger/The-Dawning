@@ -15,6 +15,7 @@
 #include "core/window.h"
 #include "render/d3d12_device.h"
 #include "render/renderer.h"
+#include "render/debug_overlay.h"
 #include "render/camera.h"
 #include "render/mesh.h"
 #include "render/path_tracer.h"
@@ -88,6 +89,14 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         { 1.0f, 0.97f, 0.92f },
         { 0.12f, 0.14f, 0.22f }
     );
+
+    render::DebugOverlay debugOverlay;
+    bool debugOverlayReady = debugOverlay.Init(device);
+    bool showDebugOverlay = true;
+    if (!debugOverlayReady)
+    {
+        core::Log::Warn("Debug overlay failed to initialize - continuing without it");
+    }
 
     // =========================================================================
     // Initialize camera
@@ -198,7 +207,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     render::RTQualityInfo rtQualityInfo = render::GetRTQualityInfo(rtQualityMode);
 
     core::Log::Info("Path tracing will initialize on first F1 press");
-    core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality");
+    core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
 
     // =========================================================================
     // Timer
@@ -243,6 +252,12 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
                 rtQualityInfo.samplesPerPixel,
                 rtQualityInfo.maxBounces,
                 rtQualityInfo.maxBounces == 1 ? "" : "es");
+        }
+
+        if (input.KeyPressed(VK_F3))
+        {
+            showDebugOverlay = !showDebugOverlay;
+            core::Log::Infof("Debug overlay: %s", showDebugOverlay ? "ON" : "OFF");
         }
 
         // F1: initialize/toggle path tracing
@@ -302,7 +317,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             }
 
             char title[160];
-            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s [F1 render | F2 quality]",
+            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s [F1 render | F2 quality | F3 overlay]",
                      ts.fps, gameScene.EntityCount(), modeText);
             SetWindowTextA(window.GetHWND(), title);
         }
@@ -373,6 +388,28 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
             // Copy RT output to back buffer and transition to PRESENT
             gameScene.CopyPathTraceToBackBuffer(device);
+
+            if (debugOverlayReady && showDebugOverlay)
+            {
+                device.TransitionResource(device.CurrentBackBuffer(),
+                                          D3D12_RESOURCE_STATE_PRESENT,
+                                          D3D12_RESOURCE_STATE_RENDER_TARGET);
+                render::DebugOverlayState overlayState = {};
+                overlayState.visible = showDebugOverlay;
+                overlayState.pathTracing = usePathTracing;
+                overlayState.rtAvailable = rtAvailable;
+                overlayState.rtInitAttempted = rtInitAttempted;
+                overlayState.mouseCaptured = window.IsCaptured();
+                overlayState.fps = ts.fps;
+                overlayState.frameMs = ts.dt * 1000.0;
+                overlayState.entityCount = gameScene.EntityCount();
+                overlayState.rtQuality = rtQualityInfo;
+                overlayState.cameraPosition = camera.Position();
+                debugOverlay.Draw(device, overlayState);
+                device.TransitionResource(device.CurrentBackBuffer(),
+                                          D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                          D3D12_RESOURCE_STATE_PRESENT);
+            }
         }
         else
         {
@@ -398,6 +435,22 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             renderer.BeginFrame(device, camera);
             gameScene.RenderEntities(device, renderer);
 
+            if (debugOverlayReady && showDebugOverlay)
+            {
+                render::DebugOverlayState overlayState = {};
+                overlayState.visible = showDebugOverlay;
+                overlayState.pathTracing = usePathTracing;
+                overlayState.rtAvailable = rtAvailable;
+                overlayState.rtInitAttempted = rtInitAttempted;
+                overlayState.mouseCaptured = window.IsCaptured();
+                overlayState.fps = ts.fps;
+                overlayState.frameMs = ts.dt * 1000.0;
+                overlayState.entityCount = gameScene.EntityCount();
+                overlayState.rtQuality = rtQualityInfo;
+                overlayState.cameraPosition = camera.Position();
+                debugOverlay.Draw(device, overlayState);
+            }
+
             device.TransitionResource(device.CurrentBackBuffer(),
                                        D3D12_RESOURCE_STATE_RENDER_TARGET,
                                        D3D12_RESOURCE_STATE_PRESENT);
@@ -422,6 +475,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
     device.WaitForGpu();
     gameScene.Shutdown();
+    debugOverlay.Shutdown();
     renderer.Shutdown();
     device.Shutdown();
     window.Shutdown();

@@ -28,6 +28,7 @@ set(RENDER_SOURCES
     src/render/mesh.cpp
     src/render/camera.cpp
     src/render/renderer.cpp
+    src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
     src/render/path_tracer.cpp
@@ -39,6 +40,7 @@ set(RENDER_HEADERS
     src/render/mesh.h
     src/render/camera.h
     src/render/renderer.h
+    src/render/debug_overlay.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
     src/render/path_tracer.h
@@ -47,6 +49,8 @@ set(RENDER_HEADERS
 set(SHADER_FILES
     shaders/basic_vs.hlsl
     shaders/basic_ps.hlsl
+    shaders/overlay_vs.hlsl
+    shaders/overlay_ps.hlsl
     shaders/path_trace.hlsl
 )
 
@@ -92,6 +96,7 @@ target_link_libraries(TheDawningV3 PRIVATE
     dxgi
     d3dcompiler
     dxguid
+    gdi32
 )
 
 # =============================================================================

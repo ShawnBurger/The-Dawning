@@ -53,6 +53,14 @@ compilation at runtime, copy these next to `TheDawningV3.exe`:
 They can come from the Microsoft DirectX Shader Compiler release or the
 Microsoft.Direct3D.DXC NuGet package.
 
+## Runtime Controls
+
+- `F1`: toggle raster/path tracing.
+- `F2`: toggle path tracing quality.
+- `F3`: toggle the debug overlay.
+- `WASD` + mouse: move the camera after clicking into the window.
+- `ESC`: release mouse capture, then quit.
+
 ## Development Rule
 
 Keep V3 compile-clean before adding features. Prefer small, verified changes:
