@@ -235,11 +235,13 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device)
         core::Mat4x4 worldMat = transform.ToMatrix();
 
         render::TLASInstance inst = {};
-        // Convert 4x4 row-major to 3x4 row-major (drop last row)
+        // Convert the engine's row-vector matrix to DXR's 3x4 instance
+        // transform. Engine translation lives in row 3; DXR expects it in
+        // the final column of the 3x4 descriptor.
         const float* m = worldMat.Data();
-        inst.transform[0][0] = m[0]; inst.transform[0][1] = m[1]; inst.transform[0][2] = m[2];  inst.transform[0][3] = m[3];
-        inst.transform[1][0] = m[4]; inst.transform[1][1] = m[5]; inst.transform[1][2] = m[6];  inst.transform[1][3] = m[7];
-        inst.transform[2][0] = m[8]; inst.transform[2][1] = m[9]; inst.transform[2][2] = m[10]; inst.transform[2][3] = m[11];
+        inst.transform[0][0] = m[0]; inst.transform[0][1] = m[4]; inst.transform[0][2] = m[8];  inst.transform[0][3] = m[12];
+        inst.transform[1][0] = m[1]; inst.transform[1][1] = m[5]; inst.transform[1][2] = m[9];  inst.transform[1][3] = m[13];
+        inst.transform[2][0] = m[2]; inst.transform[2][1] = m[6]; inst.transform[2][2] = m[10]; inst.transform[2][3] = m[14];
 
         inst.instanceID    = instanceID;
         inst.instanceMask  = 0xFF;
