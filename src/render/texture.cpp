@@ -4,8 +4,11 @@
 
 #include "texture.h"
 #include "../core/log.h"
+#include <windows.h>
+#include <wincodec.h>
 #include <cstring>
 #include <fstream>
+#include <string>
 
 namespace render
 {
@@ -477,6 +480,138 @@ Texture CreateTexture2DFromDDSFile(
     if (texture.IsValid())
         core::Log::Infof("DDS loaded: %s (%ux%u, format=%u)",
                          filePath, texture.width, texture.height, static_cast<uint32_t>(format));
+    return texture;
+}
+
+Texture CreateTexture2DFromWICFile(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const char* filePath,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name)
+{
+    Texture texture;
+    if (!filePath || !filePath[0])
+        return texture;
+
+    DWORD attrs = GetFileAttributesA(filePath);
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        core::Log::Warnf("WIC texture not found: %s", filePath);
+        return texture;
+    }
+
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, filePath, -1, nullptr, 0);
+    if (wideLen <= 0)
+    {
+        core::Log::Errorf("Could not convert texture path to UTF-16: %s", filePath);
+        return texture;
+    }
+
+    std::wstring widePath(static_cast<size_t>(wideLen), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, filePath, -1, widePath.data(), wideLen);
+
+    bool comInitialized = false;
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (SUCCEEDED(hr))
+    {
+        comInitialized = true;
+    }
+    else if (hr != RPC_E_CHANGED_MODE)
+    {
+        core::Log::Errorf("CoInitializeEx failed for WIC texture loading: 0x%08X", hr);
+        return texture;
+    }
+
+    struct ComScope
+    {
+        bool initialized = false;
+        ~ComScope()
+        {
+            if (initialized)
+                CoUninitialize();
+        }
+    } comScope{ comInitialized };
+
+    ComPtr<IWICImagingFactory> factory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(&factory));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC factory creation failed: 0x%08X", hr);
+        return texture;
+    }
+
+    ComPtr<IWICBitmapDecoder> decoder;
+    hr = factory->CreateDecoderFromFilename(widePath.c_str(), nullptr, GENERIC_READ,
+                                            WICDecodeMetadataCacheOnLoad, &decoder);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC decoder failed for %s: 0x%08X", filePath, hr);
+        return texture;
+    }
+
+    ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC GetFrame failed for %s: 0x%08X", filePath, hr);
+        return texture;
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    hr = frame->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0)
+    {
+        core::Log::Errorf("WIC GetSize failed for %s: 0x%08X", filePath, hr);
+        return texture;
+    }
+
+    ComPtr<IWICFormatConverter> converter;
+    hr = factory->CreateFormatConverter(&converter);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC format converter creation failed: 0x%08X", hr);
+        return texture;
+    }
+
+    hr = converter->Initialize(frame.Get(),
+                               GUID_WICPixelFormat32bppRGBA,
+                               WICBitmapDitherTypeNone,
+                               nullptr,
+                               0.0,
+                               WICBitmapPaletteTypeCustom);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC format conversion failed for %s: 0x%08X", filePath, hr);
+        return texture;
+    }
+
+    const uint32_t rowBytes = width * 4u;
+    std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * height);
+    hr = converter->CopyPixels(nullptr, rowBytes, static_cast<UINT>(pixels.size()), pixels.data());
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC CopyPixels failed for %s: 0x%08X", filePath, hr);
+        return texture;
+    }
+
+    texture = CreateTexture2DFromMemory(
+        device,
+        cmdList,
+        pixels.data(),
+        width,
+        height,
+        DXGI_FORMAT_R8G8B8A8_UNORM,
+        rowBytes,
+        height,
+        outUpload,
+        name);
+
+    if (texture.IsValid())
+        core::Log::Infof("WIC texture loaded: %s (%ux%u)", filePath, texture.width, texture.height);
+
     return texture;
 }
 

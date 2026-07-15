@@ -45,6 +45,13 @@ Texture CreateTexture2DFromDDSFile(
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name = nullptr);
 
+Texture CreateTexture2DFromWICFile(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const char* filePath,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name = nullptr);
+
 bool WriteCheckerDDSTextureRGBA8(
     const char* filePath,
     uint32_t width,

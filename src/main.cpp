@@ -147,17 +147,24 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
 
+    const char* groundPNGPath = "assets\\textures\\ground_grid.png";
+    const char* cubePNGPath = "assets\\textures\\blue_panels.png";
     const char* groundDDSPath = "assets\\textures\\ground_grid.dds";
     const char* cubeDDSPath = "assets\\textures\\blue_panels.dds";
+    auto fileExists = [](const char* path) -> bool
+    {
+        DWORD attrs = GetFileAttributesA(path);
+        return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    };
 
-    if (GetFileAttributesA(groundDDSPath) == INVALID_FILE_ATTRIBUTES)
+    if (!fileExists(groundDDSPath))
     {
         render::WriteCheckerDDSTextureRGBA8(
             groundDDSPath, 512, 512, 32,
             { 0.82f, 0.86f, 0.91f, 1.0f },
             { 0.48f, 0.53f, 0.60f, 1.0f });
     }
-    if (GetFileAttributesA(cubeDDSPath) == INVALID_FILE_ATTRIBUTES)
+    if (!fileExists(cubeDDSPath))
     {
         render::WriteCheckerDDSTextureRGBA8(
             cubeDDSPath, 256, 256, 32,
@@ -165,9 +172,19 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             { 0.03f, 0.08f, 0.20f, 1.0f });
     }
 
-    auto groundTexture = render::CreateTexture2DFromDDSFile(
-        device.Device(), device.CmdList(),
-        groundDDSPath, groundTexUp, L"GroundAlbedoTexture");
+    render::Texture groundTexture;
+    if (fileExists(groundPNGPath))
+    {
+        groundTexture = render::CreateTexture2DFromWICFile(
+            device.Device(), device.CmdList(),
+            groundPNGPath, groundTexUp, L"GroundAlbedoTexture");
+    }
+    if (!groundTexture.IsValid())
+    {
+        groundTexture = render::CreateTexture2DFromDDSFile(
+            device.Device(), device.CmdList(),
+            groundDDSPath, groundTexUp, L"GroundAlbedoTexture");
+    }
     if (!groundTexture.IsValid())
     {
         auto groundTexPixels = render::GenerateCheckerTextureRGBA8(
@@ -181,9 +198,19 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     }
     groundTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundTexture);
 
-    auto cubeTexture = render::CreateTexture2DFromDDSFile(
-        device.Device(), device.CmdList(),
-        cubeDDSPath, cubeTexUp, L"BluePanelAlbedoTexture");
+    render::Texture cubeTexture;
+    if (fileExists(cubePNGPath))
+    {
+        cubeTexture = render::CreateTexture2DFromWICFile(
+            device.Device(), device.CmdList(),
+            cubePNGPath, cubeTexUp, L"BluePanelAlbedoTexture");
+    }
+    if (!cubeTexture.IsValid())
+    {
+        cubeTexture = render::CreateTexture2DFromDDSFile(
+            device.Device(), device.CmdList(),
+            cubeDDSPath, cubeTexUp, L"BluePanelAlbedoTexture");
+    }
     if (!cubeTexture.IsValid())
     {
         auto cubeTexPixels = render::GenerateCheckerTextureRGBA8(

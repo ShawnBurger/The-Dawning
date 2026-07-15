@@ -99,6 +99,7 @@ target_link_libraries(TheDawningV3 PRIVATE
     d3dcompiler
     dxguid
     gdi32
+    windowscodecs
 )
 
 # =============================================================================

@@ -57,11 +57,12 @@ Microsoft.Direct3D.DXC NuGet package.
 ## Material System Status
 
 Raster materials can bind one albedo texture per draw through texture handles in
-the resource manager. The current scene loads DDS albedo textures from
-`assets/textures/`; if the starter DDS files are missing from the executable
-directory, the app writes generated checker DDS files and loads those. PNG/KTX
-loading, full mip chains, bindless texture arrays, normal maps, and path-traced
-texture sampling are still upcoming Layer 4 work.
+the resource manager. The current scene first looks for PNG albedo textures in
+`assets/textures/` via Windows Imaging Component, then falls back to DDS files.
+If the starter DDS files are missing from the executable directory, the app
+writes generated checker DDS files and loads those. KTX loading, full mip
+chains, bindless texture arrays, normal maps, and path-traced texture sampling
+are still upcoming Layer 4 work.
 
 ## Runtime Controls
 
