@@ -16,7 +16,9 @@
 #include "rt_acceleration.h"
 #include "camera.h"
 #include "d3d12_device.h"
+#include "texture.h"
 #include "../core/types.h"
+#include <array>
 #include <cstdint>
 
 namespace render
@@ -64,6 +66,10 @@ public:
                   uint32_t instanceDataCount,
                   const RTTriangleNormalData* triangleNormals,
                   uint32_t triangleNormalCount,
+                  const RTTriangleUVData* triangleUVs,
+                  uint32_t triangleUVCount,
+                  const Texture* const* albedoTextures,
+                  uint32_t albedoTextureCount,
                   uint32_t instanceCount,
                   RTQualityMode qualityMode);
 
@@ -79,6 +85,11 @@ private:
     bool CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMaterials);
     bool EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount);
     bool EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount);
+    bool EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangleCount);
+    void ClearAlbedoTextureDescriptors(ID3D12Device5* device);
+    uint32_t UpdateAlbedoTextureDescriptors(ID3D12Device5* device,
+                                            const Texture* const* textures,
+                                            uint32_t textureCount);
 
     RTAcceleration m_accel;
     RTPipeline     m_pipeline;
@@ -91,6 +102,9 @@ private:
 
     // Descriptor heap for UAV
     ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
+    uint32_t m_srvUavDescSize = 0;
+    uint32_t m_boundAlbedoTextureCount = 0;
+    std::array<ID3D12Resource*, kMaxRTAlbedoTextures> m_boundAlbedoTextureResources = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
@@ -109,6 +123,10 @@ private:
     ComPtr<ID3D12Resource> m_triangleNormalBuffer;
     uint8_t* m_triangleNormalMapped = nullptr;
     uint32_t m_maxTriangleNormals = 0;
+
+    ComPtr<ID3D12Resource> m_triangleUVBuffer;
+    uint8_t* m_triangleUVMapped = nullptr;
+    uint32_t m_maxTriangleUVs = 0;
 
     core::Vec3f m_prevCameraPos = {};
     core::Vec3f m_prevCameraRight = {};

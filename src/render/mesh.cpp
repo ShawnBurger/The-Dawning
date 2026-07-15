@@ -103,14 +103,24 @@ static void StoreNormal(float out[4], const core::Vec3f& normal)
     out[3] = 0.0f;
 }
 
+static void StoreUV(float out[4], const core::Vec2f& uv)
+{
+    out[0] = uv.x;
+    out[1] = uv.y;
+    out[2] = 0.0f;
+    out[3] = 0.0f;
+}
+
 template <typename IndexT>
-static void BuildRTTriangleNormals(
+static void BuildRTTriangleMetadata(
     Mesh& mesh,
     const Vertex* vertices, uint32_t vertexCount,
     const IndexT* indices, uint32_t indexCount)
 {
     mesh.rtTriangleNormals.clear();
+    mesh.rtTriangleUVs.clear();
     mesh.rtTriangleNormals.reserve(indexCount / 3);
+    mesh.rtTriangleUVs.reserve(indexCount / 3);
 
     for (uint32_t i = 0; i + 2 < indexCount; i += 3)
     {
@@ -131,6 +141,12 @@ static void BuildRTTriangleNormals(
         StoreNormal(tri.n1, SafeNormal(v1.normal, faceNormal));
         StoreNormal(tri.n2, SafeNormal(v2.normal, faceNormal));
         mesh.rtTriangleNormals.push_back(tri);
+
+        RTTriangleUVData uv = {};
+        StoreUV(uv.uv0, v0.uv);
+        StoreUV(uv.uv1, v1.uv);
+        StoreUV(uv.uv2, v2.uv);
+        mesh.rtTriangleUVs.push_back(uv);
     }
 }
 
@@ -148,7 +164,7 @@ Mesh CreateMesh(
     Mesh mesh;
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
-    BuildRTTriangleNormals(mesh, vertices, vertexCount, indices, indexCount);
+    BuildRTTriangleMetadata(mesh, vertices, vertexCount, indices, indexCount);
 
     uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
     uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(uint16_t);
@@ -216,7 +232,7 @@ Mesh CreateMesh32(
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
     mesh.indexFormat = DXGI_FORMAT_R32_UINT;
-    BuildRTTriangleNormals(mesh, vertices, vertexCount, indices, indexCount);
+    BuildRTTriangleMetadata(mesh, vertices, vertexCount, indices, indexCount);
 
     uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
     uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(uint32_t);

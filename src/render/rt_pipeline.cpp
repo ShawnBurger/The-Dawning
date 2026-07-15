@@ -42,16 +42,18 @@ void RTPipeline::Shutdown()
 // Global Root Signature
 // =============================================================================
 // Layout:
-//   [0] SRV — TLAS (t0, space0)
-//   [1] UAV descriptor table — Output texture (u0, space0)
-//   [2] CBV — Per-frame constants (b0, space0)
-//   [3] SRV — Material StructuredBuffer (t1, space0)
-//   [4] SRV — Vertex buffers table (t0, space1) — for bindless vertex access
-//   [5] SRV — Index buffers table (t0, space2) — for bindless index access
+//   [0] SRV - TLAS (t0, space0)
+//   [1] UAV descriptor table - output textures (u0/u1, space0)
+//   [2] CBV - per-frame constants (b0, space0)
+//   [3] SRV - material StructuredBuffer (t1, space0)
+//   [4] SRV - triangle normal StructuredBuffer (t2, space0)
+//   [5] SRV - instance metadata StructuredBuffer (t3, space0)
+//   [6] SRV - triangle UV StructuredBuffer (t4, space0)
+//   [7] SRV descriptor table - albedo textures (t0, space4)
 // =============================================================================
 bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
 {
-    D3D12_ROOT_PARAMETER rootParams[6] = {};
+    D3D12_ROOT_PARAMETER rootParams[8] = {};
 
     // Slot 0: TLAS SRV (t0)
     rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -96,12 +98,46 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[5].Descriptor.RegisterSpace  = 0;
     rootParams[5].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
+    // Slot 6: Triangle UV StructuredBuffer SRV (t4)
+    rootParams[6].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[6].Descriptor.ShaderRegister = 4;
+    rootParams[6].Descriptor.RegisterSpace  = 0;
+    rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Slot 7: Albedo texture descriptor table (t0, space4)
+    D3D12_DESCRIPTOR_RANGE textureRange = {};
+    textureRange.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRange.NumDescriptors     = kMaxRTAlbedoTextures;
+    textureRange.BaseShaderRegister = 0;
+    textureRange.RegisterSpace      = 4;
+    textureRange.OffsetInDescriptorsFromTableStart = 0;
+
+    rootParams[7].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[7].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[7].DescriptorTable.pDescriptorRanges   = &textureRange;
+    rootParams[7].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.MipLODBias       = 0.0f;
+    sampler.MaxAnisotropy    = 1;
+    sampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+    sampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    sampler.MinLOD           = 0.0f;
+    sampler.MaxLOD           = D3D12_FLOAT32_MAX;
+    sampler.ShaderRegister   = 0;
+    sampler.RegisterSpace    = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root signature description
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
     rsDesc.NumParameters     = _countof(rootParams);
     rsDesc.pParameters       = rootParams;
-    rsDesc.NumStaticSamplers = 0;
-    rsDesc.pStaticSamplers   = nullptr;
+    rsDesc.NumStaticSamplers = 1;
+    rsDesc.pStaticSamplers   = &sampler;
     rsDesc.Flags             = D3D12_ROOT_SIGNATURE_FLAG_NONE; // No IA for RT
 
     ComPtr<ID3DBlob> sigBlob, errorBlob;
@@ -125,7 +161,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     }
 
     m_globalRootSig->SetName(L"RT_GlobalRootSig");
-    core::Log::Info("RT global root signature created (6 params: TLAS, 2 UAVs, CB, Materials, Normals, Instances)");
+    core::Log::Info("RT global root signature created (8 params: TLAS, UAVs, CB, materials, normals, instances, UVs, albedo textures)");
     return true;
 }
 
@@ -187,7 +223,7 @@ bool RTPipeline::CreateStateObject(ID3D12Device5* device)
 
     // --- 4. Shader Config (payload + attribute size) ---
     D3D12_RAYTRACING_SHADER_CONFIG shaderConfig = {};
-    shaderConfig.MaxPayloadSizeInBytes   = 32; // float3 color + float hitDist + uint flags
+    shaderConfig.MaxPayloadSizeInBytes   = 48; // hit distance, normal, UV, instance ID
     shaderConfig.MaxAttributeSizeInBytes = 8;  // float2 barycentrics (built-in triangles)
 
     subobjects[idx].Type  = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;

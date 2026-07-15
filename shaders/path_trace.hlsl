@@ -43,7 +43,8 @@ struct MaterialData
     float4 albedo;
     float  roughness;
     float  metallic;
-    float2 pad;
+    uint   albedoTextureIndex;
+    uint   useAlbedoTexture;
 };
 StructuredBuffer<MaterialData> g_Materials : register(t1, space0);
 
@@ -58,19 +59,32 @@ StructuredBuffer<TriangleNormalData> g_TriangleNormals : register(t2, space0);
 struct InstanceData
 {
     uint  triangleNormalOffset;
-    uint3 pad;
+    uint  triangleUVOffset;
+    uint2 pad;
 };
 StructuredBuffer<InstanceData> g_InstanceData : register(t3, space0);
+
+struct TriangleUVData
+{
+    float4 uv0;
+    float4 uv1;
+    float4 uv2;
+};
+StructuredBuffer<TriangleUVData> g_TriangleUVs : register(t4, space0);
+
+Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
+SamplerState g_TextureSampler : register(s0, space0);
 
 // =============================================================================
 // Ray payload structures
 // =============================================================================
 struct RayPayload
 {
-    float3 color;
     float  hitT;
     float3 normal;
+    float2 uv;
     uint   instanceID;
+    uint   pad;
 };
 
 struct ShadowPayload
@@ -192,6 +206,17 @@ float3 ClampFireflySample(float3 sampleRadiance, float3 previousRadiance, uint f
     return sampleRadiance;
 }
 
+float3 ResolveAlbedo(MaterialData mat, float2 uv)
+{
+    float3 albedo = mat.albedo.rgb;
+    if (mat.useAlbedoTexture != 0 && mat.albedoTextureIndex < 64)
+    {
+        uint textureIndex = NonUniformResourceIndex(mat.albedoTextureIndex);
+        albedo *= g_AlbedoTextures[textureIndex].SampleLevel(g_TextureSampler, uv, 0.0f).rgb;
+    }
+    return saturate(albedo);
+}
+
 // =============================================================================
 // Ray Generation Shader
 // =============================================================================
@@ -258,10 +283,11 @@ void RayGen()
         ray.TMax      = 10000.0f;
 
         RayPayload payload;
-        payload.color      = float3(0, 0, 0);
         payload.hitT       = -1.0f;
         payload.normal     = float3(0, 0, 0);
+        payload.uv         = float2(0, 0);
         payload.instanceID = 0;
+        payload.pad        = 0;
 
         TraceRay(g_Scene,
             RAY_FLAG_NONE,
@@ -280,6 +306,7 @@ void RayGen()
 
         // Get material for this instance
         MaterialData mat = g_Materials[payload.instanceID];
+        float3 albedo = ResolveAlbedo(mat, payload.uv);
         float3 hitPos = currentOrigin + currentDir * payload.hitT;
         float3 N = normalize(payload.normal);
         float3 V = -currentDir;
@@ -319,14 +346,14 @@ void RayGen()
                 float NdotV = saturate(dot(N, V));
                 float VdotH = saturate(dot(V, H));
 
-                float3 F0 = lerp(float3(0.04, 0.04, 0.04), mat.albedo.rgb, mat.metallic);
+                float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
                 float3 F  = FresnelSchlick(VdotH, F0);
                 float  D  = DistributionGGX(NdotH, mat.roughness);
                 float  G  = GeometrySmith(NdotV, NdotL, mat.roughness);
 
                 float3 specular = (D * G * F) / (4.0f * NdotV * NdotL + 0.0001f);
                 float3 kD = (1.0f - F) * (1.0f - mat.metallic);
-                float3 diffuse = kD * mat.albedo.rgb / PI;
+                float3 diffuse = kD * albedo / PI;
 
                 float3 directLight = (diffuse + specular) * g_LightColor.rgb * NdotL;
                 radiance += throughput * directLight * shadowPayload.shadowFactor;
@@ -337,9 +364,9 @@ void RayGen()
         {
             // Stable preview fill: approximate missing diffuse GI and sky reflection
             // without tracing another noisy secondary bounce.
-            float3 envDiffuse = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
+            float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
             float3 envReflection = SkyRadiance(reflect(-V, N));
-            float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), mat.albedo.rgb, mat.metallic);
+            float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, mat.metallic);
             float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
             float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
             float3 envSpecular = envReflection * envF * envGloss;
@@ -347,7 +374,7 @@ void RayGen()
         }
         else
         {
-            float3 ambient = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic);
+            float3 ambient = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic);
             radiance += throughput * ambient * (bounce == 0 ? 0.3f : 0.1f);
         }
 
@@ -371,10 +398,10 @@ void RayGen()
             newDir = SampleCosineHemisphere(u, N);
 
             // Update throughput
-            float3 F0 = lerp(float3(0.04, 0.04, 0.04), mat.albedo.rgb, mat.metallic);
+            float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
             float3 F = FresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
             float3 kD = (1.0f - F) * (1.0f - mat.metallic);
-            throughput *= kD * mat.albedo.rgb;
+            throughput *= kD * albedo;
         }
         else
         {
@@ -385,7 +412,7 @@ void RayGen()
             // Lerp toward perfect reflection based on roughness
             newDir = normalize(lerp(reflected, newDir, mat.roughness * mat.roughness));
 
-            float3 F0 = lerp(float3(0.04, 0.04, 0.04), mat.albedo.rgb, mat.metallic);
+            float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
             float3 F = FresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
             throughput *= F;
         }
@@ -438,7 +465,9 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
 
     InstanceData instanceData = g_InstanceData[payload.instanceID];
     TriangleNormalData tri = g_TriangleNormals[instanceData.triangleNormalOffset + PrimitiveIndex()];
+    TriangleUVData triUV = g_TriangleUVs[instanceData.triangleUVOffset + PrimitiveIndex()];
     float3 objectNormal = normalize(tri.n0.xyz * bary.x + tri.n1.xyz * bary.y + tri.n2.xyz * bary.z);
+    float2 surfaceUV = triUV.uv0.xy * bary.x + triUV.uv1.xy * bary.y + triUV.uv2.xy * bary.z;
 
     float3x4 objToWorld = ObjectToWorld3x4();
     float3 worldNormal = normalize(float3(
@@ -452,7 +481,7 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         worldNormal = -worldNormal;
 
     payload.normal = worldNormal;
-    payload.color  = float3(1, 1, 1); // Color comes from material lookup in ray gen
+    payload.uv     = surfaceUV;
 }
 
 // =============================================================================
@@ -473,7 +502,6 @@ void ShadowClosestHit(inout ShadowPayload payload,
 void Miss(inout RayPayload payload)
 {
     payload.hitT  = -1.0f; // Signal miss
-    payload.color = float3(0, 0, 0);
 }
 
 // =============================================================================

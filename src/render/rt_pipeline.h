@@ -21,6 +21,8 @@ using Microsoft::WRL::ComPtr;
 namespace render
 {
 
+constexpr uint32_t kMaxRTAlbedoTextures = 64;
+
 // =============================================================================
 // Per-frame constants for the path tracer (uploaded each frame)
 // =============================================================================
@@ -51,7 +53,8 @@ struct RTMaterialData
     float albedo[4];
     float roughness;
     float metallic;
-    float pad[2];
+    uint32_t albedoTextureIndex;
+    uint32_t useAlbedoTexture;
 };
 
 // =============================================================================

@@ -61,9 +61,10 @@ the resource manager. The current scene first looks for PNG albedo textures in
 `assets/textures/` via Windows Imaging Component, then falls back to DDS files.
 If the starter DDS files are missing from the executable directory, the app
 writes generated checker DDS files and loads those. RGBA/WIC textures generate
-CPU mip chains, and DDS files upload all declared mip levels. KTX loading,
-bindless texture arrays, normal maps, and path-traced texture sampling are still
-upcoming Layer 4 work.
+CPU mip chains, and DDS files upload all declared mip levels. Raster and DXR
+path-traced materials now sample albedo textures from their respective texture
+tables. KTX loading, bindless texture arrays, and normal maps are still upcoming
+Layer 4 work.
 
 ## Runtime Controls
 

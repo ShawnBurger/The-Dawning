@@ -40,11 +40,21 @@ struct RTTriangleNormalData
     float n2[4];
 };
 
+// Per-triangle UVs consumed by the DXR closest-hit shader. These mirror the
+// triangle normal metadata so ray hits can reconstruct material texture coords.
+struct RTTriangleUVData
+{
+    float uv0[4];
+    float uv1[4];
+    float uv2[4];
+};
+
 // Per-TLAS-instance metadata consumed by the DXR closest-hit shader.
 struct RTInstanceData
 {
     uint32_t triangleNormalOffset = 0;
-    uint32_t pad[3] = {};
+    uint32_t triangleUVOffset = 0;
+    uint32_t pad[2] = {};
 };
 
 // Input layout description matching the Vertex struct
@@ -70,6 +80,7 @@ struct Mesh
     uint32_t vertexCount = 0;
     DXGI_FORMAT indexFormat = DXGI_FORMAT_R16_UINT; // R16_UINT or R32_UINT
     std::vector<RTTriangleNormalData> rtTriangleNormals;
+    std::vector<RTTriangleUVData> rtTriangleUVs;
 
     bool IsValid() const { return vertexBuffer && indexBuffer && indexCount > 0; }
 };

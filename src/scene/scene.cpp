@@ -235,7 +235,8 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device)
             continue;
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
-        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty())
+        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty() ||
+            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size())
             continue;
 
         uint32_t blasIdx = m_meshToBLAS[meshIdx];
@@ -294,8 +295,35 @@ void Scene::PathTraceEntities(
     std::vector<render::RTMaterialData> materials;
     std::vector<render::RTInstanceData> instanceData;
     std::vector<render::RTTriangleNormalData> triangleNormals;
+    std::vector<render::RTTriangleUVData> triangleUVs;
+    std::vector<const render::Texture*> albedoTextures;
     materials.reserve(meshPool->Count());
     instanceData.reserve(meshPool->Count());
+
+    auto resolveAlbedoTextureIndex = [&](uint32_t handleValue) -> uint32_t
+    {
+        if (handleValue == UINT32_MAX)
+            return UINT32_MAX;
+
+        const render::Texture* texture = m_resources.GetTexture(TextureHandle(handleValue));
+        if (!texture || !texture->IsValid())
+            return UINT32_MAX;
+
+        for (uint32_t i = 0; i < albedoTextures.size(); ++i)
+        {
+            if (albedoTextures[i] == texture)
+                return i;
+        }
+
+        if (albedoTextures.size() >= render::kMaxRTAlbedoTextures)
+        {
+            core::Log::Warn("Path tracer albedo texture table is full; material texture skipped");
+            return UINT32_MAX;
+        }
+
+        albedoTextures.push_back(texture);
+        return static_cast<uint32_t>(albedoTextures.size() - 1);
+    };
 
     for (uint32_t i = 0; i < meshPool->Count(); i++)
     {
@@ -313,10 +341,12 @@ void Scene::PathTraceEntities(
             continue;
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
-        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty())
+        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty() ||
+            gpuMesh->rtTriangleUVs.size() != gpuMesh->rtTriangleNormals.size())
             continue;
 
         const auto& mat = m_registry.GetByIndex<ecs::Material>(entityIdx);
+        const uint32_t albedoTextureIndex = resolveAlbedoTextureIndex(mat.albedoTextureHandle);
 
         render::RTMaterialData rtMat = {};
         rtMat.albedo[0]  = mat.albedo.r;
@@ -325,21 +355,29 @@ void Scene::PathTraceEntities(
         rtMat.albedo[3]  = mat.albedo.a;
         rtMat.roughness   = mat.roughness;
         rtMat.metallic    = mat.metallic;
+        rtMat.albedoTextureIndex = albedoTextureIndex == UINT32_MAX ? 0u : albedoTextureIndex;
+        rtMat.useAlbedoTexture = albedoTextureIndex == UINT32_MAX ? 0u : 1u;
         materials.push_back(rtMat);
 
         render::RTInstanceData rtInstance = {};
         rtInstance.triangleNormalOffset = static_cast<uint32_t>(triangleNormals.size());
+        rtInstance.triangleUVOffset = static_cast<uint32_t>(triangleUVs.size());
         instanceData.push_back(rtInstance);
 
         triangleNormals.insert(triangleNormals.end(),
                                gpuMesh->rtTriangleNormals.begin(),
                                gpuMesh->rtTriangleNormals.end());
+        triangleUVs.insert(triangleUVs.end(),
+                           gpuMesh->rtTriangleUVs.begin(),
+                           gpuMesh->rtTriangleUVs.end());
     }
 
     m_pathTracer.Dispatch(device, camera, lightDir, lightColor, ambientColor,
                           materials.data(), static_cast<uint32_t>(materials.size()),
                           instanceData.data(), static_cast<uint32_t>(instanceData.size()),
                           triangleNormals.data(), static_cast<uint32_t>(triangleNormals.size()),
+                          triangleUVs.data(), static_cast<uint32_t>(triangleUVs.size()),
+                          albedoTextures.data(), static_cast<uint32_t>(albedoTextures.size()),
                           static_cast<uint32_t>(materials.size()),
                           qualityMode);
 }
