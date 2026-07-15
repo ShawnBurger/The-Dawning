@@ -70,8 +70,9 @@ writes generated checker DDS files and loads those. RGBA/WIC textures generate
 CPU mip chains, and DDS files upload all declared mip levels. Raster and DXR
 path-traced materials now sample albedo textures from their respective texture
 tables. Raster and DXR materials can also bind normal maps; the demo scene
-currently uses procedural wave normal textures for the floor and cube. KTX
-loading and bindless texture arrays are still upcoming Layer 4 work.
+loads `ground_normal` / `cube_normal` PNG or DDS files when present and otherwise
+uses procedural wave normal textures for the floor and cube. KTX loading and
+bindless texture arrays are still upcoming Layer 4 work.
 
 ## Runtime Controls
 

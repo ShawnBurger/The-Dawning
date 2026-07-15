@@ -152,6 +152,10 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     const char* cubePNGPath = "assets\\textures\\blue_panels.png";
     const char* groundDDSPath = "assets\\textures\\ground_grid.dds";
     const char* cubeDDSPath = "assets\\textures\\blue_panels.dds";
+    const char* groundNormalPNGPath = "assets\\textures\\ground_normal.png";
+    const char* cubeNormalPNGPath = "assets\\textures\\cube_normal.png";
+    const char* groundNormalDDSPath = "assets\\textures\\ground_normal.dds";
+    const char* cubeNormalDDSPath = "assets\\textures\\cube_normal.dds";
     auto fileExists = [](const char* path) -> bool
     {
         DWORD attrs = GetFileAttributesA(path);
@@ -225,18 +229,50 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     }
     cubeTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeTexture);
 
-    auto groundNormalPixels = render::GenerateWaveNormalTextureRGBA8(512, 512, 8.0f, 0.008f);
-    render::Texture groundNormalTexture = render::CreateTexture2DFromRGBA8(
-        device.Device(), device.CmdList(),
-        groundNormalPixels.data(), 512, 512,
-        groundNormalTexUp, L"GroundNormalTexture");
+    render::Texture groundNormalTexture;
+    if (fileExists(groundNormalPNGPath))
+    {
+        groundNormalTexture = render::CreateTexture2DFromWICFile(
+            device.Device(), device.CmdList(),
+            groundNormalPNGPath, groundNormalTexUp, L"GroundNormalTexture");
+    }
+    if (!groundNormalTexture.IsValid() && fileExists(groundNormalDDSPath))
+    {
+        groundNormalTexture = render::CreateTexture2DFromDDSFile(
+            device.Device(), device.CmdList(),
+            groundNormalDDSPath, groundNormalTexUp, L"GroundNormalTexture");
+    }
+    if (!groundNormalTexture.IsValid())
+    {
+        auto groundNormalPixels = render::GenerateWaveNormalTextureRGBA8(512, 512, 8.0f, 0.008f);
+        groundNormalTexture = render::CreateTexture2DFromRGBA8(
+            device.Device(), device.CmdList(),
+            groundNormalPixels.data(), 512, 512,
+            groundNormalTexUp, L"GroundNormalTexture");
+    }
     groundNormalTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundNormalTexture);
 
-    auto cubeNormalPixels = render::GenerateWaveNormalTextureRGBA8(256, 256, 6.0f, 0.012f);
-    render::Texture cubeNormalTexture = render::CreateTexture2DFromRGBA8(
-        device.Device(), device.CmdList(),
-        cubeNormalPixels.data(), 256, 256,
-        cubeNormalTexUp, L"CubeNormalTexture");
+    render::Texture cubeNormalTexture;
+    if (fileExists(cubeNormalPNGPath))
+    {
+        cubeNormalTexture = render::CreateTexture2DFromWICFile(
+            device.Device(), device.CmdList(),
+            cubeNormalPNGPath, cubeNormalTexUp, L"CubeNormalTexture");
+    }
+    if (!cubeNormalTexture.IsValid() && fileExists(cubeNormalDDSPath))
+    {
+        cubeNormalTexture = render::CreateTexture2DFromDDSFile(
+            device.Device(), device.CmdList(),
+            cubeNormalDDSPath, cubeNormalTexUp, L"CubeNormalTexture");
+    }
+    if (!cubeNormalTexture.IsValid())
+    {
+        auto cubeNormalPixels = render::GenerateWaveNormalTextureRGBA8(256, 256, 6.0f, 0.012f);
+        cubeNormalTexture = render::CreateTexture2DFromRGBA8(
+            device.Device(), device.CmdList(),
+            cubeNormalPixels.data(), 256, 256,
+            cubeNormalTexUp, L"CubeNormalTexture");
+    }
     cubeNormalTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeNormalTexture);
 
     // Execute uploads
