@@ -31,6 +31,22 @@ struct Vertex
     core::Vec2f uv;
 };
 
+// Per-triangle normals consumed by the DXR closest-hit shader. Stored as
+// float4-aligned rows to keep the CPU/GPU structured-buffer layout simple.
+struct RTTriangleNormalData
+{
+    float n0[4];
+    float n1[4];
+    float n2[4];
+};
+
+// Per-TLAS-instance metadata consumed by the DXR closest-hit shader.
+struct RTInstanceData
+{
+    uint32_t triangleNormalOffset = 0;
+    uint32_t pad[3] = {};
+};
+
 // Input layout description matching the Vertex struct
 const D3D12_INPUT_ELEMENT_DESC kVertexLayout[] =
 {
@@ -53,6 +69,7 @@ struct Mesh
     uint32_t indexCount = 0;
     uint32_t vertexCount = 0;
     DXGI_FORMAT indexFormat = DXGI_FORMAT_R16_UINT; // R16_UINT or R32_UINT
+    std::vector<RTTriangleNormalData> rtTriangleNormals;
 
     bool IsValid() const { return vertexBuffer && indexBuffer && indexCount > 0; }
 };

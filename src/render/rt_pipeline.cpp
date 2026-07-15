@@ -51,7 +51,7 @@ void RTPipeline::Shutdown()
 // =============================================================================
 bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
 {
-    D3D12_ROOT_PARAMETER rootParams[4] = {};
+    D3D12_ROOT_PARAMETER rootParams[6] = {};
 
     // Slot 0: TLAS SRV (t0)
     rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -84,6 +84,18 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[3].Descriptor.RegisterSpace  = 0;
     rootParams[3].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
+    // Slot 4: Triangle normal StructuredBuffer SRV (t2)
+    rootParams[4].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[4].Descriptor.ShaderRegister = 2;
+    rootParams[4].Descriptor.RegisterSpace  = 0;
+    rootParams[4].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Slot 5: Instance metadata StructuredBuffer SRV (t3)
+    rootParams[5].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[5].Descriptor.ShaderRegister = 3;
+    rootParams[5].Descriptor.RegisterSpace  = 0;
+    rootParams[5].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root signature description
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
     rsDesc.NumParameters     = _countof(rootParams);
@@ -113,7 +125,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     }
 
     m_globalRootSig->SetName(L"RT_GlobalRootSig");
-    core::Log::Info("RT global root signature created (4 params: TLAS, UAV, CB, Materials)");
+    core::Log::Info("RT global root signature created (6 params: TLAS, UAV, CB, Materials, Normals, Instances)");
     return true;
 }
 

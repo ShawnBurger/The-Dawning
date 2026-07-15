@@ -86,6 +86,54 @@ static void UploadBufferData(
     cmdList->ResourceBarrier(1, &barrier);
 }
 
+static core::Vec3f SafeNormal(const core::Vec3f& normal, const core::Vec3f& fallback)
+{
+    if (normal.LengthSq() > 1e-8f)
+        return normal.Normalized();
+    if (fallback.LengthSq() > 1e-8f)
+        return fallback.Normalized();
+    return { 0.0f, 1.0f, 0.0f };
+}
+
+static void StoreNormal(float out[4], const core::Vec3f& normal)
+{
+    out[0] = normal.x;
+    out[1] = normal.y;
+    out[2] = normal.z;
+    out[3] = 0.0f;
+}
+
+template <typename IndexT>
+static void BuildRTTriangleNormals(
+    Mesh& mesh,
+    const Vertex* vertices, uint32_t vertexCount,
+    const IndexT* indices, uint32_t indexCount)
+{
+    mesh.rtTriangleNormals.clear();
+    mesh.rtTriangleNormals.reserve(indexCount / 3);
+
+    for (uint32_t i = 0; i + 2 < indexCount; i += 3)
+    {
+        uint32_t i0 = static_cast<uint32_t>(indices[i + 0]);
+        uint32_t i1 = static_cast<uint32_t>(indices[i + 1]);
+        uint32_t i2 = static_cast<uint32_t>(indices[i + 2]);
+
+        if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+            continue;
+
+        const Vertex& v0 = vertices[i0];
+        const Vertex& v1 = vertices[i1];
+        const Vertex& v2 = vertices[i2];
+
+        core::Vec3f faceNormal = (v1.position - v0.position).Cross(v2.position - v0.position);
+        RTTriangleNormalData tri = {};
+        StoreNormal(tri.n0, SafeNormal(v0.normal, faceNormal));
+        StoreNormal(tri.n1, SafeNormal(v1.normal, faceNormal));
+        StoreNormal(tri.n2, SafeNormal(v2.normal, faceNormal));
+        mesh.rtTriangleNormals.push_back(tri);
+    }
+}
+
 // =============================================================================
 // CreateMesh — upload vertices + indices to VRAM
 // =============================================================================
@@ -100,6 +148,7 @@ Mesh CreateMesh(
     Mesh mesh;
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
+    BuildRTTriangleNormals(mesh, vertices, vertexCount, indices, indexCount);
 
     uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
     uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(uint16_t);
@@ -167,6 +216,7 @@ Mesh CreateMesh32(
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
     mesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    BuildRTTriangleNormals(mesh, vertices, vertexCount, indices, indexCount);
 
     uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
     uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(uint32_t);

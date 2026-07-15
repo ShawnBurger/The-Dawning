@@ -43,6 +43,10 @@ public:
                   const core::Vec3f& ambientColor,
                   const RTMaterialData* materials,
                   uint32_t materialCount,
+                  const RTInstanceData* instanceData,
+                  uint32_t instanceDataCount,
+                  const RTTriangleNormalData* triangleNormals,
+                  uint32_t triangleNormalCount,
                   uint32_t instanceCount);
 
     // Copy the RT output to the back buffer for display
@@ -55,6 +59,8 @@ private:
     bool CreateDescriptorHeap(ID3D12Device5* device);
     bool CreateConstantBuffer(ID3D12Device5* device);
     bool CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMaterials);
+    bool EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount);
+    bool EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount);
 
     RTAcceleration m_accel;
     RTPipeline     m_pipeline;
@@ -75,6 +81,15 @@ private:
     ComPtr<ID3D12Resource> m_materialBuffer;
     uint8_t* m_materialMapped = nullptr;
     uint32_t m_maxMaterials = 0;
+
+    // Geometry metadata consumed by closest-hit shaders
+    ComPtr<ID3D12Resource> m_instanceDataBuffer;
+    uint8_t* m_instanceDataMapped = nullptr;
+    uint32_t m_maxInstanceData = 0;
+
+    ComPtr<ID3D12Resource> m_triangleNormalBuffer;
+    uint8_t* m_triangleNormalMapped = nullptr;
+    uint32_t m_maxTriangleNormals = 0;
 
     uint32_t m_frameIndex = 0;
     bool     m_initialized = false;

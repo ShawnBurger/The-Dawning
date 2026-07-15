@@ -221,11 +221,16 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device)
 
         if (!meshInst.visible) continue;
         if (!m_registry.HasByIndex<ecs::Transform>(entityIdx)) continue;
+        if (!m_registry.HasByIndex<ecs::Material>(entityIdx)) continue;
 
         MeshHandle handle(meshInst.meshHandle);
         uint32_t meshIdx = handle.Index();
 
         if (meshIdx >= m_meshToBLAS.size() || m_meshToBLAS[meshIdx] == UINT32_MAX)
+            continue;
+
+        const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
+        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty())
             continue;
 
         uint32_t blasIdx = m_meshToBLAS[meshIdx];
@@ -281,7 +286,10 @@ void Scene::PathTraceEntities(
     if (!meshPool) return;
 
     std::vector<render::RTMaterialData> materials;
+    std::vector<render::RTInstanceData> instanceData;
+    std::vector<render::RTTriangleNormalData> triangleNormals;
     materials.reserve(meshPool->Count());
+    instanceData.reserve(meshPool->Count());
 
     for (uint32_t i = 0; i < meshPool->Count(); i++)
     {
@@ -291,6 +299,16 @@ void Scene::PathTraceEntities(
         if (!meshInst.visible) continue;
         if (!m_registry.HasByIndex<ecs::Transform>(entityIdx)) continue;
         if (!m_registry.HasByIndex<ecs::Material>(entityIdx)) continue;
+
+        MeshHandle handle(meshInst.meshHandle);
+        uint32_t meshIdx = handle.Index();
+
+        if (meshIdx >= m_meshToBLAS.size() || m_meshToBLAS[meshIdx] == UINT32_MAX)
+            continue;
+
+        const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
+        if (!gpuMesh || gpuMesh->rtTriangleNormals.empty())
+            continue;
 
         const auto& mat = m_registry.GetByIndex<ecs::Material>(entityIdx);
 
@@ -302,10 +320,20 @@ void Scene::PathTraceEntities(
         rtMat.roughness   = mat.roughness;
         rtMat.metallic    = mat.metallic;
         materials.push_back(rtMat);
+
+        render::RTInstanceData rtInstance = {};
+        rtInstance.triangleNormalOffset = static_cast<uint32_t>(triangleNormals.size());
+        instanceData.push_back(rtInstance);
+
+        triangleNormals.insert(triangleNormals.end(),
+                               gpuMesh->rtTriangleNormals.begin(),
+                               gpuMesh->rtTriangleNormals.end());
     }
 
     m_pathTracer.Dispatch(device, camera, lightDir, lightColor, ambientColor,
                           materials.data(), static_cast<uint32_t>(materials.size()),
+                          instanceData.data(), static_cast<uint32_t>(instanceData.size()),
+                          triangleNormals.data(), static_cast<uint32_t>(triangleNormals.size()),
                           static_cast<uint32_t>(materials.size()));
 }
 

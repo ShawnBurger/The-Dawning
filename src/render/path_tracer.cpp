@@ -9,6 +9,49 @@
 namespace render
 {
 
+static bool CreateMappedUploadBuffer(
+    ID3D12Device5* device,
+    uint64_t byteSize,
+    const wchar_t* name,
+    ComPtr<ID3D12Resource>& buffer,
+    uint8_t** mapped)
+{
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = byteSize;
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE,
+        &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&buffer));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create RT upload buffer '%ls': 0x%08X", name, hr);
+        return false;
+    }
+
+    buffer->SetName(name);
+    D3D12_RANGE readRange = { 0, 0 };
+    hr = buffer->Map(0, &readRange, reinterpret_cast<void**>(mapped));
+    if (FAILED(hr) || !*mapped)
+    {
+        core::Log::Errorf("Failed to map RT upload buffer '%ls': 0x%08X", name, hr);
+        buffer.Reset();
+        return false;
+    }
+
+    return true;
+}
+
 // =============================================================================
 // Init / Shutdown
 // =============================================================================
@@ -51,14 +94,30 @@ void PathTracer::Shutdown()
         m_materialMapped = nullptr;
     }
 
+    if (m_instanceDataBuffer && m_instanceDataMapped)
+    {
+        m_instanceDataBuffer->Unmap(0, nullptr);
+        m_instanceDataMapped = nullptr;
+    }
+
+    if (m_triangleNormalBuffer && m_triangleNormalMapped)
+    {
+        m_triangleNormalBuffer->Unmap(0, nullptr);
+        m_triangleNormalMapped = nullptr;
+    }
+
     m_pipeline.Shutdown();
     m_accel.Shutdown();
 
     m_outputTexture.Reset();
     m_srvUavHeap.Reset();
     m_materialBuffer.Reset();
+    m_instanceDataBuffer.Reset();
+    m_triangleNormalBuffer.Reset();
     for (auto& cb : m_constantBuffer) cb.Reset();
 
+    m_maxInstanceData = 0;
+    m_maxTriangleNormals = 0;
     m_initialized = false;
     core::Log::Info("PathTracer shut down");
 }
@@ -214,6 +273,42 @@ bool PathTracer::CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMateria
 // =============================================================================
 // Dispatch — execute the path tracer for one frame
 // =============================================================================
+bool PathTracer::EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount)
+{
+    if (instanceCount == 0) return false;
+    if (m_instanceDataBuffer && instanceCount <= m_maxInstanceData) return true;
+
+    if (m_instanceDataBuffer && m_instanceDataMapped)
+    {
+        m_instanceDataBuffer->Unmap(0, nullptr);
+        m_instanceDataMapped = nullptr;
+    }
+    m_instanceDataBuffer.Reset();
+
+    m_maxInstanceData = instanceCount + 64;
+    uint64_t bufSize = sizeof(RTInstanceData) * static_cast<uint64_t>(m_maxInstanceData);
+    return CreateMappedUploadBuffer(device, bufSize, L"RT_InstanceDataBuffer",
+                                    m_instanceDataBuffer, &m_instanceDataMapped);
+}
+
+bool PathTracer::EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount)
+{
+    if (triangleCount == 0) return false;
+    if (m_triangleNormalBuffer && triangleCount <= m_maxTriangleNormals) return true;
+
+    if (m_triangleNormalBuffer && m_triangleNormalMapped)
+    {
+        m_triangleNormalBuffer->Unmap(0, nullptr);
+        m_triangleNormalMapped = nullptr;
+    }
+    m_triangleNormalBuffer.Reset();
+
+    m_maxTriangleNormals = triangleCount + 256;
+    uint64_t bufSize = sizeof(RTTriangleNormalData) * static_cast<uint64_t>(m_maxTriangleNormals);
+    return CreateMappedUploadBuffer(device, bufSize, L"RT_TriangleNormalBuffer",
+                                    m_triangleNormalBuffer, &m_triangleNormalMapped);
+}
+
 void PathTracer::Dispatch(
     D3D12Device& device,
     const Camera& camera,
@@ -222,10 +317,13 @@ void PathTracer::Dispatch(
     const core::Vec3f& ambientColor,
     const RTMaterialData* materials,
     uint32_t materialCount,
+    const RTInstanceData* instanceData,
+    uint32_t instanceDataCount,
+    const RTTriangleNormalData* triangleNormals,
+    uint32_t triangleNormalCount,
     uint32_t instanceCount)
 {
     if (!m_initialized) return;
-    (void)instanceCount;
 
     if (!m_accel.GetTLASAddress())
     {
@@ -236,6 +334,19 @@ void PathTracer::Dispatch(
     if (!m_pipeline.HasShaderTable())
     {
         core::Log::Error("PathTracer dispatch skipped: shader table is not built");
+        return;
+    }
+
+    if (materialCount != instanceCount || instanceDataCount != instanceCount)
+    {
+        core::Log::Errorf("PathTracer dispatch skipped: instance data mismatch (instances=%u materials=%u metadata=%u)",
+                          instanceCount, materialCount, instanceDataCount);
+        return;
+    }
+
+    if (!materials || !instanceData || !triangleNormals || triangleNormalCount == 0)
+    {
+        core::Log::Error("PathTracer dispatch skipped: missing RT scene metadata");
         return;
     }
 
@@ -287,6 +398,16 @@ void PathTracer::Dispatch(
     if (matCount > 0 && materials)
         memcpy(m_materialMapped, materials, sizeof(RTMaterialData) * matCount);
 
+    if (!EnsureInstanceDataBuffer(device.Device5(), instanceDataCount) ||
+        !EnsureTriangleNormalBuffer(device.Device5(), triangleNormalCount))
+    {
+        core::Log::Error("PathTracer dispatch skipped: failed to prepare RT geometry buffers");
+        return;
+    }
+
+    memcpy(m_instanceDataMapped, instanceData, sizeof(RTInstanceData) * instanceDataCount);
+    memcpy(m_triangleNormalMapped, triangleNormals, sizeof(RTTriangleNormalData) * triangleNormalCount);
+
     // --- Set up for DispatchRays ---
     cmd->SetComputeRootSignature(m_pipeline.GetGlobalRootSig());
     cmd->SetPipelineState1(m_pipeline.GetStateObject());
@@ -307,6 +428,12 @@ void PathTracer::Dispatch(
     // [3] Material buffer
     cmd->SetComputeRootShaderResourceView(3,
         m_materialBuffer->GetGPUVirtualAddress());
+    // [4] Triangle normal buffer
+    cmd->SetComputeRootShaderResourceView(4,
+        m_triangleNormalBuffer->GetGPUVirtualAddress());
+    // [5] Instance metadata buffer
+    cmd->SetComputeRootShaderResourceView(5,
+        m_instanceDataBuffer->GetGPUVirtualAddress());
 
     // --- DispatchRays ---
     D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};

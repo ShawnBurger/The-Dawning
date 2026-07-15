@@ -43,6 +43,21 @@ struct MaterialData
 };
 StructuredBuffer<MaterialData> g_Materials : register(t1, space0);
 
+struct TriangleNormalData
+{
+    float4 n0;
+    float4 n1;
+    float4 n2;
+};
+StructuredBuffer<TriangleNormalData> g_TriangleNormals : register(t2, space0);
+
+struct InstanceData
+{
+    uint  triangleNormalOffset;
+    uint3 pad;
+};
+StructuredBuffer<InstanceData> g_InstanceData : register(t3, space0);
+
 // =============================================================================
 // Ray payload structures
 // =============================================================================
@@ -349,30 +364,22 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     payload.hitT       = RayTCurrent();
     payload.instanceID = InstanceID();
 
-    // Compute interpolated normal from barycentrics
-    // For now, use the geometry normal (flat shading)
-    // TODO: access vertex normals via bindless vertex buffer
     float3 bary = float3(
         1.0f - attribs.barycentrics.x - attribs.barycentrics.y,
         attribs.barycentrics.x,
         attribs.barycentrics.y
     );
 
-    // Compute geometric normal from triangle edges
-    // Using ObjectRayDirection and the hit transforms
-    float3 worldNormal = float3(0, 1, 0); // Fallback — will be replaced by vertex normal lookup
+    InstanceData instanceData = g_InstanceData[payload.instanceID];
+    TriangleNormalData tri = g_TriangleNormals[instanceData.triangleNormalOffset + PrimitiveIndex()];
+    float3 objectNormal = normalize(tri.n0.xyz * bary.x + tri.n1.xyz * bary.y + tri.n2.xyz * bary.z);
 
-    // For triangle primitives, we can compute the face normal from the
-    // object-to-world transform and the hit position
-    // Simple approximation: use the instance transform's up vector
     float3x4 objToWorld = ObjectToWorld3x4();
-
-    // Extract normal from the world-space hit
-    // This is approximate for non-planar geometry
-    // A proper implementation reads vertex normals from a ByteAddressBuffer
-    float3 edge1 = float3(objToWorld[0][0], objToWorld[1][0], objToWorld[2][0]);
-    float3 edge2 = float3(objToWorld[0][1], objToWorld[1][1], objToWorld[2][1]);
-    worldNormal = normalize(cross(edge1, edge2));
+    float3 worldNormal = normalize(float3(
+        dot(objToWorld[0].xyz, objectNormal),
+        dot(objToWorld[1].xyz, objectNormal),
+        dot(objToWorld[2].xyz, objectNormal)
+    ));
 
     // If the normal faces away from the ray, flip it
     if (dot(worldNormal, WorldRayDirection()) > 0)
