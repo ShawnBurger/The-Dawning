@@ -22,6 +22,12 @@
 namespace render
 {
 
+enum class RTQualityMode : uint32_t
+{
+    StablePreview = 0,
+    FullPathTrace = 1
+};
+
 class PathTracer
 {
 public:
@@ -47,7 +53,8 @@ public:
                   uint32_t instanceDataCount,
                   const RTTriangleNormalData* triangleNormals,
                   uint32_t triangleNormalCount,
-                  uint32_t instanceCount);
+                  uint32_t instanceCount,
+                  RTQualityMode qualityMode);
 
     // Copy the RT output to the back buffer for display
     void CopyToBackBuffer(D3D12Device& device);
@@ -96,9 +103,13 @@ private:
     core::Vec3f m_prevCameraRight = {};
     core::Vec3f m_prevCameraUp = {};
     core::Vec3f m_prevCameraForward = {};
+    RTQualityMode m_prevQualityMode = RTQualityMode::StablePreview;
+    uint32_t m_prevSamplesPerPixel = 0;
+    uint32_t m_prevMaxBounces = 0;
     uint32_t m_accumFrameIndex = 0;
     uint32_t m_frameIndex = 0;
     bool     m_hasPrevCamera = false;
+    bool     m_hasPrevQuality = false;
     bool     m_initialized = false;
 };
 

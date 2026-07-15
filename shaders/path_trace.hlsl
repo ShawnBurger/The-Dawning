@@ -33,6 +33,9 @@ cbuffer PerFrameConstants : register(b0, space0)
     uint     g_MaxBounces;
     uint     g_RenderWidth;
     uint     g_RenderHeight;
+    uint     g_SamplesPerPixel;
+    uint     g_StablePreview;
+    uint2    g_Pad;
 };
 
 struct MaterialData
@@ -201,10 +204,10 @@ void RayGen()
     // Initialize RNG
     uint rngState = InitRNG(launchIndex, g_FrameIndex);
 
-    const uint SAMPLES_PER_PIXEL = 8;
+    uint samplesPerPixel = max(g_SamplesPerPixel, 1u);
     float3 frameRadiance = float3(0, 0, 0);
 
-    for (uint sampleIndex = 0; sampleIndex < SAMPLES_PER_PIXEL; sampleIndex++)
+    for (uint sampleIndex = 0; sampleIndex < samplesPerPixel; sampleIndex++)
     {
 
     // Compute ray direction from pixel coordinates
@@ -330,15 +333,23 @@ void RayGen()
             }
         }
 
-        // Stable preview fill: approximate missing diffuse GI and sky reflection
-        // without tracing another noisy secondary bounce.
-        float3 envDiffuse = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
-        float3 envReflection = SkyRadiance(reflect(-V, N));
-        float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), mat.albedo.rgb, mat.metallic);
-        float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
-        float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
-        float3 envSpecular = envReflection * envF * envGloss;
-        radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
+        if (g_StablePreview != 0)
+        {
+            // Stable preview fill: approximate missing diffuse GI and sky reflection
+            // without tracing another noisy secondary bounce.
+            float3 envDiffuse = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
+            float3 envReflection = SkyRadiance(reflect(-V, N));
+            float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), mat.albedo.rgb, mat.metallic);
+            float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
+            float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
+            float3 envSpecular = envReflection * envF * envGloss;
+            radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
+        }
+        else
+        {
+            float3 ambient = mat.albedo.rgb * g_AmbientColor.rgb * (1.0f - mat.metallic);
+            radiance += throughput * ambient * (bounce == 0 ? 0.3f : 0.1f);
+        }
 
         if (bounce + 1 >= g_MaxBounces)
             break;
@@ -400,15 +411,11 @@ void RayGen()
     frameRadiance += radiance;
     }
 
-    float3 radiance = frameRadiance / float(SAMPLES_PER_PIXEL);
+    float3 radiance = frameRadiance / float(samplesPerPixel);
 
     // Accumulate linear HDR radiance; tone mapping happens only for display.
-    float4 prevHistory = g_Output[launchIndex];
-    float3 filteredRadiance = ClampFireflySample(radiance, prevHistory.rgb, g_FrameIndex);
-    float blend = (g_FrameIndex < 32) ? (1.0f / float(g_FrameIndex + 1)) : 0.04f;
-    float3 accumulatedRadiance = (g_FrameIndex == 0)
-        ? filteredRadiance
-        : lerp(prevHistory.rgb, filteredRadiance, blend);
+    float3 filteredRadiance = ClampFireflySample(radiance, g_Output[launchIndex].rgb, g_FrameIndex);
+    float3 accumulatedRadiance = filteredRadiance;
 
     g_Output[launchIndex] = float4(accumulatedRadiance, 1.0f);
     g_DisplayOutput[launchIndex] = float4(ToneMapForOutput(accumulatedRadiance), 1.0f);

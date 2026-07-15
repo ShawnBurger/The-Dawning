@@ -57,6 +57,20 @@ static bool HasVectorChanged(const core::Vec3f& a, const core::Vec3f& b, float e
     return (a - b).LengthSq() > epsilon * epsilon;
 }
 
+struct RTQualitySettings
+{
+    uint32_t samplesPerPixel = 8;
+    uint32_t maxBounces = 1;
+    uint32_t stablePreview = 1;
+};
+
+static RTQualitySettings GetQualitySettings(RTQualityMode mode)
+{
+    if (mode == RTQualityMode::FullPathTrace)
+        return { 4, 3, 0 };
+    return { 8, 1, 1 };
+}
+
 // =============================================================================
 // Init / Shutdown
 // =============================================================================
@@ -126,6 +140,7 @@ void PathTracer::Shutdown()
     m_maxTriangleNormals = 0;
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
+    m_hasPrevQuality = false;
     m_initialized = false;
     core::Log::Info("PathTracer shut down");
 }
@@ -227,6 +242,7 @@ void PathTracer::Resize(ID3D12Device5* device, uint32_t width, uint32_t height)
     CreateOutputTexture(device, width, height);
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
+    m_hasPrevQuality = false;
 }
 
 // =============================================================================
@@ -353,9 +369,11 @@ void PathTracer::Dispatch(
     uint32_t instanceDataCount,
     const RTTriangleNormalData* triangleNormals,
     uint32_t triangleNormalCount,
-    uint32_t instanceCount)
+    uint32_t instanceCount,
+    RTQualityMode qualityMode)
 {
     if (!m_initialized) return;
+    RTQualitySettings quality = GetQualitySettings(qualityMode);
 
     if (!m_accel.GetTLASAddress())
     {
@@ -416,7 +434,12 @@ void PathTracer::Dispatch(
         HasVectorChanged(camUp, m_prevCameraUp) ||
         HasVectorChanged(camForward, m_prevCameraForward);
 
-    if (cameraChanged)
+    bool qualityChanged = !m_hasPrevQuality ||
+        qualityMode != m_prevQualityMode ||
+        quality.samplesPerPixel != m_prevSamplesPerPixel ||
+        quality.maxBounces != m_prevMaxBounces;
+
+    if (cameraChanged || qualityChanged)
     {
         m_accumFrameIndex = 0;
     }
@@ -430,6 +453,10 @@ void PathTracer::Dispatch(
     m_prevCameraUp = camUp;
     m_prevCameraForward = camForward;
     m_hasPrevCamera = true;
+    m_prevQualityMode = qualityMode;
+    m_prevSamplesPerPixel = quality.samplesPerPixel;
+    m_prevMaxBounces = quality.maxBounces;
+    m_hasPrevQuality = true;
 
     cb.cameraPos[0] = camPos.x; cb.cameraPos[1] = camPos.y; cb.cameraPos[2] = camPos.z;
     cb.cameraRight[0] = camRight.x; cb.cameraRight[1] = camRight.y; cb.cameraRight[2] = camRight.z;
@@ -440,9 +467,11 @@ void PathTracer::Dispatch(
     cb.ambientColor[0] = ambientColor.x; cb.ambientColor[1] = ambientColor.y; cb.ambientColor[2] = ambientColor.z;
 
     cb.frameIndex    = m_accumFrameIndex;
-    cb.maxBounces    = 1;
+    cb.maxBounces    = quality.maxBounces;
     cb.renderWidth   = m_outputWidth;
     cb.renderHeight  = m_outputHeight;
+    cb.samplesPerPixel = quality.samplesPerPixel;
+    cb.stablePreview = quality.stablePreview;
 
     memcpy(m_cbMapped[m_frameIndex], &cb, sizeof(cb));
 

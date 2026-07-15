@@ -194,6 +194,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     bool usePathTracing = false;
     bool rtAvailable = false;
     bool rtInitAttempted = false;
+    render::RTQualityMode rtQualityMode = render::RTQualityMode::StablePreview;
 
     core::Log::Info("Path tracing will initialize on first F1 press");
 
@@ -228,6 +229,15 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
 
         if (input.mouse.buttonPressed[0] && !window.IsCaptured())
             window.CaptureMouse();
+
+        if (input.KeyPressed(VK_F2))
+        {
+            rtQualityMode = (rtQualityMode == render::RTQualityMode::StablePreview)
+                ? render::RTQualityMode::FullPathTrace
+                : render::RTQualityMode::StablePreview;
+            core::Log::Infof("RT quality mode: %s",
+                rtQualityMode == render::RTQualityMode::StablePreview ? "STABLE PREVIEW" : "FULL PATH TRACE");
+        }
 
         // F1: initialize/toggle path tracing
         if (input.KeyPressed(VK_F1))
@@ -272,10 +282,14 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
         if (titleTimer >= 0.5f)
         {
             titleTimer = 0.0f;
-            char title[128];
-            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s [F1 toggle]",
+            const char* qualityName = rtQualityMode == render::RTQualityMode::StablePreview
+                ? "STABLE" : "FULL";
+            char title[160];
+            snprintf(title, sizeof(title), "The Dawning V3 | %.1f fps | %u entities | %s%s%s [F1 render | F2 quality]",
                      ts.fps, gameScene.EntityCount(),
-                     usePathTracing ? "PATH TRACING" : "RASTERIZED");
+                     usePathTracing ? "PATH TRACING" : "RASTERIZED",
+                     usePathTracing ? " " : "",
+                     usePathTracing ? qualityName : "");
             SetWindowTextA(window.GetHWND(), title);
         }
 
@@ -341,7 +355,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
             core::Vec3f lightDir = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
             core::Vec3f lightColor = { 1.0f, 0.97f, 0.92f };
             core::Vec3f ambientColor = { 0.12f, 0.14f, 0.22f };
-            gameScene.PathTraceEntities(device, camera, lightDir, lightColor, ambientColor);
+            gameScene.PathTraceEntities(device, camera, lightDir, lightColor, ambientColor, rtQualityMode);
 
             // Copy RT output to back buffer and transition to PRESENT
             gameScene.CopyPathTraceToBackBuffer(device);

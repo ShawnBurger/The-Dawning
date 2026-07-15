@@ -38,6 +38,9 @@ struct RTPerFrameConstants
     uint32_t maxBounces;         // Max path tracing bounces
     uint32_t renderWidth;        // Output texture width
     uint32_t renderHeight;       // Output texture height
+    uint32_t samplesPerPixel;    // Camera/path samples per pixel per frame
+    uint32_t stablePreview;      // Non-zero enables deterministic preview fill
+    uint32_t pad[2];             // 16-byte cbuffer alignment
 };
 
 // =============================================================================

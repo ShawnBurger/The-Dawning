@@ -61,7 +61,8 @@ public:
                            const render::Camera& camera,
                            const core::Vec3f& lightDir,
                            const core::Vec3f& lightColor,
-                           const core::Vec3f& ambientColor);
+                           const core::Vec3f& ambientColor,
+                           render::RTQualityMode qualityMode);
     void CopyPathTraceToBackBuffer(render::D3D12Device& device);
 
     // --- RT Setup ---

@@ -277,7 +277,8 @@ void Scene::PathTraceEntities(
     const render::Camera& camera,
     const core::Vec3f& lightDir,
     const core::Vec3f& lightColor,
-    const core::Vec3f& ambientColor)
+    const core::Vec3f& ambientColor,
+    render::RTQualityMode qualityMode)
 {
     if (!m_rtReady) return;
 
@@ -334,7 +335,8 @@ void Scene::PathTraceEntities(
                           materials.data(), static_cast<uint32_t>(materials.size()),
                           instanceData.data(), static_cast<uint32_t>(instanceData.size()),
                           triangleNormals.data(), static_cast<uint32_t>(triangleNormals.size()),
-                          static_cast<uint32_t>(materials.size()));
+                          static_cast<uint32_t>(materials.size()),
+                          qualityMode);
 }
 
 void Scene::CopyPathTraceToBackBuffer(render::D3D12Device& device)
