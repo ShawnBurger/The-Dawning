@@ -148,10 +148,14 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
 
+    const char* groundKTXPath = "assets\\textures\\ground_grid.ktx";
+    const char* cubeKTXPath = "assets\\textures\\blue_panels.ktx";
     const char* groundPNGPath = "assets\\textures\\ground_grid.png";
     const char* cubePNGPath = "assets\\textures\\blue_panels.png";
     const char* groundDDSPath = "assets\\textures\\ground_grid.dds";
     const char* cubeDDSPath = "assets\\textures\\blue_panels.dds";
+    const char* groundNormalKTXPath = "assets\\textures\\ground_normal.ktx";
+    const char* cubeNormalKTXPath = "assets\\textures\\cube_normal.ktx";
     const char* groundNormalPNGPath = "assets\\textures\\ground_normal.png";
     const char* cubeNormalPNGPath = "assets\\textures\\cube_normal.png";
     const char* groundNormalDDSPath = "assets\\textures\\ground_normal.dds";
@@ -178,7 +182,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     }
 
     render::Texture groundTexture;
-    if (fileExists(groundPNGPath))
+    if (fileExists(groundKTXPath))
+    {
+        groundTexture = render::CreateTexture2DFromKTXFile(
+            device.Device(), device.CmdList(),
+            groundKTXPath, groundTexUp, L"GroundAlbedoTexture");
+    }
+    if (!groundTexture.IsValid() && fileExists(groundPNGPath))
     {
         groundTexture = render::CreateTexture2DFromWICFile(
             device.Device(), device.CmdList(),
@@ -204,7 +214,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     groundTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundTexture);
 
     render::Texture cubeTexture;
-    if (fileExists(cubePNGPath))
+    if (fileExists(cubeKTXPath))
+    {
+        cubeTexture = render::CreateTexture2DFromKTXFile(
+            device.Device(), device.CmdList(),
+            cubeKTXPath, cubeTexUp, L"BluePanelAlbedoTexture");
+    }
+    if (!cubeTexture.IsValid() && fileExists(cubePNGPath))
     {
         cubeTexture = render::CreateTexture2DFromWICFile(
             device.Device(), device.CmdList(),
@@ -230,7 +246,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     cubeTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), cubeTexture);
 
     render::Texture groundNormalTexture;
-    if (fileExists(groundNormalPNGPath))
+    if (fileExists(groundNormalKTXPath))
+    {
+        groundNormalTexture = render::CreateTexture2DFromKTXFile(
+            device.Device(), device.CmdList(),
+            groundNormalKTXPath, groundNormalTexUp, L"GroundNormalTexture");
+    }
+    if (!groundNormalTexture.IsValid() && fileExists(groundNormalPNGPath))
     {
         groundNormalTexture = render::CreateTexture2DFromWICFile(
             device.Device(), device.CmdList(),
@@ -253,7 +275,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR, int)
     groundNormalTexture.descriptorIndex = renderer.RegisterTexture(device.Device(), groundNormalTexture);
 
     render::Texture cubeNormalTexture;
-    if (fileExists(cubeNormalPNGPath))
+    if (fileExists(cubeNormalKTXPath))
+    {
+        cubeNormalTexture = render::CreateTexture2DFromKTXFile(
+            device.Device(), device.CmdList(),
+            cubeNormalKTXPath, cubeNormalTexUp, L"CubeNormalTexture");
+    }
+    if (!cubeNormalTexture.IsValid() && fileExists(cubeNormalPNGPath))
     {
         cubeNormalTexture = render::CreateTexture2DFromWICFile(
             device.Device(), device.CmdList(),

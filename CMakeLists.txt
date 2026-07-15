@@ -93,6 +93,10 @@ add_executable(TheDawningV3 WIN32
     ${SHADER_FILES}
 )
 
+set_target_properties(TheDawningV3 PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
+)
+
 target_include_directories(TheDawningV3 PRIVATE src)
 
 # =============================================================================

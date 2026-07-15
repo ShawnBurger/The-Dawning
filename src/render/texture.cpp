@@ -548,6 +548,59 @@ static DXGI_FORMAT FormatFromDDSHeader(const DDSHeader& header, const uint8_t* b
     return DXGI_FORMAT_UNKNOWN;
 }
 
+static uint32_t ByteSwap32(uint32_t value)
+{
+    return ((value & 0x000000ffu) << 24) |
+           ((value & 0x0000ff00u) << 8) |
+           ((value & 0x00ff0000u) >> 8) |
+           ((value & 0xff000000u) >> 24);
+}
+
+static uint32_t ReadU32(const uint8_t* data, bool byteSwap)
+{
+    uint32_t value = 0;
+    std::memcpy(&value, data, sizeof(value));
+    return byteSwap ? ByteSwap32(value) : value;
+}
+
+static DXGI_FORMAT FormatFromKTX1(
+    uint32_t glType,
+    uint32_t glTypeSize,
+    uint32_t glFormat,
+    uint32_t glInternalFormat,
+    uint32_t glBaseInternalFormat)
+{
+    static constexpr uint32_t GL_UNSIGNED_BYTE = 0x1401;
+    static constexpr uint32_t GL_RGBA = 0x1908;
+    static constexpr uint32_t GL_BGRA = 0x80E1;
+    static constexpr uint32_t GL_RGBA8 = 0x8058;
+    static constexpr uint32_t GL_SRGB8_ALPHA8 = 0x8C43;
+    static constexpr uint32_t GL_BGRA8_EXT = 0x93A1;
+
+    if (glType != GL_UNSIGNED_BYTE || glTypeSize != 1)
+        return DXGI_FORMAT_UNKNOWN;
+
+    if (glFormat == GL_RGBA && glBaseInternalFormat == GL_RGBA)
+    {
+        if (glInternalFormat == GL_SRGB8_ALPHA8)
+            return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        if (glInternalFormat == GL_RGBA8 || glInternalFormat == GL_RGBA)
+            return DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    if (glFormat == GL_BGRA && glBaseInternalFormat == GL_RGBA)
+    {
+        if (glInternalFormat == GL_BGRA8_EXT ||
+            glInternalFormat == GL_RGBA8 ||
+            glInternalFormat == GL_RGBA)
+        {
+            return DXGI_FORMAT_B8G8R8A8_UNORM;
+        }
+    }
+
+    return DXGI_FORMAT_UNKNOWN;
+}
+
 Texture CreateTexture2DFromDDSFile(
     ID3D12Device* device,
     ID3D12GraphicsCommandList* cmdList,
@@ -667,6 +720,187 @@ Texture CreateTexture2DFromDDSFile(
 
     if (texture.IsValid())
         core::Log::Infof("DDS loaded: %s (%ux%u, mips=%u, format=%u)",
+                         filePath, texture.width, texture.height, texture.mipCount,
+                         static_cast<uint32_t>(format));
+    return texture;
+}
+
+Texture CreateTexture2DFromKTXFile(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const char* filePath,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name)
+{
+    Texture texture;
+    if (!filePath || !filePath[0])
+        return texture;
+
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        core::Log::Warnf("KTX texture not found: %s", filePath);
+        return texture;
+    }
+
+    std::streamsize fileSize = file.tellg();
+    if (fileSize <= 0)
+    {
+        core::Log::Errorf("KTX texture is empty: %s", filePath);
+        return texture;
+    }
+
+    std::vector<uint8_t> bytes(static_cast<size_t>(fileSize));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), fileSize))
+    {
+        core::Log::Errorf("Failed to read KTX texture: %s", filePath);
+        return texture;
+    }
+
+    static constexpr uint8_t kIdentifier[12] = {
+        0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
+    };
+    static constexpr size_t kHeaderSize = 64;
+    if (bytes.size() < kHeaderSize ||
+        std::memcmp(bytes.data(), kIdentifier, sizeof(kIdentifier)) != 0)
+    {
+        core::Log::Errorf("Invalid KTX identifier: %s", filePath);
+        return texture;
+    }
+
+    uint32_t endianness = 0;
+    std::memcpy(&endianness, bytes.data() + 12, sizeof(endianness));
+    bool byteSwap = false;
+    if (endianness == 0x04030201u)
+    {
+        byteSwap = false;
+    }
+    else if (endianness == 0x01020304u)
+    {
+        byteSwap = true;
+    }
+    else
+    {
+        core::Log::Errorf("Invalid KTX endianness: %s", filePath);
+        return texture;
+    }
+
+    auto headerU32 = [&](size_t offset) -> uint32_t
+    {
+        return ReadU32(bytes.data() + offset, byteSwap);
+    };
+
+    const uint32_t glType = headerU32(16);
+    const uint32_t glTypeSize = headerU32(20);
+    const uint32_t glFormat = headerU32(24);
+    const uint32_t glInternalFormat = headerU32(28);
+    const uint32_t glBaseInternalFormat = headerU32(32);
+    const uint32_t width = headerU32(36);
+    const uint32_t height = headerU32(40);
+    const uint32_t depth = headerU32(44);
+    const uint32_t arrayElements = headerU32(48);
+    const uint32_t faces = headerU32(52);
+    const uint32_t fileMipCountRaw = headerU32(56);
+    const uint32_t keyValueBytes = headerU32(60);
+
+    if (width == 0 || height == 0 || depth != 0 || arrayElements != 0 || faces != 1)
+    {
+        core::Log::Errorf("Unsupported KTX texture shape: %s", filePath);
+        return texture;
+    }
+
+    DXGI_FORMAT format = FormatFromKTX1(
+        glType, glTypeSize, glFormat, glInternalFormat, glBaseInternalFormat);
+    if (format == DXGI_FORMAT_UNKNOWN)
+    {
+        core::Log::Errorf("Unsupported KTX format: %s", filePath);
+        return texture;
+    }
+
+    const uint32_t maxMipCount = CalculateMipCount(width, height);
+    const uint32_t fileMipCount = fileMipCountRaw == 0 ? 1u : fileMipCountRaw;
+    if (fileMipCount > maxMipCount)
+    {
+        core::Log::Errorf("KTX texture has invalid mip count: %s", filePath);
+        return texture;
+    }
+
+    size_t mipOffset = kHeaderSize;
+    if (keyValueBytes > bytes.size() - mipOffset)
+    {
+        core::Log::Errorf("KTX key/value data is truncated: %s", filePath);
+        return texture;
+    }
+    mipOffset += keyValueBytes;
+    mipOffset = static_cast<size_t>(AlignTo64(mipOffset, 4));
+
+    std::vector<TextureSubresource> subresources;
+    subresources.reserve(fileMipCount);
+
+    uint32_t mipWidth = width;
+    uint32_t mipHeight = height;
+    for (uint32_t mip = 0; mip < fileMipCount; ++mip)
+    {
+        if (mipOffset > bytes.size() || sizeof(uint32_t) > bytes.size() - mipOffset)
+        {
+            core::Log::Errorf("KTX mip header is truncated: %s", filePath);
+            return texture;
+        }
+
+        uint32_t imageSize = ReadU32(bytes.data() + mipOffset, byteSwap);
+        mipOffset += sizeof(uint32_t);
+
+        uint32_t rowBytes = 0;
+        uint32_t numRows = 0;
+        uint64_t totalBytes = 0;
+        if (!ComputeSurfaceInfo(mipWidth, mipHeight, format, rowBytes, numRows, totalBytes))
+        {
+            core::Log::Errorf("Could not compute KTX surface info: %s", filePath);
+            return texture;
+        }
+
+        if (imageSize != totalBytes || totalBytes > bytes.size() - mipOffset)
+        {
+            core::Log::Errorf("KTX texture data is invalid or truncated: %s", filePath);
+            return texture;
+        }
+
+        TextureSubresource sub = {};
+        sub.data = bytes.data() + mipOffset;
+        sub.width = mipWidth;
+        sub.height = mipHeight;
+        sub.rowBytes = rowBytes;
+        sub.numRows = numRows;
+        subresources.push_back(sub);
+
+        mipOffset += imageSize;
+        mipOffset = static_cast<size_t>(AlignTo64(mipOffset, 4));
+        mipWidth = (std::max)(1u, mipWidth / 2u);
+        mipHeight = (std::max)(1u, mipHeight / 2u);
+    }
+
+    if (fileMipCountRaw == 0)
+    {
+        std::vector<uint32_t> basePixels(static_cast<size_t>(width) * height);
+        std::memcpy(basePixels.data(), subresources[0].data, basePixels.size() * sizeof(uint32_t));
+        auto mipPixels = GenerateMipChainRGBA8(basePixels.data(), width, height);
+        auto generatedSubresources = BuildRGBA8Subresources(mipPixels, width, height);
+        texture = CreateTexture2DFromSubresources(
+            device, cmdList, generatedSubresources.data(),
+            width, height, format, static_cast<uint32_t>(generatedSubresources.size()),
+            outUpload, name);
+    }
+    else
+    {
+        texture = CreateTexture2DFromSubresources(
+            device, cmdList, subresources.data(),
+            width, height, format, fileMipCount,
+            outUpload, name);
+    }
+
+    if (texture.IsValid())
+        core::Log::Infof("KTX loaded: %s (%ux%u, mips=%u, format=%u)",
                          filePath, texture.width, texture.height, texture.mipCount,
                          static_cast<uint32_t>(format));
     return texture;

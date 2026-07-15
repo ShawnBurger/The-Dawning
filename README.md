@@ -63,16 +63,16 @@ Microsoft.Direct3D.DXC NuGet package.
 ## Material System Status
 
 Raster materials can bind one albedo texture per draw through texture handles in
-the resource manager. The current scene first looks for PNG albedo textures in
-`assets/textures/` via Windows Imaging Component, then falls back to DDS files.
+the resource manager. The current scene first looks for KTX v1 albedo textures
+in `assets/textures/`, then PNG via Windows Imaging Component, then DDS files.
 If the starter DDS files are missing from the executable directory, the app
 writes generated checker DDS files and loads those. RGBA/WIC textures generate
-CPU mip chains, and DDS files upload all declared mip levels. Raster and DXR
+CPU mip chains, while KTX/DDS files upload declared mip levels. Raster and DXR
 path-traced materials now sample albedo textures from their respective texture
-tables. Raster and DXR materials can also bind normal maps; the demo scene
-loads `ground_normal` / `cube_normal` PNG or DDS files when present and otherwise
-uses procedural wave normal textures for the floor and cube. KTX loading and
-bindless texture arrays are still upcoming Layer 4 work.
+tables. Raster and DXR materials can also bind normal maps; the demo scene loads
+`ground_normal` / `cube_normal` KTX, PNG, or DDS files when present and
+otherwise uses procedural wave normal textures for the floor and cube. Bindless
+texture arrays are still upcoming Layer 4 work.
 
 ## Runtime Controls
 
