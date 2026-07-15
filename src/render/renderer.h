@@ -75,6 +75,9 @@ public:
     // Call once per frame before any draw calls
     void BeginFrame(D3D12Device& device, const Camera& camera);
 
+    // Draw the raster sky background before scene geometry.
+    void DrawSky(D3D12Device& device);
+
     // Draw a mesh with a world transform and material properties
     void DrawMesh(D3D12Device& device, const Mesh& mesh,
                   const core::Mat4x4& worldMatrix,
@@ -95,6 +98,7 @@ public:
 private:
     bool CreateRootSignature(ID3D12Device* device);
     bool CreatePSO(ID3D12Device* device);
+    bool CreateSkyPSO(ID3D12Device* device);
     bool CreateConstantBuffers(ID3D12Device* device);
     bool CreateTextureHeap(ID3D12Device* device);
 
@@ -104,6 +108,7 @@ private:
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
     ComPtr<ID3D12PipelineState> m_pso;
+    ComPtr<ID3D12PipelineState> m_skyPSO;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback.
     static constexpr uint32_t kMaxRasterTextures = 128;

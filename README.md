@@ -89,6 +89,8 @@ otherwise uses procedural wave normal textures for the floor and cube. Raster
 and DXR now both use indexed shader-visible texture tables at demo scale.
 Raster lighting uses Cook-Torrance/GGX direct lighting so material roughness and
 metallic response track more closely between preview and path tracing.
+Raster mode also draws a tone-mapped sky gradient from the same sky helper used
+by DXR misses and environment reflections.
 
 ## Runtime Controls
 

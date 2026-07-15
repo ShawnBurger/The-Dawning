@@ -714,6 +714,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
             cmd->RSSetScissorRects(1, &scissor);
 
             renderer.BeginFrame(device, camera);
+            renderer.DrawSky(device);
             gameScene.RenderEntities(device, renderer);
 
             if (debugOverlayReady && showDebugOverlay)

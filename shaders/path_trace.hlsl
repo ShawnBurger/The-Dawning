@@ -13,6 +13,7 @@
 // =============================================================================
 
 #include "display_common.hlsli"
+#include "sky_common.hlsli"
 
 // =============================================================================
 // Global root signature bindings
@@ -184,12 +185,6 @@ float GeometrySmithG1(float NdotV, float roughness)
 float GeometrySmith(float NdotV, float NdotL, float roughness)
 {
     return GeometrySmithG1(NdotV, roughness) * GeometrySmithG1(NdotL, roughness);
-}
-
-float3 SkyRadiance(float3 direction)
-{
-    float t = 0.5f * (direction.y + 1.0f);
-    return lerp(float3(0.8f, 0.85f, 0.9f), float3(0.3f, 0.5f, 0.9f), t) * 0.5f;
 }
 
 float Luminance(float3 color)
@@ -371,7 +366,7 @@ void RayGen()
         // Miss — sky
         if (payload.hitT < 0.0f)
         {
-            radiance += throughput * SkyRadiance(currentDir);
+            radiance += throughput * DawningSkyRadiance(currentDir);
             break;
         }
 
@@ -436,7 +431,7 @@ void RayGen()
             // Stable preview fill: approximate missing diffuse GI and sky reflection
             // without tracing another noisy secondary bounce.
             float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
-            float3 envReflection = SkyRadiance(reflect(-V, N));
+            float3 envReflection = DawningSkyRadiance(reflect(-V, N));
             float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, mat.metallic);
             float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
             float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));

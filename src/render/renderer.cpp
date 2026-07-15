@@ -18,6 +18,7 @@ bool Renderer::Init(D3D12Device& device)
 {
     if (!CreateRootSignature(device.Device())) return false;
     if (!CreatePSO(device.Device()))           return false;
+    if (!CreateSkyPSO(device.Device()))        return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     if (!CreateTextureHeap(device.Device())) return false;
 
@@ -37,6 +38,9 @@ void Renderer::Shutdown()
         }
     }
     m_textureHeap.Reset();
+    m_skyPSO.Reset();
+    m_pso.Reset();
+    m_rootSig.Reset();
     m_textureDescSize = 0;
     m_nextTextureDescriptor = 1;
     core::Log::Info("Renderer shut down");
@@ -278,6 +282,61 @@ bool Renderer::CreatePSO(ID3D12Device* device)
     return true;
 }
 
+bool Renderer::CreateSkyPSO(ID3D12Device* device)
+{
+    auto vsBytecode = CompileShaderFromFile(L"shaders/sky_vs.hlsl", "main", "vs_5_1");
+    auto psBytecode = CompileShaderFromFile(L"shaders/sky_ps.hlsl", "main", "ps_5_1");
+
+    if (!vsBytecode || !psBytecode)
+    {
+        core::Log::Error("Failed to compile shaders for sky PSO");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_rootSig.Get();
+    psoDesc.VS.pShaderBytecode = vsBytecode->GetBufferPointer();
+    psoDesc.VS.BytecodeLength  = vsBytecode->GetBufferSize();
+    psoDesc.PS.pShaderBytecode = psBytecode->GetBufferPointer();
+    psoDesc.PS.BytecodeLength  = psBytecode->GetBufferSize();
+
+    psoDesc.InputLayout = { nullptr, 0 };
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.RasterizerState.ConservativeRaster    = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+    psoDesc.BlendState.AlphaToCoverageEnable  = FALSE;
+    psoDesc.BlendState.IndependentBlendEnable = FALSE;
+    psoDesc.BlendState.RenderTarget[0].BlendEnable           = FALSE;
+    psoDesc.BlendState.RenderTarget[0].LogicOpEnable         = FALSE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    psoDesc.DepthStencilState.DepthEnable    = FALSE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_ALWAYS;
+    psoDesc.DepthStencilState.StencilEnable  = FALSE;
+
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_skyPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (sky) failed: 0x%08X", hr);
+        return false;
+    }
+
+    m_skyPSO->SetName(L"RasterSkyPSO");
+    core::Log::Info("Sky PSO created (full-screen sky, depth off)");
+    return true;
+}
+
 // =============================================================================
 // Constant Buffer Upload Ring — persistently mapped, 256-byte aligned
 // =============================================================================
@@ -455,6 +514,17 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
 
     cmd->SetGraphicsRootDescriptorTable(3, m_textureHeap->GetGPUDescriptorHandleForHeapStart());
+}
+
+void Renderer::DrawSky(D3D12Device& device)
+{
+    auto* cmd = device.CmdList();
+    cmd->SetPipelineState(m_skyPSO.Get());
+    cmd->IASetVertexBuffers(0, 0, nullptr);
+    cmd->IASetIndexBuffer(nullptr);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawInstanced(3, 1, 0, 0);
+    cmd->SetPipelineState(m_pso.Get());
 }
 
 // =============================================================================

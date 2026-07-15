@@ -56,10 +56,13 @@ set(RENDER_HEADERS
 set(SHADER_FILES
     shaders/basic_vs.hlsl
     shaders/basic_ps.hlsl
+    shaders/sky_vs.hlsl
+    shaders/sky_ps.hlsl
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
     shaders/path_trace.hlsl
     shaders/display_common.hlsli
+    shaders/sky_common.hlsli
 )
 
 set(ECS_HEADERS

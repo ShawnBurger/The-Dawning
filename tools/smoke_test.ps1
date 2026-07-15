@@ -72,6 +72,12 @@ if ($logText -notmatch "Smoke mode complete") {
 if ($logText -notmatch "Compiled shader: shaders/basic_ps.hlsl") {
     throw "Smoke test did not compile the raster pixel shader."
 }
+if ($logText -notmatch "Compiled shader: shaders/sky_ps.hlsl") {
+    throw "Smoke test did not compile the raster sky shader."
+}
+if ($logText -notmatch "Sky PSO created") {
+    throw "Smoke test did not create the raster sky pipeline."
+}
 
 if ($RasterOnly) {
     if ($logText -match "Path tracing initialized") {
