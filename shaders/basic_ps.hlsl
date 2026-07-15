@@ -24,10 +24,11 @@ cbuffer CBMaterial : register(b2)
     float  metallic;       // 0 = dielectric, 1 = metal
     uint   useAlbedoTexture;
     uint   useNormalTexture;
+    uint   albedoTextureIndex;
+    uint   normalTextureIndex;
 };
 
-Texture2D<float4> albedoTexture : register(t0);
-Texture2D<float4> normalTexture : register(t1);
+Texture2D<float4> materialTextures[128] : register(t0);
 SamplerState linearSampler : register(s0);
 
 struct PSInput
@@ -39,7 +40,7 @@ struct PSInput
     float2 uv         : TEXCOORD2;
 };
 
-float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv)
+float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textureIndex)
 {
     float3 N = normalize(normalWS);
     float3 dpdx = ddx(positionWS);
@@ -62,7 +63,7 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv)
         }
     }
 
-    float3 tangentNormal = normalTexture.Sample(linearSampler, uv).xyz * 2.0 - 1.0;
+    float3 tangentNormal = materialTextures[textureIndex].Sample(linearSampler, uv).xyz * 2.0 - 1.0;
     tangentNormal.z = max(tangentNormal.z, 0.0);
     float3 mappedNormal = tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N;
     return dot(mappedNormal, mappedNormal) > 1e-8 ? normalize(mappedNormal) : N;
@@ -72,7 +73,7 @@ float4 main(PSInput input) : SV_TARGET
 {
     float3 N = normalize(input.normalWS);
     if (useNormalTexture != 0)
-        N = ApplyNormalMap(N, input.positionWS, input.uv);
+        N = ApplyNormalMap(N, input.positionWS, input.uv, normalTextureIndex);
 
     float3 V = normalize(eyePos - input.positionWS);
     float3 L = normalize(lightDir);
@@ -85,7 +86,7 @@ float4 main(PSInput input) : SV_TARGET
     // Base color from material albedo * vertex color * optional albedo texture
     float3 baseColor = albedo.rgb * input.color.rgb;
     if (useAlbedoTexture != 0)
-        baseColor *= albedoTexture.Sample(linearSampler, input.uv).rgb;
+        baseColor *= materialTextures[albedoTextureIndex].Sample(linearSampler, input.uv).rgb;
 
     // Fresnel-Schlick approximation
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);

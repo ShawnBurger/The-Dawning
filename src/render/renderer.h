@@ -11,7 +11,7 @@
 // Constant buffer layout (matches shaders):
 //   b0: CBPerObject  — worldViewProj, world, worldInvTranspose (192 bytes → 256 aligned)
 //   b1: CBPerFrame   — lightDir, lightColor, ambient, eyePos (64 bytes → 256 aligned)
-//   b2: CBMaterial    — albedo, roughness, metallic (32 bytes → 256 aligned)
+//   b2: CBMaterial    — albedo, roughness, metallic, texture indices
 // =============================================================================
 
 #include "d3d12_device.h"
@@ -53,6 +53,8 @@ struct CBMaterial
     float metallic;
     uint32_t useAlbedoTexture;
     uint32_t useNormalTexture;
+    uint32_t albedoTextureIndex;
+    uint32_t normalTextureIndex;
 };
 
 // Align size to 256 bytes for CBV placement
