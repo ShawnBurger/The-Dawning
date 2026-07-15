@@ -4,6 +4,11 @@ project(TheDawningV3 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# This project currently links Windows SDK libraries directly and manages
+# runtime DLLs explicitly. Avoid vcpkg's app-local post-build probe, which emits
+# noisy pwsh fallback messages on systems without PowerShell Core.
+set(VCPKG_APPLOCAL_DEPS OFF CACHE BOOL "Disable vcpkg app-local dependency copying for this target" FORCE)
+
 # =============================================================================
 # Source files
 # =============================================================================
