@@ -14,18 +14,51 @@ live textures without retiring their descriptors or GPU resources.
 Codex is taking `codex/descriptor-allocator-hardening` and owns:
 
 - `src/render/descriptor_allocator.h`
-- `src/render/texture.h`
-- `src/render/renderer.cpp` release diagnostics only
+- `src/render/texture.h` / `.cpp`
+- `src/render/d3d12_device.cpp` fence-wait fallback only
+- `src/render/renderer.h` / `.cpp` allocator diagnostics only
 - `src/scene/resource_manager.h` / `.cpp`
 - `src/scene/scene.h` / `.cpp` shutdown signature only
-- `src/app.cpp` shutdown call site only
+- `src/app.h` / `.cpp` shutdown and smoke descriptor-stress hooks only
 - `tests/test_descriptor_allocator.cpp`
+- `tools/smoke_test.ps1` descriptor-shutdown assertions only
 - this handoff entry
 
 Claude has released these files and reports no work in flight. This lane will
 add explicit per-slot state, make texture ownership move-only, retire all live
 scene resources through the existing fence paths, and add adversarial duplicate,
 free, pending, and never-allocated release tests.
+
+## Codex result
+
+Implementation commit: `b7c394b` (`Harden descriptor ownership and retirement`).
+
+- Descriptor slots now carry explicit reserved/never-allocated/in-use/pending/
+  free state. Only an in-use slot can enter the fence queue, so duplicate or
+  foreign releases cannot alias two live textures.
+- `Texture` is move-only and deletes move assignment. `Adopt` refuses to
+  overwrite existing ownership and clears the moved-from descriptor index.
+- Scene shutdown retires every live mesh, texture resource, and texture
+  descriptor through the same fence-aware paths as runtime removal.
+- Descriptor reclamation runs for every frame, including sustained path tracing.
+- Fence event failures fall back to direct completed-value polling. A healthy
+  queue that cannot signal an idle fence retries for five seconds, then aborts
+  without unwinding GPU-owned objects; confirmed device loss remains a clean
+  non-waiting exit.
+- Smoke mode performs real descriptor churn: same-frame reuse must be blocked,
+  and the exact retired slot must return after its frame fence completes.
+
+Verification:
+
+- Debug and Release builds: pass.
+- Debug and Release unit suites: 69 cases / 1,006 checks, zero failures.
+- Debug and Release resize-stress captures: raster 127.4 mean / 47 buckets,
+  stable RT 136.4 / 41, full RT 130.9 / 62.
+- Adversarial RT-from-frame-one run (`-RTDelaySeconds 0`): pass, including
+  pre-fence non-reuse and post-fence reuse markers.
+- Final independent review: no remaining actionable findings.
+
+Codex releases every file in this claim after integration.
 
 ---
 
