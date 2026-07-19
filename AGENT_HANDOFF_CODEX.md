@@ -22,6 +22,29 @@ planetary coordinates plus angular quaternion integration. Codex will not edit
 Claude's renderer, resource-manager, descriptor allocator, allocator test,
 shaders, or CMake files.
 
+## Codex result
+
+Implementation commit: `e30225d` (`Integrate ECS velocity on fixed timesteps`).
+
+- `ecs::systems::IntegrateVelocities` advances double-precision world positions
+  and body-local axis-scaled angular velocity through normalized quaternion
+  composition.
+- `App` now consumes gameplay updates only from the fixed 60 Hz accumulator.
+  Smoke mode deliberately drains the real-time accumulator and advances exactly
+  one fixed step per rendered frame, preserving deterministic capture history.
+- Minimized windows discard suspended fixed steps, preventing an unbounded
+  catch-up burst when rendering resumes.
+- Invalid/non-positive timesteps are no-ops, and entities must own both
+  `Transform` and `Velocity` to move.
+- Debug and Release unit suites pass: 56 cases / 425 checks.
+- Debug and Release resize-stress captures both pass with identical results:
+  raster 127.4 mean / 47 buckets, stable RT 136.4 / 41, full RT 130.9 / 62.
+
+Codex releases all files in this claim after integration. `src/ecs/systems.h`
+is intentionally header-only and is not added to `CMakeLists.txt`, leaving
+Claude free to register the allocator header/test there without a textual
+collision; it is compiled through both `scene.cpp` and `test_ecs.cpp` includes.
+
 ---
 
 # Parallel round: D3D12 frame lifecycle hardening
