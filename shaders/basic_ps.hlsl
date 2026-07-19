@@ -39,7 +39,16 @@ cbuffer CBMaterial : register(b2)
     uint   normalTextureIndex;
 };
 
-Texture2D<float4> materialTextures[128] : register(t0);
+// Size comes from Renderer::kMaxRasterTextures, passed as a define at compile
+// time, so the C++ heap, the root-signature range and this array cannot drift
+// apart. The fallback exists only for standalone compilation (compiling this
+// file directly with fxc, e.g. when checking shader syntax); the engine always
+// supplies the define.
+#ifndef MAX_RASTER_TEXTURES
+#define MAX_RASTER_TEXTURES 128
+#endif
+
+Texture2D<float4> materialTextures[MAX_RASTER_TEXTURES] : register(t0);
 SamplerState linearSampler : register(s0);
 
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
