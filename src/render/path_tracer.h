@@ -150,8 +150,9 @@ private:
     RTQualityMode m_prevQualityMode = RTQualityMode::StablePreview;
     uint32_t m_prevSamplesPerPixel = 0;
     uint32_t m_prevMaxBounces = 0;
-    uint32_t m_accumFrameIndex = 0;
-    uint32_t m_frameIndex = 0;
+    uint32_t m_accumFrameIndex = 0;   // Resets on camera/quality change — drives accumulation
+    uint32_t m_seedFrameCounter = 0;  // Never resets — drives RNG decorrelation
+    uint32_t m_frameIndex = 0;        // Frame-in-flight slot (0..kFrameCount-1)
     bool     m_hasPrevCamera = false;
     bool     m_hasPrevQuality = false;
     bool     m_initialized = false;

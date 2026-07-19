@@ -38,7 +38,8 @@ cbuffer PerFrameConstants : register(b0, space0)
     uint     g_RenderHeight;
     uint     g_SamplesPerPixel;
     uint     g_StablePreview;
-    uint2    g_Pad;
+    uint     g_SeedIndex;       // Wall-clock dispatch counter — RNG decorrelation only
+    uint     g_Pad;
 };
 
 struct MaterialData
@@ -134,7 +135,15 @@ float Random(inout uint seed)
 
 uint InitRNG(uint2 pixel, uint frameIndex)
 {
-    return PCGHash(pixel.x + pixel.y * 16384 + frameIndex * 16384 * 16384);
+    // Hash each dimension in sequence. The previous form packed the three values into
+    // one uint via multiplies (pixel.y * 16384 + frameIndex * 2^28), which wrapped mod
+    // 2^32 at frameIndex 16 — only sixteen distinct frame seeds existed — and aliased
+    // pixel/frame contributions against each other. Each PCGHash fully avalanches, so
+    // chaining them decorrelates all three dimensions with no packing constraints.
+    uint seed = PCGHash(pixel.x);
+    seed = PCGHash(seed ^ pixel.y);
+    seed = PCGHash(seed ^ frameIndex);
+    return seed;
 }
 
 // Cosine-weighted hemisphere sampling (for diffuse)
@@ -171,7 +180,10 @@ float DistributionGGX(float NdotH, float roughness)
     float a  = roughness * roughness;
     float a2 = a * a;
     float d  = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
-    return a2 / (PI * d * d + 0.0001f);
+    // Multiplicative floor, NOT an additive epsilon: at the lobe peak d == a2, so the
+    // true denominator is PI*a2*a2, which for roughness < ~0.35 is smaller than 1e-4.
+    // Adding an epsilon there lets it dominate and flattens the specular peak away.
+    return a2 / max(PI * d * d, 1e-7f);
 }
 
 // Smith geometry function (single direction)
@@ -292,8 +304,10 @@ void RayGen()
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim   = DispatchRaysDimensions().xy;
 
-    // Initialize RNG
-    uint rngState = InitRNG(launchIndex, g_FrameIndex);
+    // Initialize RNG. Seed from the wall-clock dispatch counter, NOT g_FrameIndex:
+    // g_FrameIndex is the accumulation index and resets to 0 on any camera motion,
+    // which pinned every moving frame to an identical random stream.
+    uint rngState = InitRNG(launchIndex, g_SeedIndex);
 
     uint samplesPerPixel = max(g_SamplesPerPixel, 1u);
     float3 frameRadiance = float3(0, 0, 0);

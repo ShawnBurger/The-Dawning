@@ -641,6 +641,7 @@ void PathTracer::Dispatch(
     cb.ambientColor[0] = ambientColor.x; cb.ambientColor[1] = ambientColor.y; cb.ambientColor[2] = ambientColor.z;
 
     cb.frameIndex    = m_accumFrameIndex;
+    cb.seedIndex     = m_seedFrameCounter++;
     cb.maxBounces    = quality.maxBounces;
     cb.renderWidth   = m_outputWidth;
     cb.renderHeight  = m_outputHeight;

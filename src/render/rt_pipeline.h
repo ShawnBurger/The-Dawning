@@ -37,14 +37,20 @@ struct RTPerFrameConstants
     float lightDir[4];           // Directional light direction (w unused)
     float lightColor[4];         // Light color + intensity (w unused)
     float ambientColor[4];       // Ambient color (w unused)
-    uint32_t frameIndex;         // For random seed
+    uint32_t frameIndex;         // Accumulation index; resets on camera/quality change
     uint32_t maxBounces;         // Max path tracing bounces
     uint32_t renderWidth;        // Output texture width
     uint32_t renderHeight;       // Output texture height
     uint32_t samplesPerPixel;    // Camera/path samples per pixel per frame
     uint32_t stablePreview;      // Non-zero enables deterministic preview fill
-    uint32_t pad[2];             // 16-byte cbuffer alignment
+    uint32_t seedIndex;          // Wall-clock dispatch counter — RNG decorrelation only
+    uint32_t pad;                // 16-byte cbuffer alignment
 };
+
+// Must stay byte-identical to cbuffer PerFrameConstants in shaders/path_trace.hlsl.
+// A silent mismatch here misaligns every field after the divergence point.
+static_assert(sizeof(RTPerFrameConstants) == 208,
+              "RTPerFrameConstants layout changed — update path_trace.hlsl to match");
 
 // =============================================================================
 // Per-instance material data (in a StructuredBuffer, indexed by InstanceID)

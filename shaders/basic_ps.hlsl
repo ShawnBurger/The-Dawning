@@ -83,7 +83,10 @@ float DistributionGGX(float NdotH, float materialRoughness)
     float a = materialRoughness * materialRoughness;
     float a2 = a * a;
     float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * d * d + 0.0001);
+    // Multiplicative floor, NOT an additive epsilon: at the lobe peak d == a2, so the
+    // true denominator is PI*a2*a2, which for roughness < ~0.35 is smaller than 1e-4.
+    // Adding an epsilon there lets it dominate and flattens the specular peak away.
+    return a2 / max(PI * d * d, 1e-7);
 }
 
 float GeometrySmithG1(float NdotV, float materialRoughness)
