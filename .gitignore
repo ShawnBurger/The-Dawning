@@ -30,6 +30,9 @@ CTestTestfile.cmake
 /TheDawning_Codex_Handoff_v3_unpacked/
 *.zip
 
+# Local parallel-agent worktrees and scratch state
+/.agents/
+
 # Logs and temp files
 *.log
 *.tmp

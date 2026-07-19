@@ -142,3 +142,9 @@ moves the horizon.
 
 Keep V3 compile-clean before adding features. Prefer small, verified changes:
 build after each meaningful edit, then move to the next layer.
+
+## Parallel Agent Workflow
+
+Codex and Claude Code should work from separate Git worktrees instead of the
+same physical checkout. See `AGENT_COORDINATION.md` and the `tools\agent_*.ps1`
+scripts for the shared branch, build, smoke-test, and merge workflow.
