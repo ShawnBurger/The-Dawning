@@ -453,6 +453,37 @@ void D3D12Device::ExecuteAndPresent(bool vsync)
     MoveToNextFrame();
 }
 
+// =============================================================================
+// Deferred GPU resource release
+// =============================================================================
+void D3D12Device::DeferredRelease(ComPtr<IUnknown> resource)
+{
+    if (!resource) return;
+
+    // Tag with the fence value that will be signalled at the END of the current
+    // frame, not the last one already signalled. MoveToNextFrame increments
+    // m_globalFenceValue and then signals it, so the value covering commands
+    // recorded during this frame is m_globalFenceValue + 1 as observed here.
+    // Using m_globalFenceValue instead would free the resource one frame early,
+    // while the command list recorded this frame still references it.
+    m_deferredReleases.Push(m_globalFenceValue + 1, std::move(resource));
+}
+
+void D3D12Device::ProcessDeferredReleases()
+{
+    if (m_deferredReleases.Empty()) return;
+
+    // A lost device never advances its fence again, so drain unconditionally
+    // rather than leaking the queue to process exit; nothing can be executing.
+    if (m_deviceLost)
+    {
+        m_deferredReleases.Clear();
+        return;
+    }
+
+    m_deferredReleases.Process(m_fence ? m_fence->GetCompletedValue() : 0);
+}
+
 void D3D12Device::MoveToNextFrame()
 {
     // Signal the fence for the current frame
@@ -465,6 +496,10 @@ void D3D12Device::MoveToNextFrame()
 
     // Wait for the next frame's previous work to complete
     WaitForCurrentFrame();
+
+    // Once per frame, after the wait, so the fence has advanced as far as it is
+    // going to this frame. Callers never have to remember to do this.
+    ProcessDeferredReleases();
 }
 
 void D3D12Device::WaitForGpu()
@@ -917,6 +952,18 @@ void D3D12Device::ProbeCapabilities()
 void D3D12Device::Shutdown()
 {
     WaitForGpu();
+
+    // WaitForGpu has retired every frame, so nothing queued can still be in use.
+    // Clear unconditionally rather than via ProcessDeferredReleases: if the
+    // device was lost the fence never advanced, and these must not leak to
+    // process exit. This must also happen BEFORE the fence and event are torn
+    // down, since ProcessDeferredReleases reads the fence.
+    if (!m_deferredReleases.Empty())
+    {
+        core::Log::Infof("Releasing %zu deferred GPU resource(s) at shutdown",
+                         m_deferredReleases.Size());
+        m_deferredReleases.Clear();
+    }
 
     if (m_fenceEvent)
     {

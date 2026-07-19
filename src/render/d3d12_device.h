@@ -21,7 +21,9 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
+#include "deferred_release.h"
 #include <cstdint>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -78,6 +80,27 @@ public:
 
     // Resize swap chain (call when window resizes)
     bool Resize(int newWidth, int newHeight);
+
+    // -------------------------------------------------------------------------
+    // Deferred GPU resource release
+    // -------------------------------------------------------------------------
+    // Dropping a ComPtr to a GPU resource frees it immediately, but up to
+    // kFrameCount frames may still be in flight with command lists referencing
+    // it. Hand it here instead: the resource is retained until the GPU has
+    // passed the fence value signalled at the end of the frame in which it was
+    // retired, then released.
+    //
+    // Takes IUnknown so it works for resources, heaps, PSOs and root signatures
+    // alike. Safe to call mid-frame; that is the entire point.
+    //
+    // Releases are processed automatically once per frame from MoveToNextFrame,
+    // and flushed during Shutdown after a full WaitForGpu.
+    void DeferredRelease(ComPtr<IUnknown> resource);
+    void ProcessDeferredReleases();
+    uint32_t PendingDeferredReleaseCount() const
+    {
+        return static_cast<uint32_t>(m_deferredReleases.Size());
+    }
 
     // Barrier helpers
     void TransitionResource(ID3D12Resource* resource,
@@ -175,6 +198,10 @@ private:
     HANDLE                   m_fenceEvent = nullptr;
     uint64_t                 m_fenceValues[kFrameCount] = {};
     uint64_t                 m_globalFenceValue = 0;
+
+    // Ordering lives in DeferredReleaseQueue (render/deferred_release.h), which
+    // has no D3D12 dependency and is unit tested. This class supplies the fence.
+    DeferredReleaseQueue<ComPtr<IUnknown>> m_deferredReleases;
 
     // Dimensions
     int m_width = 0;
