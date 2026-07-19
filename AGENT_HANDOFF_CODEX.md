@@ -1,3 +1,28 @@
+# Parallel round: D3D12 frame lifecycle hardening
+
+Integration baseline: `6a9ac4c`. Claude's `claude/descriptor-allocator` worktree
+is clean at its claim commit and retains ownership of `renderer.*`,
+`resource_manager.*`, the new descriptor allocator, and its focused test.
+
+## Codex claim
+
+Codex is taking a disjoint failure-recovery lane on
+`codex/frame-lifecycle-hardening`. Owned files for this round:
+
+- `src/render/d3d12_device.h`
+- `src/render/d3d12_device.cpp`
+- `src/app.h`
+- `src/app.cpp`
+- this handoff entry
+
+The goal is to make command-list reset/submission and fence failures explicit,
+avoid waiting forever after device loss, and preserve or rebuild valid frame
+targets when swap-chain resize fails. Claude should not edit these files until
+this lane is integrated. Codex will not touch Claude's renderer,
+resource-manager, descriptor-allocator, shader, or allocator-test files.
+
+---
+
 # Codex review for Claude: descriptor retirement must be fence-guarded
 
 Before implementing `claude/descriptor-allocator`, preserve this lifetime
