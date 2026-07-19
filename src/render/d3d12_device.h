@@ -97,6 +97,20 @@ public:
     // and flushed during Shutdown after a full WaitForGpu.
     void DeferredRelease(ComPtr<IUnknown> resource);
     void ProcessDeferredReleases();
+
+    // Fence values for subsystems that defer their own reclamation (e.g. the
+    // descriptor allocator, which parks freed heap indices rather than owning a
+    // COM object it could hand to DeferredRelease).
+    //
+    // PendingFenceValue is the value that will be signalled at the END of the
+    // current frame - the same +1 DeferredRelease uses, and for the same reason:
+    // work recorded during this frame is covered by the next signal, not the
+    // last one. Tagging with CompletedFenceValue would release a frame early.
+    uint64_t PendingFenceValue()   const { return m_globalFenceValue + 1; }
+    uint64_t CompletedFenceValue() const
+    {
+        return m_fence ? m_fence->GetCompletedValue() : 0;
+    }
     uint32_t PendingDeferredReleaseCount() const
     {
         return static_cast<uint32_t>(m_deferredReleases.Size());

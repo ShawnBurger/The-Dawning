@@ -52,6 +52,7 @@ set(RENDER_SOURCES
 set(RENDER_HEADERS
     src/render/d3d12_device.h
     src/render/deferred_release.h
+    src/render/descriptor_allocator.h
     src/render/shader_utils.h
     src/render/mesh.h
     src/render/texture.h
@@ -100,6 +101,7 @@ set(TEST_SOURCES
     tests/test_math.cpp
     tests/test_ecs.cpp
     tests/test_deferred_release.cpp
+    tests/test_descriptor_allocator.cpp
 )
 
 set(TEST_HEADERS

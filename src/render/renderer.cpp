@@ -55,7 +55,7 @@ void Renderer::Shutdown()
     m_pso.Reset();
     m_rootSig.Reset();
     m_textureDescSize = 0;
-    m_nextTextureDescriptor = 1;
+    m_textureAllocator.ReclaimAll();
     core::Log::Info("Renderer shut down");
 }
 
@@ -703,8 +703,24 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     nullSrv.Texture2D.MipLevels = 1;
     device->CreateShaderResourceView(nullptr, &nullSrv, m_textureHeap->GetCPUDescriptorHandleForHeapStart());
 
-    core::Log::Infof("Raster texture heap created (%u descriptors)", kMaxRasterTextures);
+    // Slot 0 stays the null-SRV fallback written just above, so allocation
+    // starts at 1 and the allocator will never recycle index 0.
+    m_textureAllocator.Init(kMaxRasterTextures, 1);
+
+    core::Log::Infof("Raster texture heap created (%u descriptors, %u usable)",
+                     kMaxRasterTextures, kMaxRasterTextures - 1);
     return true;
+}
+
+void Renderer::ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptorIndex)
+{
+    if (descriptorIndex == UINT32_MAX) return;
+
+    // Parked against the value signalled at the END of this frame, not the last
+    // one already signalled: a command list recorded during this frame may still
+    // reference the slot, and the GPU reads shader-visible descriptors at
+    // execution time for the volatile ranges this engine binds.
+    m_textureAllocator.Release(descriptorIndex, device.PendingFenceValue());
 }
 
 uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
@@ -712,13 +728,13 @@ uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
     if (!device || !m_textureHeap || !texture.IsValid())
         return UINT32_MAX;
 
-    if (m_nextTextureDescriptor >= kMaxRasterTextures)
+    const uint32_t descriptorIndex = m_textureAllocator.Allocate();
+    if (descriptorIndex == DescriptorAllocator::kInvalid)
     {
-        core::Log::Error("Raster texture heap is full");
+        core::Log::Errorf("Raster texture heap is full (%u in use, %u capacity)",
+                          m_textureAllocator.InUse(), m_textureAllocator.Capacity());
         return UINT32_MAX;
     }
-
-    uint32_t descriptorIndex = m_nextTextureDescriptor++;
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += static_cast<SIZE_T>(descriptorIndex) * m_textureDescSize;
 
@@ -770,6 +786,11 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
 {
     m_currentFrame = device.FrameIndex();
     m_cbOffset = 0; // Reset ring for this frame
+
+    // Return descriptor slots the GPU has finished with. Done here, once per
+    // frame, so callers of ReleaseTextureDescriptor never have to think about
+    // when a slot becomes reusable.
+    m_textureAllocator.Reclaim(device.CompletedFenceValue());
 
     auto* cmd = device.CmdList();
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
@@ -852,11 +873,11 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     bool useAlbedoTexture = albedoTexture &&
         albedoTexture->IsValid() &&
         albedoTexture->descriptorIndex != UINT32_MAX &&
-        albedoTexture->descriptorIndex < m_nextTextureDescriptor;
+        albedoTexture->descriptorIndex < m_textureAllocator.HighWater();
     bool useNormalTexture = normalTexture &&
         normalTexture->IsValid() &&
         normalTexture->descriptorIndex != UINT32_MAX &&
-        normalTexture->descriptorIndex < m_nextTextureDescriptor;
+        normalTexture->descriptorIndex < m_textureAllocator.HighWater();
 
     // Compute world-view-projection
     core::Mat4x4 wvp = worldMatrix * m_viewProj;

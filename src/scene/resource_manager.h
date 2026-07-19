@@ -23,11 +23,14 @@
 //   still reference it. The generational handle never protected against that —
 //   it invalidates future CPU lookups, and the GPU does not consult it.
 //
-//   Still true and NOT fixed by deferred release: RemoveTexture leaks the
-//   shader-visible descriptor slot that Renderer::RegisterTexture allocated,
-//   because that allocator is a monotonic counter with no free list. Runtime
-//   texture churn will exhaust the heap. RemoveMaterial needs no deferral —
-//   MaterialData is CPU-only and holds no GPU objects.
+//   RemoveTexture also returns the shader-visible descriptor slot that
+//   Renderer::RegisterTexture allocated, via Renderer::ReleaseTextureDescriptor.
+//   That slot is fence-guarded the same way the resource is: it is parked until
+//   the GPU has retired every command list that could still reference it, then
+//   recycled. Texture churn no longer exhausts the heap.
+//
+//   RemoveMaterial needs neither — MaterialData is CPU-only and holds no GPU
+//   objects and no descriptors.
 // =============================================================================
 
 #include "../render/mesh.h"
@@ -35,6 +38,7 @@
 #include "../core/types.h"
 #include "../render/d3d12_device.h"   // for D3D12Device, whose fence-guarded
                                        // queue owns deferred GPU release
+#include "../render/renderer.h"        // for Renderer, which owns the descriptor heap
 #include <cstdint>
 #include <vector>
 
@@ -102,7 +106,8 @@ public:
     TextureHandle AddTexture(render::Texture&& texture, const char* name = nullptr);
     const render::Texture* GetTexture(TextureHandle handle) const;
     bool IsValidTexture(TextureHandle handle) const;
-    void RemoveTexture(TextureHandle handle, render::D3D12Device& device);
+    void RemoveTexture(TextureHandle handle, render::D3D12Device& device,
+                       render::Renderer& renderer);
 
     // --- Statistics ---
     uint32_t MeshCount() const { return m_meshAliveCount; }
