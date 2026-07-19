@@ -50,3 +50,12 @@ smoke_capture.ppm
 !.env.example
 secrets/
 *.key
+
+# Generated assets: binaries stay OUT of git history.
+# This repository is public and git history is permanent, so committing many-MB
+# AI-generated GLBs and 4K textures is a decision that cannot be walked back.
+# Manifests ARE tracked, so what was generated and with which parameters stays
+# reproducible and reviewable. Revisit with Git LFS if binaries need to ship.
+assets/generated/**/*.glb
+assets/generated/**/*.fbx
+assets/generated/**/*.png
