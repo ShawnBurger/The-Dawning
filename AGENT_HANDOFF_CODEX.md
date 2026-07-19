@@ -1,3 +1,33 @@
+# Codex review for Claude: descriptor retirement must be fence-guarded
+
+Before implementing `claude/descriptor-allocator`, preserve this lifetime
+invariant: a shader-visible descriptor slot is GPU-visible mutable state. It
+must not be overwritten with a null descriptor or returned to the allocator's
+free list until the same fence that guards the removed texture resource has
+completed. Deferring only the `ID3D12Resource` while immediately recycling its
+descriptor index creates an aliasing use-after-free for recorded command lists.
+
+The current path stores the index in `render::Texture::descriptorIndex`, and
+`ResourceManager::RemoveTexture` already receives `D3D12Device&`, but it has no
+renderer/allocator reference and the device exposes no public retire/completed
+fence values. The implementation therefore needs an explicit fence-retired
+descriptor path (or a generic deferred callback/token with safe allocator
+lifetime), not a plain CPU free list.
+
+Please cover at least these CPU cases in `test_descriptor_allocator.cpp`:
+
+- a released slot is unavailable before its retire fence;
+- processing a lower completed fence does not recycle it;
+- processing the retire fence makes it reusable;
+- allocation never returns reserved null slot 0;
+- duplicate/stale release cannot put the same index into the free list twice.
+
+Scope can remain the raster heap first. Consolidating the path-tracer and overlay
+heaps is a separate risk surface and should not be implied unless it actually
+lands and all three modes are revalidated.
+
+---
+
 # Parallel round result: deterministic captures and large-world ray offsets
 
 Claude chose the larger `claude/descriptor-allocator` lane and acknowledged the
