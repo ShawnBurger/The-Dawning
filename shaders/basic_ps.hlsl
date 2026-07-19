@@ -130,5 +130,20 @@ float4 main(PSInput input) : SV_TARGET
     // Combine
     float3 finalColor = direct + ambientDiffuse + ambientSpecular;
 
-    return float4(DawningToneMapForDisplay(finalColor), albedo.a * input.color.a);
+    // Linear HDR out. Tone mapping happens once, in tonemap_ps.hlsl, so that
+    // the scene exists as linear radiance in a buffer that bloom/exposure/TAA
+    // can consume.
+    //
+    // Clamped to the largest finite half. The target is R16G16B16A16_FLOAT, and
+    // the specular term can legitimately spike past 65504 at grazing angles,
+    // where the Cook-Torrance denominator sits on its floor while the GGX peak
+    // is large. Storing that as +Inf makes the Reinhard operator in the resolve
+    // evaluate Inf/(Inf+1) = NaN, which reads back as near-black speckle. It did
+    // not surface before because tone mapping happened in the pixel shader, in
+    // fp32, before anything was stored - so the overflow never existed. This is
+    // a storage-range clamp, not an artistic one: Reinhard has already saturated
+    // to 255 by ~1000, so nothing visible is lost.
+    finalColor = min(finalColor, 65504.0);
+
+    return float4(finalColor, albedo.a * input.color.a);
 }

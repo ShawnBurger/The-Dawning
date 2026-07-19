@@ -661,6 +661,19 @@ bool App::HandleResize()
         return false;
     }
 
+    // The HDR scene target is back-buffer sized, so it has to follow. Unlike the
+    // path tracer there is no raster fallback if this fails - the raster path has
+    // nowhere else to draw - so treat it the same as a swap-chain resize failure
+    // and retry rather than rendering into a stale or absent target.
+    if (!m_renderer.ResizeHDRTarget(m_device,
+                                    static_cast<uint32_t>(m_device.Width()),
+                                    static_cast<uint32_t>(m_device.Height())))
+    {
+        core::Log::Error("HDR scene target resize failed; skipping frame and retrying");
+        Sleep(10);
+        return false;
+    }
+
     if (m_rtAvailable &&
         !m_scene.ResizePathTracer(m_device, m_device.Width(), m_device.Height()))
     {
@@ -729,17 +742,10 @@ void App::RenderFrame(const core::TimeStep& timeStep)
     }
     else
     {
-        m_device.TransitionResource(
-            m_device.CurrentBackBuffer(),
-            D3D12_RESOURCE_STATE_PRESENT,
-            D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        auto renderTarget = m_device.CurrentRTV();
-        auto depthStencil = m_device.DSV();
-        commandList->ClearRenderTargetView(renderTarget, clearColor, 0, nullptr);
-        commandList->ClearDepthStencilView(
-            depthStencil, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        commandList->OMSetRenderTargets(1, &renderTarget, FALSE, &depthStencil);
+        // Scene renders into the linear HDR target, not the back buffer. The
+        // back buffer is not touched until ResolveToBackBuffer tone-maps into it,
+        // which is also what transitions it out of PRESENT.
+        m_renderer.BeginScenePass(m_device, clearColor);
 
         D3D12_VIEWPORT viewport = {
             0.0f, 0.0f,
@@ -760,6 +766,13 @@ void App::RenderFrame(const core::TimeStep& timeStep)
         m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
 
+        // Tone-map the linear scene into the back buffer. Post-process passes
+        // (bloom, exposure, TAA) belong between the line above and this one,
+        // which is the whole reason the HDR intermediate exists.
+        m_renderer.ResolveToBackBuffer(m_device);
+
+        // Overlay draws after the resolve, directly in display space, so it is
+        // not tone-mapped. The back buffer is already RENDER_TARGET here.
         if (m_debugOverlayReady && m_showDebugOverlay)
         {
             const render::DebugOverlayState overlayState = BuildOverlayState(timeStep);

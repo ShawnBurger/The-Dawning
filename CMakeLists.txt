@@ -70,6 +70,8 @@ set(SHADER_FILES
     shaders/sky_ps.hlsl
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
+    shaders/tonemap_vs.hlsl
+    shaders/tonemap_ps.hlsl
     shaders/path_trace.hlsl
     shaders/brdf_common.hlsli
     shaders/display_common.hlsli

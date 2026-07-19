@@ -44,6 +44,7 @@ float4 main(PSInput input) : SV_TARGET
                               + camUp    * (ndc.y * tanHalfFovY));
 
     // Same entry point as the DXR miss shader and environment reflections.
+    // Linear HDR out; see basic_ps.hlsl. The resolve tone-maps.
     float3 radiance = DawningSkyRadiance(direction);
-    return float4(DawningToneMapForDisplay(radiance), 1.0);
+    return float4(radiance, 1.0);
 }
