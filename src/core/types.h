@@ -140,10 +140,26 @@ struct Vec3d
 
     Vec3d& operator+=(const Vec3d& v) { x += v.x; y += v.y; z += v.z; return *this; }
     Vec3d& operator-=(const Vec3d& v) { x -= v.x; y -= v.y; z -= v.z; return *this; }
+    Vec3d& operator*=(double s) { x *= s; y *= s; z *= s; return *this; }
+    Vec3d& operator/=(double s) { double inv = 1.0 / s; x *= inv; y *= inv; z *= inv; return *this; }
+
+    bool operator==(const Vec3d& v) const { return x == v.x && y == v.y && z == v.z; }
+    bool operator!=(const Vec3d& v) const { return !(*this == v); }
 
     double Dot(const Vec3d& v) const { return x * v.x + y * v.y + z * v.z; }
+
+    Vec3d Cross(const Vec3d& v) const
+    {
+        return { y * v.z - z * v.y,
+                 z * v.x - x * v.z,
+                 x * v.y - y * v.x };
+    }
+
     double LengthSq() const { return x * x + y * y + z * z; }
     double Length() const { return std::sqrt(LengthSq()); }
+
+    double DistanceSq(const Vec3d& v) const { return (*this - v).LengthSq(); }
+    double Distance(const Vec3d& v) const { return (*this - v).Length(); }
 
     Vec3d Normalized() const
     {
@@ -152,12 +168,33 @@ struct Vec3d
         return *this / len;
     }
 
-    // Convert to float (for GPU) — caller must subtract camera position first!
+    static Vec3d Lerp(const Vec3d& a, const Vec3d& b, double t)
+    {
+        return { a.x + (b.x - a.x) * t,
+                 a.y + (b.y - a.y) * t,
+                 a.z + (b.z - a.z) * t };
+    }
+
+    // Widen from single precision. Safe for offsets and directions; widening an
+    // absolute world position that has already been through float does NOT recover
+    // the precision it lost.
+    static Vec3d FromFloat(const Vec3f& v)
+    {
+        return { static_cast<double>(v.x),
+                 static_cast<double>(v.y),
+                 static_cast<double>(v.z) };
+    }
+
+    // Narrow to float for GPU upload. CALLER MUST SUBTRACT THE CAMERA POSITION
+    // FIRST (Rule 1) - at 1e7 m from the origin, float spacing is about 1 m, so a
+    // narrowed absolute position quantises to visible jitter.
     Vec3f ToFloat() const
     {
         return { static_cast<float>(x), static_cast<float>(y), static_cast<float>(z) };
     }
 };
+
+inline Vec3d operator*(double s, const Vec3d& v) { return v * s; }
 
 // =============================================================================
 // Vec4f — Homogeneous coordinates, shader parameters
@@ -487,6 +524,72 @@ struct Mat4x4
             v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1],
             v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2]
         };
+    }
+
+    // General 4x4 inverse via cofactor expansion. Returns identity and sets
+    // outSingular if the determinant is degenerate, so callers cannot silently
+    // propagate garbage.
+    //
+    // Needed for inverse-view-projection reconstruction. Its absence is why
+    // path_trace.hlsl hardcoded a 70-degree FOV and why path_tracer.cpp uploads
+    // viewProj under a member named for its inverse.
+    static Mat4x4 Inverse(const Mat4x4& mat, bool* outSingular = nullptr)
+    {
+        const float* m = &mat.m[0][0];
+
+        float a2323 = m[10] * m[15] - m[11] * m[14];
+        float a1323 = m[9]  * m[15] - m[11] * m[13];
+        float a1223 = m[9]  * m[14] - m[10] * m[13];
+        float a0323 = m[8]  * m[15] - m[11] * m[12];
+        float a0223 = m[8]  * m[14] - m[10] * m[12];
+        float a0123 = m[8]  * m[13] - m[9]  * m[12];
+        float a2313 = m[6]  * m[15] - m[7]  * m[14];
+        float a1313 = m[5]  * m[15] - m[7]  * m[13];
+        float a1213 = m[5]  * m[14] - m[6]  * m[13];
+        float a2312 = m[6]  * m[11] - m[7]  * m[10];
+        float a1312 = m[5]  * m[11] - m[7]  * m[9];
+        float a1212 = m[5]  * m[10] - m[6]  * m[9];
+        float a0313 = m[4]  * m[15] - m[7]  * m[12];
+        float a0213 = m[4]  * m[14] - m[6]  * m[12];
+        float a0312 = m[4]  * m[11] - m[7]  * m[8];
+        float a0212 = m[4]  * m[10] - m[6]  * m[8];
+        float a0113 = m[4]  * m[13] - m[5]  * m[12];
+        float a0112 = m[4]  * m[9]  - m[5]  * m[8];
+
+        float det = m[0] * (m[5] * a2323 - m[6] * a1323 + m[7] * a1223)
+                  - m[1] * (m[4] * a2323 - m[6] * a0323 + m[7] * a0223)
+                  + m[2] * (m[4] * a1323 - m[5] * a0323 + m[7] * a0123)
+                  - m[3] * (m[4] * a1223 - m[5] * a0223 + m[6] * a0123);
+
+        if (std::fabs(det) < 1e-20f)
+        {
+            if (outSingular) *outSingular = true;
+            return Mat4x4();
+        }
+        if (outSingular) *outSingular = false;
+
+        float invDet = 1.0f / det;
+        Mat4x4 r;
+        float* o = &r.m[0][0];
+
+        o[0]  =  invDet * (m[5] * a2323 - m[6] * a1323 + m[7] * a1223);
+        o[1]  = -invDet * (m[1] * a2323 - m[2] * a1323 + m[3] * a1223);
+        o[2]  =  invDet * (m[1] * a2313 - m[2] * a1313 + m[3] * a1213);
+        o[3]  = -invDet * (m[1] * a2312 - m[2] * a1312 + m[3] * a1212);
+        o[4]  = -invDet * (m[4] * a2323 - m[6] * a0323 + m[7] * a0223);
+        o[5]  =  invDet * (m[0] * a2323 - m[2] * a0323 + m[3] * a0223);
+        o[6]  = -invDet * (m[0] * a2313 - m[2] * a0313 + m[3] * a0213);
+        o[7]  =  invDet * (m[0] * a2312 - m[2] * a0312 + m[3] * a0212);
+        o[8]  =  invDet * (m[4] * a1323 - m[5] * a0323 + m[7] * a0123);
+        o[9]  = -invDet * (m[0] * a1323 - m[1] * a0323 + m[3] * a0123);
+        o[10] =  invDet * (m[0] * a1313 - m[1] * a0313 + m[3] * a0113);
+        o[11] = -invDet * (m[0] * a1312 - m[1] * a0312 + m[3] * a0112);
+        o[12] = -invDet * (m[4] * a1223 - m[5] * a0223 + m[6] * a0123);
+        o[13] =  invDet * (m[0] * a1223 - m[1] * a0223 + m[2] * a0123);
+        o[14] = -invDet * (m[0] * a1213 - m[1] * a0213 + m[2] * a0113);
+        o[15] =  invDet * (m[0] * a1212 - m[1] * a0212 + m[2] * a0112);
+
+        return r;
     }
 
     // Inverse-transpose of the upper-left 3x3 for correct normal transformation.

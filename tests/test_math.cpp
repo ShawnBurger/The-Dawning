@@ -505,3 +505,108 @@ TEST_CASE(Mat4x4_TranslationLivesInRowThree)
     CHECK_APPROX(d.y, 0.0f);
     CHECK_APPROX(d.z, 0.0f);
 }
+
+// -----------------------------------------------------------------------------
+// Mat4x4::Inverse — new. Its absence is why path_trace.hlsl hardcoded a 70-degree
+// FOV and why path_tracer.cpp uploads viewProj under a member named for its
+// inverse. Verified by round-trip rather than by comparing against a hand-written
+// expected matrix, which would just restate the implementation.
+// -----------------------------------------------------------------------------
+TEST_CASE(Mat4x4_InverseRoundTrips)
+{
+    // A deliberately nasty matrix: non-uniform scale, rotation, and translation.
+    const core::Mat4x4 m =
+        core::Mat4x4::Scaling(2.0f, 0.5f, 3.0f) *
+        core::Mat4x4::RotationY(0.7f) *
+        core::Mat4x4::RotationX(-0.3f) *
+        core::Mat4x4::Translation(10.0f, -4.0f, 7.0f);
+
+    bool singular = true;
+    const core::Mat4x4 inv = core::Mat4x4::Inverse(m, &singular);
+    CHECK_FALSE(singular);
+
+    const core::Mat4x4 ident = m * inv;
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            CHECK_APPROX_EPS(ident.m[r][c], r == c ? 1.0f : 0.0f, 1e-4f);
+
+    // A point pushed through m and back must land where it started.
+    const core::Vec3f p = { 3.0f, -2.0f, 5.0f };
+    const core::Vec3f round = inv.TransformPoint(m.TransformPoint(p));
+    CHECK_APPROX_EPS(round.x, p.x, 1e-3f);
+    CHECK_APPROX_EPS(round.y, p.y, 1e-3f);
+    CHECK_APPROX_EPS(round.z, p.z, 1e-3f);
+}
+
+TEST_CASE(Mat4x4_InverseReportsSingular)
+{
+    // Collapsing one axis makes the matrix non-invertible.
+    core::Mat4x4 degenerate = core::Mat4x4::Scaling(1.0f, 0.0f, 1.0f);
+    bool singular = false;
+    const core::Mat4x4 inv = core::Mat4x4::Inverse(degenerate, &singular);
+    CHECK(singular);
+    // Must return identity rather than NaNs, so callers cannot silently propagate
+    // garbage through a transform chain.
+    CHECK_EQ(inv.m[0][0], 1.0f);
+    CHECK_EQ(inv.m[1][1], 1.0f);
+}
+
+// -----------------------------------------------------------------------------
+// Vec3d — CLAUDE.md Rule 1 requires double-precision world positions, but Vec3d
+// lacked Cross, compound assignment, scalar-left multiply and Lerp, so it could
+// not actually receive the conversion. These cover the added surface.
+// -----------------------------------------------------------------------------
+TEST_CASE(Vec3d_CrossMatchesRightHandRule)
+{
+    const core::Vec3d x = { 1.0, 0.0, 0.0 };
+    const core::Vec3d y = { 0.0, 1.0, 0.0 };
+    const core::Vec3d z = x.Cross(y);
+    CHECK_APPROX(static_cast<float>(z.x), 0.0f);
+    CHECK_APPROX(static_cast<float>(z.y), 0.0f);
+    CHECK_APPROX(static_cast<float>(z.z), 1.0f);
+
+    // Anti-commutative.
+    const core::Vec3d back = y.Cross(x);
+    CHECK_APPROX(static_cast<float>(back.z), -1.0f);
+}
+
+TEST_CASE(Vec3d_ScalarAndCompoundOperators)
+{
+    core::Vec3d v = { 1.0, 2.0, 3.0 };
+    v *= 2.0;
+    CHECK_APPROX(static_cast<float>(v.x), 2.0f);
+    CHECK_APPROX(static_cast<float>(v.z), 6.0f);
+    v /= 2.0;
+    CHECK_APPROX(static_cast<float>(v.z), 3.0f);
+
+    // Scalar on the left must compile and match scalar on the right.
+    const core::Vec3d left = 3.0 * v;
+    const core::Vec3d right = v * 3.0;
+    CHECK(left == right);
+}
+
+TEST_CASE(Vec3d_LerpAndDistance)
+{
+    const core::Vec3d a = { 0.0, 0.0, 0.0 };
+    const core::Vec3d b = { 10.0, 0.0, 0.0 };
+    const core::Vec3d mid = core::Vec3d::Lerp(a, b, 0.25);
+    CHECK_APPROX(static_cast<float>(mid.x), 2.5f);
+    CHECK_APPROX(static_cast<float>(a.Distance(b)), 10.0f);
+    CHECK_APPROX(static_cast<float>(a.DistanceSq(b)), 100.0f);
+}
+
+// The whole point of Rule 1: at planetary distances float cannot represent world
+// positions, but the camera-relative difference is small and representable.
+TEST_CASE(Vec3d_CameraRelativeSurvivesPlanetaryDistance)
+{
+    // 1e7 metres from the origin, where float spacing is about 1 metre.
+    const core::Vec3d cameraPos = { 1.0e7, 0.0, 0.0 };
+    const core::Vec3d objectPos = { 1.0e7 + 0.25, 0.0, 0.0 };
+
+    // Narrowing the absolute positions loses the separation entirely.
+    CHECK_EQ(cameraPos.ToFloat().x, objectPos.ToFloat().x);
+
+    // Subtracting first preserves it exactly.
+    const core::Vec3f relative = (objectPos - cameraPos).ToFloat();
+    CHECK_APPROX_EPS(relative.x, 0.25f, 1e-6f);
+}
