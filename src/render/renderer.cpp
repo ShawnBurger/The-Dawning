@@ -1645,6 +1645,138 @@ void Renderer::EndShadowPass(D3D12Device& device)
     m_shadowIsDepthTarget = false;
 }
 
+bool Renderer::RecordShadowMapReadback(D3D12Device& device)
+{
+    if (!m_shadowMap) return false;
+    auto* cmd = device.CmdList();
+    auto* dev = device.Device();
+    if (!cmd || !dev) return false;
+
+    // The copy destination describes the REGION, not the resource: a placed
+    // footprint whose row pitch is 256-byte aligned as the API requires.
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    footprint.Offset                    = 0;
+    footprint.Footprint.Format          = DXGI_FORMAT_R32_FLOAT;
+    footprint.Footprint.Width           = kShadowProbeSize;
+    footprint.Footprint.Height          = kShadowProbeSize;
+    footprint.Footprint.Depth           = 1;
+    footprint.Footprint.RowPitch        =
+        (kShadowProbeSize * 4u + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u) &
+        ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
+
+    const UINT64 totalBytes =
+        static_cast<UINT64>(footprint.Footprint.RowPitch) * kShadowProbeSize;
+
+    if (!m_shadowReadback)
+    {
+        D3D12_HEAP_PROPERTIES heapProps = {};
+        heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+
+        D3D12_RESOURCE_DESC bufDesc = {};
+        bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufDesc.Width            = totalBytes;
+        bufDesc.Height           = 1;
+        bufDesc.DepthOrArraySize = 1;
+        bufDesc.MipLevels        = 1;
+        bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
+        bufDesc.SampleDesc       = { 1, 0 };
+        bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        HRESULT hr = dev->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&m_shadowReadback));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Shadow map readback allocation failed: 0x%08X", hr);
+            return false;
+        }
+        m_shadowReadback->SetName(L"ShadowMapReadback");
+    }
+
+    // EndShadowPass left the map in PIXEL_SHADER_RESOURCE; hand it back that way.
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource   = m_shadowMap.Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd->ResourceBarrier(1, &barrier);
+
+    D3D12_TEXTURE_COPY_LOCATION dst = {};
+    dst.pResource       = m_shadowReadback.Get();
+    dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = footprint;
+
+    D3D12_TEXTURE_COPY_LOCATION src = {};
+    src.pResource        = m_shadowMap.Get();
+    src.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = 0;
+
+    const UINT half = kShadowProbeSize / 2u;
+    D3D12_BOX box = {};
+    box.left   = kShadowMapSize / 2u - half;
+    box.top    = kShadowMapSize / 2u - half;
+    box.front  = 0;
+    box.right  = kShadowMapSize / 2u + half;
+    box.bottom = kShadowMapSize / 2u + half;
+    box.back   = 1;
+    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, &box);
+
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    cmd->ResourceBarrier(1, &barrier);
+    return true;
+}
+
+bool Renderer::ReadShadowMapCoverage(float& writtenFraction, float& minDepth) const
+{
+    writtenFraction = 0.0f;
+    minDepth        = 1.0f;
+    if (!m_shadowReadback) return false;
+
+    void* mapped = nullptr;
+    D3D12_RANGE readRange = { 0, 0 };  // size filled below
+    const UINT rowPitch =
+        (kShadowProbeSize * 4u + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u) &
+        ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
+    readRange.End = static_cast<SIZE_T>(rowPitch) * kShadowProbeSize;
+
+    HRESULT hr = m_shadowReadback->Map(0, &readRange, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("Shadow map readback Map failed: 0x%08X", hr);
+        return false;
+    }
+
+    uint64_t written = 0;
+    const auto* bytes = static_cast<const uint8_t*>(mapped);
+    for (uint32_t y = 0; y < kShadowProbeSize; ++y)
+    {
+        const auto* row = reinterpret_cast<const float*>(bytes + static_cast<size_t>(y) * rowPitch);
+        for (uint32_t x = 0; x < kShadowProbeSize; ++x)
+        {
+            const float d = row[x];
+            // Strictly less than the clear value. A depth of exactly 1.0 is
+            // either the cleared background or geometry at the far plane, and
+            // neither counts as evidence the pass drew anything.
+            if (d < 1.0f)
+            {
+                ++written;
+                if (d < minDepth) minDepth = d;
+            }
+        }
+    }
+
+    // Nothing was written back, so tell the runtime not to flush anything.
+    const D3D12_RANGE noWrite = { 0, 0 };
+    m_shadowReadback->Unmap(0, &noWrite);
+
+    writtenFraction = static_cast<float>(written) /
+                      static_cast<float>(kShadowProbeSize * kShadowProbeSize);
+    return true;
+}
+
 void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
                               const core::Mat4x4& worldMatrix)
 {

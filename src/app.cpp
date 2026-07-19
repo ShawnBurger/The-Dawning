@@ -702,6 +702,7 @@ int App::RunMainLoop()
             if (m_frameCount >= smokeEndFrame)
             {
                 m_captureThisFrame = m_options.smokeCapture;
+                m_verifyShadowThisFrame = true;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");
                 core::Log::Infof("[SMOKE] rt_available=%s", m_rtAvailable ? "yes" : "no");
                 core::Log::Infof("[SMOKE] rt_active=%s",
@@ -1153,6 +1154,14 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (m_captureThisFrame && !m_device.RecordBackBufferReadback())
         m_captureThisFrame = false;
 
+    // Probe the shadow map on the same frame the capture is taken, and only in
+    // smoke mode - it costs a copy and a GPU-visible readback.
+    const bool probeShadow = m_verifyShadowThisFrame &&
+                             !m_usePathTracing &&
+                             m_renderer.ShadowsAvailable();
+    if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
+        m_verifyShadowThisFrame = false;
+
     const bool vsync = !(m_options.smoke && m_options.smokeUnlocked);
     if (!m_device.ExecuteAndPresent(vsync))
         return false;
@@ -1169,6 +1178,28 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         m_captureThisFrame = false;
         if (!m_device.WriteBackBufferCapture(kSmokeCaptureFile))
             return false;
+    }
+
+    if (probeShadow && m_verifyShadowThisFrame)
+    {
+        m_verifyShadowThisFrame = false;
+        float writtenFraction = 0.0f;
+        float minDepth        = 1.0f;
+        if (m_renderer.ReadShadowMapCoverage(writtenFraction, minDepth))
+        {
+            // The assertion is "the depth pass rasterised something", not a
+            // threshold on how much. Deleting the pass, culling everything, or
+            // an inverted light matrix all land on zero; anything above it means
+            // geometry reached the map.
+            core::Log::Infof("[SMOKE] shadow_map_written=%s",
+                             writtenFraction > 0.0f ? "yes" : "no");
+            core::Log::Infof("[SMOKE] shadow_written_fraction=%.3f shadow_min_depth=%.4f",
+                             writtenFraction, minDepth);
+        }
+        else
+        {
+            core::Log::Info("[SMOKE] shadow_map_written=unknown");
+        }
     }
 
     if (m_device.IsDeviceLost())

@@ -85,6 +85,14 @@ is the expected size, is not essentially black, is not blown out, has a
 reasonable fraction of non-black pixels, and contains more than a handful of
 distinct colours.
 
+In raster mode the harness additionally probes the shadow map itself, reading
+back a 256x256 window from its centre and asserting that the depth pass
+rasterised something. `shadow_map=ok` only proves the resource was created;
+deleting the shadow pass outright leaves the map at its cleared value, every
+pixel reads fully lit, and the frame still looks entirely plausible. The probe
+was verified by deleting the caster draw and confirming the marker flips to
+`no`, which is the only way to know an assertion has teeth.
+
 This is what separates the harness from a liveness check. Everything else it
 verifies proves the engine did not crash; only this proves it drew something. A
 black frame, inverted culling, a shader emitting nothing, or NaN-poisoned output
