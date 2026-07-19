@@ -26,7 +26,7 @@ class Scene
 {
 public:
     void Init();
-    void Shutdown();
+    void Shutdown(render::D3D12Device& device, render::Renderer& renderer);
 
     // --- Entity creation helpers ---
 

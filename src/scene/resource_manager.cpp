@@ -18,9 +18,13 @@ void ResourceManager::Init()
     core::Log::Info("ResourceManager initialized");
 }
 
-void ResourceManager::Shutdown()
+void ResourceManager::Shutdown(render::D3D12Device& device, render::Renderer& renderer)
 {
-    // GPU resources in mesh slots are released via ComPtr destructors
+    for (uint32_t i = 0; i < m_meshSlots.size(); ++i)
+    {
+        if (m_meshSlots[i].alive)
+            RemoveMesh(MeshHandle(i, m_meshSlots[i].generation), device);
+    }
     m_meshSlots.clear();
     m_meshFreeList.clear();
     m_meshAliveCount = 0;
@@ -29,6 +33,14 @@ void ResourceManager::Shutdown()
     m_materialFreeList.clear();
     m_materialAliveCount = 0;
 
+    for (uint32_t i = 0; i < m_textureSlots.size(); ++i)
+    {
+        if (m_textureSlots[i].alive)
+        {
+            RemoveTexture(TextureHandle(i, m_textureSlots[i].generation),
+                          device, renderer);
+        }
+    }
     m_textureSlots.clear();
     m_textureFreeList.clear();
     m_textureAliveCount = 0;
@@ -179,7 +191,11 @@ TextureHandle ResourceManager::AddTexture(render::Texture&& texture, const char*
     }
 
     auto& slot = m_textureSlots[index];
-    slot.texture = std::move(texture);
+    if (!slot.texture.Adopt(std::move(texture)))
+    {
+        core::Log::Errorf("Texture slot %u still owns an unretired resource", index);
+        return TextureHandle{};
+    }
     slot.generation = gen;
     slot.alive = true;
 
@@ -232,7 +248,7 @@ void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& d
     // different texture.
     device.DeferredRelease(slot.texture.resource);
     renderer.ReleaseTextureDescriptor(device, slot.texture.descriptorIndex);
-    slot.texture = render::Texture{};
+    slot.texture.ResetAfterRetirement();
 
     m_textureFreeList.push_back(idx);
     m_textureAliveCount--;

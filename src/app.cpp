@@ -256,21 +256,21 @@ bool App::InitializeScene()
     render::Texture groundTexture;
     if (FileExists(groundKTXPath))
     {
-        groundTexture = render::CreateTexture2DFromKTXFile(
+        groundTexture.Adopt(render::CreateTexture2DFromKTXFile(
             m_device.Device(), m_device.CmdList(),
-            groundKTXPath, groundTexUp, L"GroundAlbedoTexture");
+            groundKTXPath, groundTexUp, L"GroundAlbedoTexture"));
     }
     if (!groundTexture.IsValid() && FileExists(groundPNGPath))
     {
-        groundTexture = render::CreateTexture2DFromWICFile(
+        groundTexture.Adopt(render::CreateTexture2DFromWICFile(
             m_device.Device(), m_device.CmdList(),
-            groundPNGPath, groundTexUp, L"GroundAlbedoTexture");
+            groundPNGPath, groundTexUp, L"GroundAlbedoTexture"));
     }
     if (!groundTexture.IsValid())
     {
-        groundTexture = render::CreateTexture2DFromDDSFile(
+        groundTexture.Adopt(render::CreateTexture2DFromDDSFile(
             m_device.Device(), m_device.CmdList(),
-            groundDDSPath, groundTexUp, L"GroundAlbedoTexture");
+            groundDDSPath, groundTexUp, L"GroundAlbedoTexture"));
     }
     if (!groundTexture.IsValid())
     {
@@ -278,30 +278,30 @@ bool App::InitializeScene()
             512, 512, 32,
             { 0.82f, 0.86f, 0.91f, 1.0f },
             { 0.48f, 0.53f, 0.60f, 1.0f });
-        groundTexture = render::CreateTexture2DFromRGBA8(
+        groundTexture.Adopt(render::CreateTexture2DFromRGBA8(
             m_device.Device(), m_device.CmdList(),
-            pixels.data(), 512, 512, groundTexUp, L"GroundAlbedoTexture");
+            pixels.data(), 512, 512, groundTexUp, L"GroundAlbedoTexture"));
     }
     groundTexture.descriptorIndex = m_renderer.RegisterTexture(m_device.Device(), groundTexture);
 
     render::Texture cubeTexture;
     if (FileExists(cubeKTXPath))
     {
-        cubeTexture = render::CreateTexture2DFromKTXFile(
+        cubeTexture.Adopt(render::CreateTexture2DFromKTXFile(
             m_device.Device(), m_device.CmdList(),
-            cubeKTXPath, cubeTexUp, L"BluePanelAlbedoTexture");
+            cubeKTXPath, cubeTexUp, L"BluePanelAlbedoTexture"));
     }
     if (!cubeTexture.IsValid() && FileExists(cubePNGPath))
     {
-        cubeTexture = render::CreateTexture2DFromWICFile(
+        cubeTexture.Adopt(render::CreateTexture2DFromWICFile(
             m_device.Device(), m_device.CmdList(),
-            cubePNGPath, cubeTexUp, L"BluePanelAlbedoTexture");
+            cubePNGPath, cubeTexUp, L"BluePanelAlbedoTexture"));
     }
     if (!cubeTexture.IsValid())
     {
-        cubeTexture = render::CreateTexture2DFromDDSFile(
+        cubeTexture.Adopt(render::CreateTexture2DFromDDSFile(
             m_device.Device(), m_device.CmdList(),
-            cubeDDSPath, cubeTexUp, L"BluePanelAlbedoTexture");
+            cubeDDSPath, cubeTexUp, L"BluePanelAlbedoTexture"));
     }
     if (!cubeTexture.IsValid())
     {
@@ -309,37 +309,37 @@ bool App::InitializeScene()
             256, 256, 32,
             { 0.20f, 0.42f, 0.92f, 1.0f },
             { 0.03f, 0.08f, 0.20f, 1.0f });
-        cubeTexture = render::CreateTexture2DFromRGBA8(
+        cubeTexture.Adopt(render::CreateTexture2DFromRGBA8(
             m_device.Device(), m_device.CmdList(),
-            pixels.data(), 256, 256, cubeTexUp, L"BluePanelAlbedoTexture");
+            pixels.data(), 256, 256, cubeTexUp, L"BluePanelAlbedoTexture"));
     }
     cubeTexture.descriptorIndex = m_renderer.RegisterTexture(m_device.Device(), cubeTexture);
 
     render::Texture groundNormalTexture;
     if (FileExists(groundNormalKTXPath))
     {
-        groundNormalTexture = render::CreateTexture2DFromKTXFile(
+        groundNormalTexture.Adopt(render::CreateTexture2DFromKTXFile(
             m_device.Device(), m_device.CmdList(),
-            groundNormalKTXPath, groundNormalTexUp, L"GroundNormalTexture");
+            groundNormalKTXPath, groundNormalTexUp, L"GroundNormalTexture"));
     }
     if (!groundNormalTexture.IsValid() && FileExists(groundNormalPNGPath))
     {
-        groundNormalTexture = render::CreateTexture2DFromWICFile(
+        groundNormalTexture.Adopt(render::CreateTexture2DFromWICFile(
             m_device.Device(), m_device.CmdList(),
-            groundNormalPNGPath, groundNormalTexUp, L"GroundNormalTexture");
+            groundNormalPNGPath, groundNormalTexUp, L"GroundNormalTexture"));
     }
     if (!groundNormalTexture.IsValid() && FileExists(groundNormalDDSPath))
     {
-        groundNormalTexture = render::CreateTexture2DFromDDSFile(
+        groundNormalTexture.Adopt(render::CreateTexture2DFromDDSFile(
             m_device.Device(), m_device.CmdList(),
-            groundNormalDDSPath, groundNormalTexUp, L"GroundNormalTexture");
+            groundNormalDDSPath, groundNormalTexUp, L"GroundNormalTexture"));
     }
     if (!groundNormalTexture.IsValid())
     {
         auto pixels = render::GenerateWaveNormalTextureRGBA8(512, 512, 8.0f, 0.008f);
-        groundNormalTexture = render::CreateTexture2DFromRGBA8(
+        groundNormalTexture.Adopt(render::CreateTexture2DFromRGBA8(
             m_device.Device(), m_device.CmdList(),
-            pixels.data(), 512, 512, groundNormalTexUp, L"GroundNormalTexture");
+            pixels.data(), 512, 512, groundNormalTexUp, L"GroundNormalTexture"));
     }
     groundNormalTexture.descriptorIndex =
         m_renderer.RegisterTexture(m_device.Device(), groundNormalTexture);
@@ -347,28 +347,28 @@ bool App::InitializeScene()
     render::Texture cubeNormalTexture;
     if (FileExists(cubeNormalKTXPath))
     {
-        cubeNormalTexture = render::CreateTexture2DFromKTXFile(
+        cubeNormalTexture.Adopt(render::CreateTexture2DFromKTXFile(
             m_device.Device(), m_device.CmdList(),
-            cubeNormalKTXPath, cubeNormalTexUp, L"CubeNormalTexture");
+            cubeNormalKTXPath, cubeNormalTexUp, L"CubeNormalTexture"));
     }
     if (!cubeNormalTexture.IsValid() && FileExists(cubeNormalPNGPath))
     {
-        cubeNormalTexture = render::CreateTexture2DFromWICFile(
+        cubeNormalTexture.Adopt(render::CreateTexture2DFromWICFile(
             m_device.Device(), m_device.CmdList(),
-            cubeNormalPNGPath, cubeNormalTexUp, L"CubeNormalTexture");
+            cubeNormalPNGPath, cubeNormalTexUp, L"CubeNormalTexture"));
     }
     if (!cubeNormalTexture.IsValid() && FileExists(cubeNormalDDSPath))
     {
-        cubeNormalTexture = render::CreateTexture2DFromDDSFile(
+        cubeNormalTexture.Adopt(render::CreateTexture2DFromDDSFile(
             m_device.Device(), m_device.CmdList(),
-            cubeNormalDDSPath, cubeNormalTexUp, L"CubeNormalTexture");
+            cubeNormalDDSPath, cubeNormalTexUp, L"CubeNormalTexture"));
     }
     if (!cubeNormalTexture.IsValid())
     {
         auto pixels = render::GenerateWaveNormalTextureRGBA8(256, 256, 6.0f, 0.012f);
-        cubeNormalTexture = render::CreateTexture2DFromRGBA8(
+        cubeNormalTexture.Adopt(render::CreateTexture2DFromRGBA8(
             m_device.Device(), m_device.CmdList(),
-            pixels.data(), 256, 256, cubeNormalTexUp, L"CubeNormalTexture");
+            pixels.data(), 256, 256, cubeNormalTexUp, L"CubeNormalTexture"));
     }
     cubeNormalTexture.descriptorIndex =
         m_renderer.RegisterTexture(m_device.Device(), cubeNormalTexture);
@@ -394,6 +394,7 @@ bool App::InitializeScene()
         std::move(groundNormalTexture), "GroundWaveNormal");
     const auto cubeNormal = resources.AddTexture(
         std::move(cubeNormalTexture), "CubeWaveNormal");
+    m_smokeDescriptorTexture = groundAlbedo;
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
                      cube.Index(), plane.Index(), sphere.Index());
@@ -583,6 +584,12 @@ int App::RunMainLoop()
         if (!ApplySmokeResizeStep())
         {
             m_exitCode = 6;
+            m_running = false;
+            break;
+        }
+        if (!ApplySmokeDescriptorStress())
+        {
+            m_exitCode = 7;
             m_running = false;
             break;
         }
@@ -808,6 +815,61 @@ bool App::ApplySmokeResizeStep()
     return true;
 }
 
+bool App::ApplySmokeDescriptorStress()
+{
+    if (!m_options.smoke)
+        return true;
+
+    const render::Texture* texture =
+        m_scene.GetResources().GetTexture(m_smokeDescriptorTexture);
+    if (!texture || !texture->IsValid())
+    {
+        core::Log::Error("Smoke descriptor stress texture is unavailable");
+        return false;
+    }
+
+    if (m_frameCount == 4)
+    {
+        m_smokeRetiredDescriptor =
+            m_renderer.RegisterTexture(m_device.Device(), *texture);
+        if (m_smokeRetiredDescriptor == UINT32_MAX)
+        {
+            core::Log::Error("Smoke descriptor stress could not allocate retirement slot");
+            return false;
+        }
+
+        m_renderer.ReleaseTextureDescriptor(m_device, m_smokeRetiredDescriptor);
+        m_smokeHeldDescriptor =
+            m_renderer.RegisterTexture(m_device.Device(), *texture);
+        if (m_smokeHeldDescriptor == UINT32_MAX ||
+            m_smokeHeldDescriptor == m_smokeRetiredDescriptor)
+        {
+            core::Log::Error("Raster descriptor was reused before its fence completed");
+            return false;
+        }
+        core::Log::Info("[SMOKE] descriptor_reuse_before_fence=blocked");
+    }
+    else if (m_frameCount == 12)
+    {
+        const uint32_t recycled =
+            m_renderer.RegisterTexture(m_device.Device(), *texture);
+        if (recycled != m_smokeRetiredDescriptor)
+        {
+            core::Log::Errorf("Raster descriptor was not recycled after fence completion "
+                              "(expected %u, got %u)",
+                              m_smokeRetiredDescriptor, recycled);
+            return false;
+        }
+
+        m_renderer.ReleaseTextureDescriptor(m_device, m_smokeHeldDescriptor);
+        m_renderer.ReleaseTextureDescriptor(m_device, recycled);
+        m_smokeHeldDescriptor = UINT32_MAX;
+        core::Log::Info("[SMOKE] descriptor_reuse_after_fence=reused");
+    }
+
+    return true;
+}
+
 render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep) const
 {
     render::DebugOverlayState state = {};
@@ -832,6 +894,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         return false;
     }
     auto* commandList = m_device.CmdList();
+    m_renderer.ReclaimTextureDescriptors(m_device);
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
 
     if (renderedPathTracing)
@@ -949,8 +1012,15 @@ void App::Shutdown()
         core::Log::Error("GPU did not become idle before application resource shutdown");
     if (m_sceneReady)
     {
-        m_scene.Shutdown();
+        m_scene.Shutdown(m_device, m_renderer);
         m_sceneReady = false;
+        if (m_options.smoke)
+        {
+            core::Log::Infof("[SMOKE] descriptors_in_use_after_scene_shutdown=%u",
+                             m_renderer.TextureDescriptorsInUse());
+            core::Log::Infof("[SMOKE] descriptors_pending_after_scene_shutdown=%zu",
+                             m_renderer.TextureDescriptorsPending());
+        }
     }
     if (m_debugOverlayAttempted)
     {
@@ -962,6 +1032,11 @@ void App::Shutdown()
     {
         m_renderer.Shutdown();
         m_rendererReady = false;
+        if (m_options.smoke)
+        {
+            core::Log::Infof("[SMOKE] descriptors_pending_after_renderer_shutdown=%zu",
+                             m_renderer.TextureDescriptorsPending());
+        }
     }
     if (m_deviceReady)
     {

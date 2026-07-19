@@ -89,7 +89,7 @@ class ResourceManager
 {
 public:
     void Init();
-    void Shutdown();
+    void Shutdown(render::D3D12Device& device, render::Renderer& renderer);
 
     // --- Mesh management ---
     MeshHandle AddMesh(render::Mesh&& mesh, const char* name = nullptr);

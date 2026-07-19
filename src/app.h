@@ -42,6 +42,7 @@ private:
     void TogglePathTracing();
     bool HandleResize();
     bool ApplySmokeResizeStep();
+    bool ApplySmokeDescriptorStress();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
     void UpdateCamera(const core::TimeStep& timeStep);
     bool RenderFrame(const core::TimeStep& timeStep);
@@ -73,6 +74,9 @@ private:
     bool m_smokeRTStarted = false;
     bool m_captureThisFrame = false;
     uint32_t m_smokeResizeRequests = 0;
+    scene::TextureHandle m_smokeDescriptorTexture;
+    uint32_t m_smokeRetiredDescriptor = UINT32_MAX;
+    uint32_t m_smokeHeldDescriptor = UINT32_MAX;
     uint64_t m_frameCount = 0;
     float m_titleTimer = 0.0f;
 

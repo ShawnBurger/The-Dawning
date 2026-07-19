@@ -43,8 +43,12 @@ public:
         m_capacity   = capacity;
         m_firstIndex = firstIndex < capacity ? firstIndex : capacity;
         m_highWater  = m_firstIndex;
+        m_inUse      = 0;
         m_free.clear();
         m_pending.clear();
+        m_states.assign(capacity, SlotState::NeverAllocated);
+        for (uint32_t i = 0; i < m_firstIndex; ++i)
+            m_states[i] = SlotState::Reserved;
     }
 
     // Prefers recycled slots over fresh ones so the high-water mark stays low
@@ -55,20 +59,33 @@ public:
         {
             const uint32_t index = m_free.back();
             m_free.pop_back();
+            m_states[index] = SlotState::InUse;
+            ++m_inUse;
             return index;
         }
         if (m_highWater < m_capacity)
-            return m_highWater++;
+        {
+            const uint32_t index = m_highWater++;
+            m_states[index] = SlotState::InUse;
+            ++m_inUse;
+            return index;
+        }
         return kInvalid;
     }
 
     // Park `index` until the GPU passes `fenceValue`. Not returned to the free
     // list here — see the header comment.
-    void Release(uint32_t index, uint64_t fenceValue)
+    bool Release(uint32_t index, uint64_t fenceValue)
     {
         if (index == kInvalid || index < m_firstIndex || index >= m_capacity)
-            return;   // Never recycle the reserved prefix or an out-of-range slot.
+            return false;
+        if (m_states[index] != SlotState::InUse)
+            return false;
+
+        m_states[index] = SlotState::Pending;
+        --m_inUse;
         m_pending.push_back(Pending{ fenceValue, index });
+        return true;
     }
 
     // Move every slot the GPU has finished with into the free list. Returns how
@@ -83,8 +100,13 @@ public:
         {
             if (m_pending[i].fenceValue <= completedFenceValue)
             {
-                m_free.push_back(m_pending[i].index);
-                ++reclaimed;
+                const uint32_t index = m_pending[i].index;
+                if (m_states[index] == SlotState::Pending)
+                {
+                    m_states[index] = SlotState::Free;
+                    m_free.push_back(index);
+                    ++reclaimed;
+                }
             }
             else
             {
@@ -100,7 +122,13 @@ public:
     void ReclaimAll()
     {
         for (const auto& p : m_pending)
-            m_free.push_back(p.index);
+        {
+            if (m_states[p.index] == SlotState::Pending)
+            {
+                m_states[p.index] = SlotState::Free;
+                m_free.push_back(p.index);
+            }
+        }
         m_pending.clear();
     }
 
@@ -110,16 +138,18 @@ public:
     size_t   FreeCount()     const { return m_free.size(); }
     size_t   PendingCount()  const { return m_pending.size(); }
 
-    // Slots currently handed out: everything below the high-water mark that is
-    // neither free nor waiting on a fence.
-    uint32_t InUse() const
-    {
-        return (m_highWater - m_firstIndex)
-             - static_cast<uint32_t>(m_free.size())
-             - static_cast<uint32_t>(m_pending.size());
-    }
+    uint32_t InUse() const { return m_inUse; }
 
 private:
+    enum class SlotState : uint8_t
+    {
+        Reserved,
+        NeverAllocated,
+        InUse,
+        Pending,
+        Free,
+    };
+
     struct Pending
     {
         uint64_t fenceValue = 0;
@@ -129,8 +159,10 @@ private:
     uint32_t m_capacity   = 0;
     uint32_t m_firstIndex = 0;
     uint32_t m_highWater  = 0;
+    uint32_t m_inUse      = 0;
     std::vector<uint32_t> m_free;
     std::vector<Pending>  m_pending;
+    std::vector<SlotState> m_states;
 };
 
 } // namespace render

@@ -11,6 +11,48 @@
 
 #include "test_framework.h"
 #include "render/descriptor_allocator.h"
+#include "render/texture.h"
+
+#include <type_traits>
+
+static_assert(!std::is_copy_constructible_v<render::Texture>);
+static_assert(!std::is_copy_assignable_v<render::Texture>);
+static_assert(!std::is_move_assignable_v<render::Texture>);
+
+TEST_CASE(Texture_MoveTransfersAndClearsDescriptorOwnership)
+{
+    render::Texture source;
+    source.width = 64;
+    source.height = 32;
+    source.mipCount = 4;
+    source.descriptorIndex = 7;
+
+    render::Texture destination(std::move(source));
+
+    CHECK_EQ(destination.width, (uint32_t)64);
+    CHECK_EQ(destination.height, (uint32_t)32);
+    CHECK_EQ(destination.mipCount, (uint32_t)4);
+    CHECK_EQ(destination.descriptorIndex, (uint32_t)7);
+    CHECK_EQ(source.descriptorIndex, UINT32_MAX);
+}
+
+TEST_CASE(Texture_AdoptRefusesToOverwriteExistingOwnership)
+{
+    render::Texture destination;
+    destination.descriptorIndex = 3;
+
+    render::Texture source;
+    source.descriptorIndex = 7;
+
+    CHECK_FALSE(destination.Adopt(std::move(source)));
+    CHECK_EQ(destination.descriptorIndex, (uint32_t)3);
+    CHECK_EQ(source.descriptorIndex, (uint32_t)7);
+
+    destination.ResetAfterRetirement();
+    CHECK(destination.Adopt(std::move(source)));
+    CHECK_EQ(destination.descriptorIndex, (uint32_t)7);
+    CHECK_EQ(source.descriptorIndex, UINT32_MAX);
+}
 
 TEST_CASE(DescriptorAllocator_ReservesPrefix)
 {
@@ -124,6 +166,44 @@ TEST_CASE(DescriptorAllocator_RejectsReservedAndOutOfRangeReleases)
 
     CHECK_EQ(a.Reclaim(1000), (size_t)0);
     CHECK_EQ(a.FreeCount(), (size_t)0);
+}
+
+TEST_CASE(DescriptorAllocator_RejectsDuplicateAndNeverAllocatedReleases)
+{
+    render::DescriptorAllocator a;
+    a.Init(8, 1);
+
+    const uint32_t live = a.Allocate();
+    CHECK(a.Release(live, 5));
+    CHECK_FALSE(a.Release(live, 5));
+    CHECK_FALSE(a.Release(6, 5));
+    CHECK_EQ(a.PendingCount(), (size_t)1);
+    CHECK_EQ(a.InUse(), (uint32_t)0);
+
+    CHECK_EQ(a.Reclaim(5), (size_t)1);
+    CHECK_FALSE(a.Release(live, 6));
+
+    const uint32_t recycled = a.Allocate();
+    const uint32_t fresh = a.Allocate();
+    CHECK_EQ(recycled, live);
+    CHECK(fresh != live);
+    CHECK_EQ(a.InUse(), (uint32_t)2);
+}
+
+TEST_CASE(DescriptorAllocator_DuplicateReleaseCannotAliasLiveSlots)
+{
+    render::DescriptorAllocator a;
+    a.Init(4, 0);
+
+    const uint32_t released = a.Allocate();
+    CHECK(a.Release(released, 1));
+    CHECK_FALSE(a.Release(released, 1));
+    CHECK_EQ(a.Reclaim(1), (size_t)1);
+
+    const uint32_t first = a.Allocate();
+    const uint32_t second = a.Allocate();
+    CHECK_EQ(first, released);
+    CHECK(second != first);
 }
 
 TEST_CASE(DescriptorAllocator_ReclaimAllDrainsRegardlessOfFence)

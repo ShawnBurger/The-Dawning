@@ -111,10 +111,12 @@ public:
     // render/descriptor_allocator.h. Without this every removed texture consumed
     // one of 127 usable slots permanently.
     void ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptorIndex);
+    void ReclaimTextureDescriptors(D3D12Device& device);
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
     uint32_t TextureDescriptorHighWater() const { return m_textureAllocator.HighWater(); }
+    size_t TextureDescriptorsPending() const { return m_textureAllocator.PendingCount(); }
 
     // -------------------------------------------------------------------------
     // HDR scene target and tone-map resolve

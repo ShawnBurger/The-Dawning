@@ -19,14 +19,14 @@ void Scene::Init()
     core::Log::Info("Scene initialized");
 }
 
-void Scene::Shutdown()
+void Scene::Shutdown(render::D3D12Device& device, render::Renderer& renderer)
 {
     if (m_rtReady)
     {
         m_pathTracer.Shutdown();
         m_rtReady = false;
     }
-    m_resources.Shutdown();
+    m_resources.Shutdown(device, renderer);
     core::Log::Info("Scene shut down");
 }
 

@@ -9,6 +9,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include "../core/types.h"
 
@@ -19,6 +20,43 @@ namespace render
 
 struct Texture
 {
+    Texture() = default;
+    Texture(const Texture&) = delete;
+    Texture& operator=(const Texture&) = delete;
+
+    Texture(Texture&& other) noexcept
+    {
+        MoveFrom(other);
+    }
+
+    Texture& operator=(Texture&&) = delete;
+
+    // Texture cannot retire an existing descriptor/resource by itself because
+    // that requires Renderer and D3D12Device fence ownership. Adoption therefore
+    // succeeds only into an empty value; callers must explicitly retire first.
+    bool Adopt(Texture&& other) noexcept
+    {
+        if (this == &other)
+            return true;
+        if (resource || descriptorIndex != UINT32_MAX)
+            return false;
+
+        MoveFrom(other);
+        return true;
+    }
+
+    // Call only after the resource and descriptor have been handed to their
+    // fence-aware owners.
+    void ResetAfterRetirement() noexcept
+    {
+        resource.Reset();
+        width = 0;
+        height = 0;
+        mipCount = 1;
+        format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        descriptorIndex = UINT32_MAX;
+    }
+
     ComPtr<ID3D12Resource> resource;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -27,6 +65,23 @@ struct Texture
     uint32_t descriptorIndex = UINT32_MAX;
 
     bool IsValid() const { return resource && width > 0 && height > 0; }
+
+private:
+    void MoveFrom(Texture& other) noexcept
+    {
+        resource = std::move(other.resource);
+        width = other.width;
+        height = other.height;
+        mipCount = other.mipCount;
+        format = other.format;
+        descriptorIndex = other.descriptorIndex;
+
+        other.width = 0;
+        other.height = 0;
+        other.mipCount = 1;
+        other.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        other.descriptorIndex = UINT32_MAX;
+    }
 };
 
 Texture CreateTexture2DFromRGBA8(

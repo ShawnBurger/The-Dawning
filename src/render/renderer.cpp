@@ -720,7 +720,16 @@ void Renderer::ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptor
     // one already signalled: a command list recorded during this frame may still
     // reference the slot, and the GPU reads shader-visible descriptors at
     // execution time for the volatile ranges this engine binds.
-    m_textureAllocator.Release(descriptorIndex, device.PendingFenceValue());
+    if (!m_textureAllocator.Release(descriptorIndex, device.PendingFenceValue()))
+    {
+        core::Log::Warnf("Ignoring release of unowned raster texture descriptor %u",
+                         descriptorIndex);
+    }
+}
+
+void Renderer::ReclaimTextureDescriptors(D3D12Device& device)
+{
+    m_textureAllocator.Reclaim(device.CompletedFenceValue());
 }
 
 uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
@@ -786,11 +795,6 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
 {
     m_currentFrame = device.FrameIndex();
     m_cbOffset = 0; // Reset ring for this frame
-
-    // Return descriptor slots the GPU has finished with. Done here, once per
-    // frame, so callers of ReleaseTextureDescriptor never have to think about
-    // when a slot becomes reusable.
-    m_textureAllocator.Reclaim(device.CompletedFenceValue());
 
     auto* cmd = device.CmdList();
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };

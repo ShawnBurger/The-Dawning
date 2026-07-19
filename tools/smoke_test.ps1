@@ -1,5 +1,6 @@
 param(
     [double]$Seconds = 4.0,
+    [double]$RTDelaySeconds = 0.25,
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
@@ -55,7 +56,10 @@ if (Test-Path -LiteralPath $log)     { Remove-Item -LiteralPath $log -Force }
 if (Test-Path -LiteralPath $capture) { Remove-Item -LiteralPath $capture -Force }
 
 $arguments = @("--smoke", "--smoke-seconds=$Seconds")
-if (!$RasterOnly)  { $arguments += "--smoke-rt" }
+if (!$RasterOnly)  {
+    $arguments += "--smoke-rt"
+    $arguments += "--smoke-rt-delay=$RTDelaySeconds"
+}
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
@@ -122,7 +126,15 @@ if ($logText -notmatch "Smoke mode complete") {
 
 Assert-Marker "overlay" "ok"
 Assert-Marker "timeline" "fixed"
+Assert-Marker "descriptor_reuse_before_fence" "blocked"
+Assert-Marker "descriptor_reuse_after_fence" "reused"
+Assert-Marker "descriptors_in_use_after_scene_shutdown" "0"
+Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
+
+if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
+    throw "Scene shutdown did not retire any raster texture descriptors."
+}
 
 if ($markers["fixed_hz"] -ne "60") {
     throw "Smoke timeline frequency was '$($markers['fixed_hz'])', expected '60'."

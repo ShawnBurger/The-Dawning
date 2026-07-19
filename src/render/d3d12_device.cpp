@@ -5,6 +5,7 @@
 #include "d3d12_device.h"
 #include "../core/log.h"
 #include <d3d12sdklayers.h>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -369,13 +370,22 @@ bool D3D12Device::WaitForFenceValue(uint64_t fenceValue, const char* context)
         return true;
 
     const HRESULT eventHr = m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent);
+    bool eventArmed = SUCCEEDED(eventHr);
     if (FAILED(eventHr))
     {
-        core::Log::Errorf("SetEventOnCompletion (%s) failed: %s (0x%08X)",
-                          context, HrToString(eventHr), eventHr);
         if (IsDeviceRemovalError(eventHr))
+        {
+            core::Log::Errorf("SetEventOnCompletion (%s) reported device loss: %s (0x%08X)",
+                              context, HrToString(eventHr), eventHr);
             m_deviceLost = true;
-        return false;
+            return false;
+        }
+
+        // Event registration can fail for reasons unrelated to device removal.
+        // The fence remains queryable, so retain the safety guarantee by polling
+        // instead of returning early and allowing callers to destroy live GPU data.
+        core::Log::Warnf("SetEventOnCompletion (%s) failed; polling fence instead: %s (0x%08X)",
+                         context, HrToString(eventHr), eventHr);
     }
 
     // Do not disappear into an infinite OS wait. A device can be removed after
@@ -384,15 +394,23 @@ bool D3D12Device::WaitForFenceValue(uint64_t fenceValue, const char* context)
     // never be signaled.
     for (;;)
     {
-        const DWORD waitResult = WaitForSingleObject(m_fenceEvent, 1000);
-        if (waitResult == WAIT_OBJECT_0)
-            return true;
-
-        if (waitResult != WAIT_TIMEOUT)
+        if (eventArmed)
         {
-            core::Log::Errorf("Fence wait (%s) failed: result=0x%08X error=%lu",
-                              context, waitResult, GetLastError());
-            return false;
+            const DWORD waitResult = WaitForSingleObject(m_fenceEvent, 1000);
+            if (waitResult == WAIT_OBJECT_0)
+                return true;
+
+            if (waitResult != WAIT_TIMEOUT)
+            {
+                core::Log::Warnf("Fence event wait (%s) failed; polling fence instead: "
+                                 "result=0x%08X error=%lu",
+                                 context, waitResult, GetLastError());
+                eventArmed = false;
+            }
+        }
+        else
+        {
+            Sleep(1);
         }
 
         completedValue = m_fence->GetCompletedValue();
@@ -610,17 +628,46 @@ bool D3D12Device::WaitForGpu()
     if (m_deviceLost || !m_cmdQueue || !m_fence || !m_fenceEvent)
         return false;
 
-    // Signal and wait for all frames
-    m_globalFenceValue++;
-    const HRESULT signalHr = m_cmdQueue->Signal(m_fence.Get(), m_globalFenceValue);
-    if (FAILED(signalHr))
+    // Signal and wait for all frames. A non-removal Signal failure provides no
+    // ordering point at all, so retry while the device reports healthy rather
+    // than pretending device loss and force-releasing potentially live objects.
+    const uint64_t idleFenceValue = m_globalFenceValue + 1;
+    uint32_t signalAttempts = 0;
+    for (;;)
     {
-        core::Log::Errorf("GPU fence Signal failed: %s (0x%08X)",
-                          HrToString(signalHr), signalHr);
-        if (IsDeviceRemovalError(signalHr))
+        const HRESULT signalHr = m_cmdQueue->Signal(m_fence.Get(), idleFenceValue);
+        if (SUCCEEDED(signalHr))
+            break;
+
+        const HRESULT removalReason = m_device
+            ? m_device->GetDeviceRemovedReason()
+            : E_FAIL;
+        if (IsDeviceRemovalError(signalHr) || FAILED(removalReason))
+        {
+            core::Log::Errorf("GPU fence Signal failed after device loss: %s "
+                              "(0x%08X), removal reason 0x%08X",
+                              HrToString(signalHr), signalHr, removalReason);
             m_deviceLost = true;
-        return false;
+            return false;
+        }
+
+        ++signalAttempts;
+        if (signalAttempts == 1 || signalAttempts % 100 == 0)
+        {
+            core::Log::Warnf("GPU fence Signal failed while device remains healthy; "
+                             "retrying (%u): %s (0x%08X)",
+                             signalAttempts, HrToString(signalHr), signalHr);
+        }
+        if (signalAttempts >= 500)
+        {
+            core::Log::Error("GPU queue stayed healthy but could not signal an idle fence; "
+                             "terminating without unwinding GPU resources");
+            std::abort();
+        }
+        Sleep(10);
     }
+
+    m_globalFenceValue = idleFenceValue;
 
     if (!WaitForFenceValue(m_globalFenceValue, "GPU idle"))
         return false;

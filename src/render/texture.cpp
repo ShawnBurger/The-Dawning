@@ -708,7 +708,7 @@ Texture CreateTexture2DFromDDSFile(
         mipHeight = (std::max)(1u, mipHeight / 2u);
     }
 
-    texture = CreateTexture2DFromSubresources(
+    texture.Adopt(CreateTexture2DFromSubresources(
         device,
         cmdList,
         subresources.data(),
@@ -717,7 +717,7 @@ Texture CreateTexture2DFromDDSFile(
         format,
         mipCount,
         outUpload,
-        name);
+        name));
 
     if (texture.IsValid())
         core::Log::Infof("DDS loaded: %s (%ux%u, mips=%u, format=%u)",
@@ -887,17 +887,17 @@ Texture CreateTexture2DFromKTXFile(
         std::memcpy(basePixels.data(), subresources[0].data, basePixels.size() * sizeof(uint32_t));
         auto mipPixels = GenerateMipChainRGBA8(basePixels.data(), width, height);
         auto generatedSubresources = BuildRGBA8Subresources(mipPixels, width, height);
-        texture = CreateTexture2DFromSubresources(
+        texture.Adopt(CreateTexture2DFromSubresources(
             device, cmdList, generatedSubresources.data(),
             width, height, format, static_cast<uint32_t>(generatedSubresources.size()),
-            outUpload, name);
+            outUpload, name));
     }
     else
     {
-        texture = CreateTexture2DFromSubresources(
+        texture.Adopt(CreateTexture2DFromSubresources(
             device, cmdList, subresources.data(),
             width, height, format, fileMipCount,
-            outUpload, name);
+            outUpload, name));
     }
 
     if (texture.IsValid())
@@ -1024,14 +1024,14 @@ Texture CreateTexture2DFromWICFile(
     std::vector<uint32_t> rgbaPixels(static_cast<size_t>(width) * height);
     std::memcpy(rgbaPixels.data(), pixels.data(), pixels.size());
 
-    texture = CreateTexture2DFromRGBA8(
+    texture.Adopt(CreateTexture2DFromRGBA8(
         device,
         cmdList,
         rgbaPixels.data(),
         width,
         height,
         outUpload,
-        name);
+        name));
 
     if (texture.IsValid())
         core::Log::Infof("WIC texture loaded: %s (%ux%u, mips=%u)",
