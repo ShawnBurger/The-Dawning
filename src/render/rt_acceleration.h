@@ -16,6 +16,7 @@
 #include <vector>
 #include <cstdint>
 #include "mesh.h"
+#include "d3d12_device.h"   // kFrameCount
 
 using Microsoft::WRL::ComPtr;
 
@@ -68,10 +69,13 @@ public:
                    uint32_t instanceCount);
 
     // Access
-    ID3D12Resource* GetTLAS() const { return m_tlasResult.Get(); }
+    // Both refer to the slot BuildTLAS most recently wrote, so they must be
+    // called after BuildTLAS within the same frame.
+    ID3D12Resource* GetTLAS() const { return m_tlasResult[m_frameSlot].Get(); }
     D3D12_GPU_VIRTUAL_ADDRESS GetTLASAddress() const
     {
-        return m_tlasResult ? m_tlasResult->GetGPUVirtualAddress() : 0;
+        return m_tlasResult[m_frameSlot]
+             ? m_tlasResult[m_frameSlot]->GetGPUVirtualAddress() : 0;
     }
 
     const BLASEntry& GetBLAS(uint32_t index) const { return m_blasPool[index]; }
@@ -84,11 +88,28 @@ private:
 
     std::vector<BLASEntry> m_blasPool;
 
-    // TLAS resources (reused across frames)
-    ComPtr<ID3D12Resource> m_tlasResult;
-    ComPtr<ID3D12Resource> m_tlasScratch;
-    ComPtr<ID3D12Resource> m_tlasInstanceBuffer; // Upload heap for instance descs
-    uint8_t*               m_tlasInstanceMapped = nullptr;
+    // -------------------------------------------------------------------------
+    // TLAS resources, one set per frame in flight
+    // -------------------------------------------------------------------------
+    // The TLAS is rebuilt from scratch every frame. A single set was only safe
+    // because each path-traced frame ends with a full WaitForGpu: the instance
+    // buffer is CPU-written per frame (the same mapped-memory race the upload
+    // buffers had), while the result and scratch buffers are GPU-written by
+    // BuildRaytracingAccelerationStructure - so with frames in flight, frame
+    // N+1's build would overwrite the structure frame N is still tracing against.
+    // A UAV barrier does not help: it orders work within a frame, not across.
+    //
+    // m_frameSlot is an internal round-robin rather than the device frame index,
+    // deliberately. BuildTLAS runs at most once per device frame, so the slot
+    // advances no faster than the frame counter; if RT is toggled off for a
+    // while it advances SLOWER, which only increases the gap before reuse. That
+    // keeps this class independent of the device's frame index without weakening
+    // the guarantee.
+    ComPtr<ID3D12Resource> m_tlasResult[kFrameCount];
+    ComPtr<ID3D12Resource> m_tlasScratch[kFrameCount];
+    ComPtr<ID3D12Resource> m_tlasInstanceBuffer[kFrameCount];
+    uint8_t*               m_tlasInstanceMapped[kFrameCount] = {};
+    uint32_t               m_frameSlot = 0;
     uint32_t               m_tlasMaxInstances = 0;
     uint64_t               m_tlasResultSize = 0;
     uint64_t               m_tlasScratchSize = 0;

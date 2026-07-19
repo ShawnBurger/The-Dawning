@@ -313,6 +313,14 @@ bool RTPipeline::BuildShaderTable(ID3D12Device5* device, uint32_t instanceCount)
     if (m_shaderTable && m_shaderTableInstanceCount == instanceCount)
         return true;
 
+    // Park the outgoing table instead of letting the ComPtr assignment below
+    // free it: a command list recorded earlier may still name it.
+    if (m_shaderTable)
+    {
+        m_retiredShaderTables[m_retiredShaderTableSlot] = m_shaderTable;
+        m_retiredShaderTableSlot = (m_retiredShaderTableSlot + 1) % kFrameCount;
+    }
+
     const uint64_t idSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // 32
     const uint64_t recordAlign = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT; // 32
     const uint64_t tableAlign  = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;  // 64
