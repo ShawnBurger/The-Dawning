@@ -15,22 +15,20 @@ https://github.com/ShawnBurger/The-Dawning.git
 Current local engine baseline:
 
 ```text
-master
+main
 ```
 
-Current remote note: `origin/main` was an unrelated initial commit when this
-workflow was added. Do not force-push over `origin/main` or merge unrelated
-history until the repo owner explicitly chooses how to reconcile it. Use
-non-destructive branches for agent work.
+`main` is the integration branch and tracks `origin/main`. Agent work stays on
+named branches until it is built, tested, reviewed for overlap, and merged.
 
 ## Model
 
 Use one Git worktree per agent task:
 
 ```text
-The Dawning\                  canonical checkout
-The Dawning\.agents\worktrees\codex-<task>\   Codex task checkout
-The Dawning\.agents\worktrees\claude-<task>\  Claude Code task checkout
+D:\The Dawning (new)\The Dawning\                         integration checkout
+D:\The Dawning (new)\.agents\worktrees\codex-<task>\    Codex task checkout
+D:\The Dawning (new)\.agents\worktrees\claude-<task>\   Claude Code task checkout
 ```
 
 This gives both agents the same repo, compiler, assets, scripts, and tests, but
@@ -45,10 +43,28 @@ agent uses a separate worktree.
 
 - Codex work branches: `codex/<task-slug>`
 - Claude Code work branches: `claude/<task-slug>`
-- Keep `master` as the local integration baseline until remote history is
-  reconciled.
+- Keep `main` as the integration baseline.
 - Push agent branches to GitHub; merge only after build and smoke tests pass.
 - Do not commit `build/`, `.agents/`, logs, DLLs, or generated scratch files.
+
+## Communication Contract
+
+Before starting or resuming work, each agent must inspect `git status`,
+`git worktree list`, the latest `main`, and the other agent branches. Do not
+assume the repository is unchanged between tool calls.
+
+Every handoff must state:
+
+- branch and commit
+- files changed
+- build and test results
+- known failures or blockers
+- files the agent still owns and is actively editing
+
+Use `tools\agent_status.ps1` for the live worktree inventory and
+`tools\agent_overlap.ps1` before integrating branches. If another worktree has
+uncommitted changes, treat them as user-owned and do not modify, reset, move, or
+stage them.
 
 ## Start a Codex Worktree
 
@@ -94,14 +110,14 @@ List agent worktrees:
 Check whether two branches touch the same files:
 
 ```powershell
-.\tools\agent_overlap.ps1 -Base master -Branches codex/material-pass,claude/camera-polish
+.\tools\agent_overlap.ps1 -Base main -Branches codex/material-pass,claude/camera-polish
 ```
 
 If overlap is reported, inspect both diffs before merging:
 
 ```powershell
-git diff --name-only master...codex/material-pass
-git diff --name-only master...claude/camera-polish
+git diff --name-only main...codex/material-pass
+git diff --name-only main...claude/camera-polish
 ```
 
 ## Merge Discipline
@@ -118,7 +134,7 @@ SETUP_AND_BUILD.bat
 Then merge into the integration branch from the canonical checkout:
 
 ```powershell
-git switch master
+git switch main
 git merge --no-ff <agent-branch>
 ```
 

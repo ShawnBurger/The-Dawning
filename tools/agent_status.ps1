@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Root = ".agents\worktrees",
+    [string]$Root = "",
 
     [switch]$All
 )
@@ -8,7 +8,21 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$agentRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $Root)).TrimEnd("\") + "\"
+$gitCommonDir = (& git -C $repo rev-parse --path-format=absolute --git-common-dir).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitCommonDir)) {
+    throw "Unable to resolve the shared Git directory."
+}
+$integrationRepo = Split-Path -Parent $gitCommonDir
+$rootPath = if ([string]::IsNullOrWhiteSpace($Root)) {
+    Join-Path (Split-Path -Parent $integrationRepo) ".agents\worktrees"
+}
+elseif ([System.IO.Path]::IsPathRooted($Root)) {
+    [System.IO.Path]::GetFullPath($Root)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $integrationRepo $Root))
+}
+$agentRoot = $rootPath.TrimEnd("\") + "\"
 
 Push-Location $repo
 try {

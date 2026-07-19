@@ -7,9 +7,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Task,
 
-    [string]$Base = "master",
+    [string]$Base = "main",
 
-    [string]$Root = ".agents\worktrees",
+    [string]$Root = "",
 
     [switch]$Build,
 
@@ -82,13 +82,26 @@ function Copy-DxcRuntime {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$gitCommonDir = (& git -C $repo rev-parse --path-format=absolute --git-common-dir).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitCommonDir)) {
+    throw "Unable to resolve the shared Git directory."
+}
+$integrationRepo = Split-Path -Parent $gitCommonDir
 $slug = ($Task.ToLowerInvariant() -replace "[^a-z0-9]+", "-").Trim("-")
 if ([string]::IsNullOrWhiteSpace($slug)) {
     $slug = "task"
 }
 
 $branch = "$Agent/$slug"
-$rootPath = Join-Path $repo $Root
+$rootPath = if ([string]::IsNullOrWhiteSpace($Root)) {
+    Join-Path (Split-Path -Parent $integrationRepo) ".agents\worktrees"
+}
+elseif ([System.IO.Path]::IsPathRooted($Root)) {
+    [System.IO.Path]::GetFullPath($Root)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $integrationRepo $Root))
+}
 $worktree = Join-Path $rootPath "$Agent-$slug"
 
 Push-Location $repo
@@ -98,9 +111,9 @@ try {
         throw "Base ref '$Base' does not exist."
     }
 
-    $canonicalDirty = & git status --porcelain
+    $canonicalDirty = & git -C $integrationRepo status --porcelain
     if ($canonicalDirty) {
-        Write-Warning "Canonical checkout has uncommitted changes. The new worktree still starts from '$Base'."
+        Write-Warning "Integration checkout has uncommitted changes. The new worktree still starts from '$Base'."
     }
 
     & git show-ref --verify --quiet "refs/heads/$branch"
@@ -114,6 +127,7 @@ try {
     Write-Host "Task:     $Task"
     Write-Host "Branch:   $branch"
     Write-Host "Base:     $Base"
+    Write-Host "Main:     $integrationRepo"
     Write-Host "Worktree: $worktree"
 
     if ($DryRun) {
@@ -143,7 +157,7 @@ if ($Build) {
     Invoke-CommandChecked -FilePath (Join-Path $worktree "SETUP_AND_BUILD.bat") -WorkingDirectory $worktree
 }
 
-Copy-DxcRuntime -SourceRoot $repo -DestinationRoot $worktree
+Copy-DxcRuntime -SourceRoot $integrationRepo -DestinationRoot $worktree
 
 if ($RunSmoke) {
     $smoke = Join-Path $worktree "tools\smoke_test.cmd"

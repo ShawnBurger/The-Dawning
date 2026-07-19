@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Base = "master",
+    [string]$Base = "main",
 
     [string[]]$Branches = @()
 )
