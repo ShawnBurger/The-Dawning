@@ -90,8 +90,23 @@ would pass every other assertion.
 
 The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any
-legitimate lighting change. A reference-image comparison is the right tool for
-that and is still future work. Pass `-NoCapture` to skip this section.
+legitimate lighting change. Pass `-NoCapture` to skip this section.
+
+**Capture statistics are not comparable across checkouts.** They depend on which
+textures happen to be present in `build\<Config>\assets\textures\`, which is
+build output rather than tracked source. `assets/textures/` in the repository
+contains only a README, so a clean clone falls through to procedurally generated
+checker textures — but a checkout whose build directory has accumulated real
+PNG/DDS/KTX files will load those instead and render measurably differently. On
+this machine the same commit measures mean luminance 127.5 in a fresh worktree
+and 124.4 in a checkout carrying leftover PNGs.
+
+That is fine for the loose thresholds above, which only ask "did it draw
+something plausible". It is a hard blocker for the reference-image comparison
+that would otherwise be the natural next step: such a test needs the texture set
+pinned as tracked input first, otherwise it will flake on nothing but build-
+directory history. Treat "commit real texture assets, or make the procedural
+fallback deterministic and mandatory under `--smoke`" as its prerequisite.
 
 Use `-RasterOnly` for the raster path, `-FullQuality` for the higher
 path-tracing quality mode, and `-Config Release` to test a Release build.
