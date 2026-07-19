@@ -6,6 +6,7 @@
 #include "render/texture.h"
 
 #include <windows.h>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,12 @@ namespace
 {
 
 constexpr const char* kSmokeCaptureFile = "smoke_capture.ppm";
+constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
+
+uint64_t SmokeFrameForTime(double seconds)
+{
+    return static_cast<uint64_t>(std::ceil(seconds / kSmokeFixedDeltaSeconds));
+}
 
 bool HasOption(const std::string& args, const char* option)
 {
@@ -490,6 +497,14 @@ int App::RunMainLoop()
     m_exitCode = 0;
     m_titleTimer = 0.0f;
 
+    const uint64_t smokeRTStartFrame = SmokeFrameForTime(m_options.smokeRTDelaySeconds);
+    const uint64_t smokeEndFrame = SmokeFrameForTime(m_options.smokeSeconds);
+    if (m_options.smoke)
+    {
+        core::Log::Infof("[SMOKE] timeline=fixed fixed_hz=60 target_frames=%llu",
+                         static_cast<unsigned long long>(smokeEndFrame));
+    }
+
     while (m_running)
     {
         ++m_frameCount;
@@ -535,12 +550,19 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_F1))
             TogglePathTracing();
 
-        const core::TimeStep timeStep = m_timer.Tick();
+        core::TimeStep timeStep = m_timer.Tick();
+        if (m_options.smoke)
+        {
+            timeStep.dt = kSmokeFixedDeltaSeconds;
+            timeStep.totalTime = static_cast<double>(m_frameCount) * kSmokeFixedDeltaSeconds;
+            timeStep.frameCount = m_frameCount;
+            timeStep.fps = 60.0f;
+        }
 
         if (m_options.smoke)
         {
             if (m_options.smokeRT && !m_smokeRTStarted &&
-                timeStep.totalTime >= m_options.smokeRTDelaySeconds)
+                m_frameCount >= smokeRTStartFrame)
             {
                 m_smokeRTStarted = true;
                 if (EnsurePathTracing())
@@ -559,7 +581,7 @@ int App::RunMainLoop()
                 }
             }
 
-            if (timeStep.totalTime >= m_options.smokeSeconds)
+            if (m_frameCount >= smokeEndFrame)
             {
                 m_captureThisFrame = m_options.smokeCapture;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");

@@ -119,6 +119,14 @@ if ($logText -notmatch "Smoke mode complete") {
 }
 
 Assert-Marker "overlay" "ok"
+Assert-Marker "timeline" "fixed"
+
+if ($markers["fixed_hz"] -ne "60") {
+    throw "Smoke timeline frequency was '$($markers['fixed_hz'])', expected '60'."
+}
+if ([uint64]$markers["frames"] -ne [uint64]$markers["target_frames"]) {
+    throw "Smoke test stopped on frame $($markers['frames']); expected exact target frame $($markers['target_frames'])."
+}
 
 if ($RasterOnly) {
     Assert-Marker "mode"      "raster"
