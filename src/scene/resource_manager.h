@@ -39,6 +39,7 @@
 #include "../render/d3d12_device.h"   // for D3D12Device, whose fence-guarded
                                        // queue owns deferred GPU release
 #include "../render/renderer.h"        // for Renderer, which owns the descriptor heap
+#include "resource_handle.h"
 #include <cstdint>
 #include <vector>
 
@@ -48,29 +49,6 @@ namespace scene
 // =============================================================================
 // Resource Handle — 32-bit packed (20 index + 12 generation)
 // =============================================================================
-struct ResourceHandle
-{
-    uint32_t value = UINT32_MAX;
-
-    static constexpr uint32_t kIndexBits = 20;
-    static constexpr uint32_t kGenBits   = 12;
-    static constexpr uint32_t kIndexMask = (1u << kIndexBits) - 1;
-    static constexpr uint32_t kGenMask   = (1u << kGenBits) - 1;
-
-    ResourceHandle() = default;
-    explicit ResourceHandle(uint32_t raw) : value(raw) {}
-    ResourceHandle(uint32_t index, uint32_t gen)
-        : value((gen << kIndexBits) | (index & kIndexMask)) {}
-
-    uint32_t Index() const      { return value & kIndexMask; }
-    uint32_t Generation() const { return (value >> kIndexBits) & kGenMask; }
-    bool     IsValid() const    { return value != UINT32_MAX; }
-};
-
-using MeshHandle = ResourceHandle;
-using MaterialHandle = ResourceHandle;
-using TextureHandle = ResourceHandle;
-
 // =============================================================================
 // MaterialData — CPU-side material definition
 // =============================================================================

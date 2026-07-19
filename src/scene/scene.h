@@ -13,6 +13,7 @@
 #include "../ecs/registry.h"
 #include "../ecs/components.h"
 #include "resource_manager.h"
+#include "handle_slot_map.h"
 #include "../render/renderer.h"
 #include "../render/path_tracer.h"
 #include "../render/d3d12_device.h"
@@ -95,7 +96,7 @@ private:
     bool                 m_rtReady = false;
 
     // BLAS index per mesh handle (maps mesh handle value → BLAS pool index)
-    std::vector<uint32_t> m_meshToBLAS; // Index by mesh handle index
+    HandleSlotMap<MeshHandle, uint32_t> m_meshToBLAS;
 };
 
 } // namespace scene

@@ -1,3 +1,26 @@
+# Parallel follow-up: generational RT mesh cache
+
+Integration baseline: `d79b3e9`, containing the completed descriptor lifetime
+work and Claude's per-frame RT upload/TLAS/shader-table changes.
+
+Codex is taking `codex/rt-blas-generation` and owns:
+
+- `src/scene/resource_handle.h` and `handle_slot_map.h`
+- `src/scene/resource_manager.h` handle declarations only
+- `src/scene/scene.h` / `.cpp` BLAS cache only
+- `tests/test_resource_handle.cpp`
+- `CMakeLists.txt` registration for those CPU-only files
+- this handoff entry
+
+The current BLAS cache indexes only `MeshHandle::Index()`. ResourceManager can
+recycle that slot for a different generation, after which raster resolves the
+new mesh through the full handle while DXR silently reuses the old mesh's BLAS.
+This lane stores the complete packed handle in the cache and makes mesh,
+material, and texture handles distinct C++ types. It does not touch Claude's RT
+resource classes, shaders, renderer, or post-process files.
+
+---
+
 # Descriptor allocator hardening: final follow-up
 
 Latest integration baseline observed: `c541879`, including Claude's

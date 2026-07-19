@@ -110,8 +110,9 @@ void ResourceManager::RemoveMesh(MeshHandle handle, render::D3D12Device& device)
     uint32_t idx = handle.Index();
     auto& slot = m_meshSlots[idx];
 
+    const bool canRecycle = MeshHandle::CanRecycleGeneration(slot.generation);
     slot.alive = false;
-    slot.generation++;
+    slot.generation = MeshHandle::NextGeneration(slot.generation);
 
     // Hand the GPU buffers to the device's fence-guarded queue rather than
     // dropping them here. Overwriting the slot releases the last reference
@@ -121,7 +122,10 @@ void ResourceManager::RemoveMesh(MeshHandle handle, render::D3D12Device& device)
     device.DeferredRelease(slot.mesh.indexBuffer);
     slot.mesh = render::Mesh{};
 
-    m_meshFreeList.push_back(idx);
+    // Retire a slot permanently when its packed generation is exhausted. This
+    // prevents an ancient generation-zero handle becoming valid again via wrap.
+    if (canRecycle)
+        m_meshFreeList.push_back(idx);
     m_meshAliveCount--;
 }
 
@@ -236,8 +240,9 @@ void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& d
     uint32_t idx = handle.Index();
     auto& slot = m_textureSlots[idx];
 
+    const bool canRecycle = TextureHandle::CanRecycleGeneration(slot.generation);
     slot.alive = false;
-    slot.generation++;
+    slot.generation = TextureHandle::NextGeneration(slot.generation);
 
     // Two separate lifetimes, both fence-guarded. The RESOURCE goes to the
     // device's deferred queue; the DESCRIPTOR that names it goes back to the
@@ -250,7 +255,8 @@ void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& d
     renderer.ReleaseTextureDescriptor(device, slot.texture.descriptor);
     slot.texture.ResetAfterRetirement();
 
-    m_textureFreeList.push_back(idx);
+    if (canRecycle)
+        m_textureFreeList.push_back(idx);
     m_textureAliveCount--;
 }
 

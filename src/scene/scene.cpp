@@ -26,6 +26,7 @@ void Scene::Shutdown(render::D3D12Device& device, render::Renderer& renderer)
         m_pathTracer.Shutdown();
         m_rtReady = false;
     }
+    m_meshToBLAS.Clear();
     m_resources.Shutdown(device, renderer);
     core::Log::Info("Scene shut down");
 }
@@ -197,21 +198,16 @@ void Scene::EnsureBLAS(render::D3D12Device& device)
     {
         const auto& meshInst = meshPool->DataAt(i);
         MeshHandle handle(meshInst.meshHandle);
-        uint32_t meshIdx = handle.Index();
+        const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
+        if (!gpuMesh || !gpuMesh->IsValid()) continue;
 
-        // Grow mapping if needed
-        if (meshIdx >= m_meshToBLAS.size())
-            m_meshToBLAS.resize(meshIdx + 1, UINT32_MAX);
-
-        // Build BLAS if not already built for this mesh
-        if (m_meshToBLAS[meshIdx] == UINT32_MAX)
+        // A recycled ResourceManager slot has a different full handle and must
+        // build a new BLAS rather than inheriting the old mesh's geometry.
+        if (!m_meshToBLAS.Contains(handle))
         {
-            const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
-            if (!gpuMesh || !gpuMesh->IsValid()) continue;
-
             uint32_t blasIdx = m_pathTracer.GetAcceleration().BuildBLAS(dev5, cmd4, *gpuMesh);
             if (blasIdx != UINT32_MAX)
-                m_meshToBLAS[meshIdx] = blasIdx;
+                m_meshToBLAS.Set(handle, blasIdx);
         }
     }
 }
@@ -223,6 +219,11 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
                                          const core::Vec3d& cameraPosition)
 {
     if (!m_rtReady) return;
+
+    // Runtime mesh additions must receive a BLAS before TLAS extraction. The
+    // startup path also calls EnsureBLAS explicitly, so this is normally a
+    // cheap cache walk and only records work for newly observed handles.
+    EnsureBLAS(device);
 
     auto* dev5 = device.Device5();
     auto* cmd4 = device.CmdList4();
@@ -246,9 +247,8 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
         if (!m_registry.HasByIndex<ecs::Material>(entityIdx)) continue;
 
         MeshHandle handle(meshInst.meshHandle);
-        uint32_t meshIdx = handle.Index();
-
-        if (meshIdx >= m_meshToBLAS.size() || m_meshToBLAS[meshIdx] == UINT32_MAX)
+        uint32_t blasIdx = UINT32_MAX;
+        if (!m_meshToBLAS.TryGet(handle, blasIdx))
             continue;
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
@@ -257,7 +257,6 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
             gpuMesh->rtTrianglePositions.size() != gpuMesh->rtTriangleNormals.size())
             continue;
 
-        uint32_t blasIdx = m_meshToBLAS[meshIdx];
         const auto& blas = m_pathTracer.GetAcceleration().GetBLAS(blasIdx);
 
         const auto& transform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
@@ -361,9 +360,7 @@ void Scene::PathTraceEntities(
         if (!m_registry.HasByIndex<ecs::Material>(entityIdx)) continue;
 
         MeshHandle handle(meshInst.meshHandle);
-        uint32_t meshIdx = handle.Index();
-
-        if (meshIdx >= m_meshToBLAS.size() || m_meshToBLAS[meshIdx] == UINT32_MAX)
+        if (!m_meshToBLAS.Contains(handle))
             continue;
 
         const render::Mesh* gpuMesh = m_resources.GetMesh(handle);

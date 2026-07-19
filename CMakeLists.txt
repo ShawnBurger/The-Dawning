@@ -92,6 +92,8 @@ set(SCENE_SOURCES
 )
 
 set(SCENE_HEADERS
+    src/scene/resource_handle.h
+    src/scene/handle_slot_map.h
     src/scene/resource_manager.h
     src/scene/scene.h
 )
@@ -102,6 +104,7 @@ set(TEST_SOURCES
     tests/test_ecs.cpp
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
+    tests/test_resource_handle.cpp
 )
 
 set(TEST_HEADERS
@@ -210,6 +213,8 @@ add_executable(TheDawningTests
     ${TEST_HEADERS}
     src/core/types.h
     ${ECS_HEADERS}
+    src/scene/resource_handle.h
+    src/scene/handle_slot_map.h
 )
 
 set_target_properties(TheDawningTests PROPERTIES
