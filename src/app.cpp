@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>   // std::size, for the pillar distance table
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -206,7 +207,12 @@ bool App::InitializeScene()
     ComPtr<ID3D12Resource> groundNormalTexUp, cubeNormalTexUp;
 
     auto cubeData = render::GenerateCube(core::Color::White());
-    auto planeData = render::GeneratePlane(10.0f, 10.0f, 10, 10, core::Color::White());
+    // 200x200 rather than 10x10. The shadow cascade covers 48 world units, so a
+    // 10-unit ground plane meant every caster in the scene fell inside a single
+    // cascade and nothing could exercise - or fail to exercise - the others.
+    // A material feature no scene uses is untested code; this project has been
+    // bitten by that enough times to stop repeating it.
+    auto planeData = render::GeneratePlane(200.0f, 200.0f, 40, 40, core::Color::White());
     auto sphereData = render::GenerateSphere(0.5f, 32, 16, core::Color::White());
 
     auto cubeMesh = render::CreateMesh(
@@ -493,6 +499,35 @@ bool App::InitializeScene()
         ecs::Material{ { 0.9f, 0.7f, 0.2f, 1.0f }, 0.25f, 1.0f },
         ecs::Transform{ { 2.5f, 0.75f, 0 }, core::Quatf::Identity(),
                         { 1.5f, 1.5f, 1.5f } });
+
+    // Pillars marching away from the camera, deliberately spanning the shadow
+    // range rather than clustering inside it. Under a SINGLE cascade the ones
+    // past ~24 units receive no shadow at all, which is the artifact cascades
+    // exist to fix - and which is now visible in a capture rather than being a
+    // claim in a comment.
+    //
+    // The DXR path traces shadow rays and is unaffected by cascade extent, so it
+    // shadows all of these correctly. That makes path tracing the reference the
+    // raster cascades are checked against.
+    static constexpr float kPillarDistances[] = {
+        12.0f, 20.0f, 30.0f, 45.0f, 65.0f, 90.0f
+    };
+    for (int i = 0; i < static_cast<int>(std::size(kPillarDistances)); ++i)
+    {
+        char pillarName[32] = {};
+        std::snprintf(pillarName, sizeof(pillarName), "Pillar_%d", i);
+        const float z = kPillarDistances[i];
+        // Scale with distance so each stays a similar size on screen, keeping
+        // all of them legible in one capture.
+        const float scale = 1.0f + z * 0.06f;
+
+        m_scene.CreateRenderable(
+            pillarName, cube,
+            ecs::Material{ { 0.75f, 0.72f, 0.68f, 1.0f }, 0.65f, 0.0f },
+            ecs::Transform{ { (i % 2 == 0) ? -3.5f : 3.5f, scale * 0.5f, z },
+                            core::Quatf::Identity(),
+                            { scale * 0.5f, scale, scale * 0.5f } });
+    }
 
     for (int i = -3; i <= 3; ++i)
     {
