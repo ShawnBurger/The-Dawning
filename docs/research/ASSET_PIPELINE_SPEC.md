@@ -100,6 +100,33 @@ These are not negotiable and any pipeline design that violates one is wrong:
   unit tests over known-good inputs plus visual comparison between the raster and
   DXR paths, which is the only oracle the project has.
 
+## Known scaling limits (measured, not estimated)
+
+Found by instrumenting the engine rather than reading it. They bound how much
+real content it can hold today, and the asset pipeline is what will hit them.
+
+**Constant ring: roughly 340 entities.** Every shadowed entity costs 768 bytes
+of the per-frame constant ring each frame - 256 for `CBPerObject`, 256 for
+`CBMaterial`, 256 for the shadow pass's copy, each rounded up to D3D12's 256-byte
+constant-buffer alignment. `kCBRingSize` is 256 KB, so the ceiling is about 341
+entities, and a four-cascade shadow pass roughly halves that to about 170.
+
+Measured: 5% of the ring with the 17-entity demo scene, 29% with the 97 entities
+the smoke growth test creates. Overflow is logged as an error, but by then draws
+are reading GPU address zero, so the smoke harness fails at 75% instead - while
+there is still room to act.
+
+A single station interior exceeds 170 draws comfortably, so for the target
+milestone this is a blocker rather than a limit. The fix is not a bigger ring: it
+is per-object data in a structured buffer indexed by draw, instead of a root CBV
+rebound per draw. That is the same architectural change SM 6.6 bindless wants,
+which is a reason to treat the two as one piece of work rather than two.
+
+**Texture tables: 128 raster slots, 64 per DXR channel.** Fixed size, allocated
+from a generational allocator with slot 0 the null SRV and slot 1 the shadow map.
+One PBR asset consumes albedo, normal, ORM and possibly emissive, so 128 slots is
+roughly 32 materials. Real content exhausts this immediately.
+
 ## Staged plan
 
 Each stage leaves the build green and is independently verifiable.
