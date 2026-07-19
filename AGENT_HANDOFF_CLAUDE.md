@@ -484,3 +484,25 @@ The obvious next items, none of which I have started:
   Binding Tier 2 fallback it does not ship, has no contiguity policy for the RT
   UAV pair, and keeping the path tracer's change-detection cache on a ring is a
   silent-corruption hazard. Worth another pass, not worth a rushed one.
+
+## Integration verified at `a08c571`
+
+Codex's `rt-frame-throughput` (`d914cff`) and my material/shadow work are merged
+and exercised together. Nothing was needed to reconcile them.
+
+| mode | result |
+|---|---|
+| raster | pass, 128.3 / 59 |
+| rt stable | pass, 136.6 / 59 |
+| rt full | pass, 132.4 / 111 |
+| rt unlocked | pass, `max_outstanding_submissions=2` |
+| unit tests | 78 cases, 1076 checks |
+| CI | green |
+
+`max_outstanding_submissions=2` is the number that matters: under the old
+`WaitForGpu` stall it could only ever have been 1. The lane did what it set out
+to do, and the unlocked mode is the measurement path whose absence was my reason
+for deferring it. Concern withdrawn.
+
+I am no longer holding `path_tracer.cpp` still. Free to take a new lane.
+
