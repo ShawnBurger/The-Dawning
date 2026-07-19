@@ -91,10 +91,10 @@ bool Renderer::CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t he
     // fast-clear path and the debug layer warns on every clear.
     D3D12_CLEAR_VALUE clearValue = {};
     clearValue.Format   = kHDRFormat;
-    clearValue.Color[0] = 0.05f;
-    clearValue.Color[1] = 0.06f;
-    clearValue.Color[2] = 0.09f;
-    clearValue.Color[3] = 1.0f;
+    clearValue.Color[0] = kSceneClearColor[0];
+    clearValue.Color[1] = kSceneClearColor[1];
+    clearValue.Color[2] = kSceneClearColor[2];
+    clearValue.Color[3] = kSceneClearColor[3];
 
     HRESULT hr = device->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
@@ -282,7 +282,7 @@ bool Renderer::CreateTonemapPipeline(ID3D12Device* device)
 // =============================================================================
 // Scene pass / resolve
 // =============================================================================
-void Renderer::BeginScenePass(D3D12Device& device, const float clearColor[4])
+void Renderer::BeginScenePass(D3D12Device& device)
 {
     if (!m_hdrTarget) return;
     auto* cmd = device.CmdList();
@@ -297,7 +297,7 @@ void Renderer::BeginScenePass(D3D12Device& device, const float clearColor[4])
 
     auto rtv = m_hdrRtvHeap->GetCPUDescriptorHandleForHeapStart();
     auto dsv = device.DSV();
-    cmd->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
+    cmd->ClearRenderTargetView(rtv, kSceneClearColor, 0, nullptr);
     cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
     cmd->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
 }

@@ -118,7 +118,7 @@ public:
     //                       RENDER_TARGET and bound, fullscreen tone-map drawn.
     //                       Leaves the back buffer in RENDER_TARGET so the
     //                       overlay can draw over it.
-    void BeginScenePass(D3D12Device& device, const float clearColor[4]);
+    void BeginScenePass(D3D12Device& device);
     void ResolveToBackBuffer(D3D12Device& device);
 
     // Recreate the HDR target at a new size. Returns false if allocation failed,
@@ -151,6 +151,7 @@ private:
     // slots in the texture table, so the tone-map pass stays independent of
     // material descriptor allocation.
     static constexpr DXGI_FORMAT kHDRFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    static constexpr float kSceneClearColor[4] = { 0.50f, 0.55f, 0.62f, 1.0f };
     ComPtr<ID3D12Resource>       m_hdrTarget;
     ComPtr<ID3D12DescriptorHeap> m_hdrRtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_hdrSrvHeap;
