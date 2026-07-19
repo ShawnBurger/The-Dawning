@@ -1,3 +1,31 @@
+# Parallel follow-up: RT frame-throughput validation
+
+Integration baseline: `c7c60d3`, including Claude's per-frame RT upload,
+TLAS, and shader-table resources plus the generational BLAS cache.
+
+Codex is taking `codex/rt-frame-throughput` and owns:
+
+- `src/app.h` / `.cpp` smoke presentation and throughput instrumentation only
+- `tools/smoke_test.ps1` immediate-present option and marker assertions only
+- this handoff entry
+
+The path-traced branch still calls `WaitForGpu()` after every present, forcing
+the renderer down to one frame in flight. This lane first adds a deterministic,
+unlocked smoke benchmark and structured frame-sync markers. An independent
+adversarial audit is tracing all RT resource lifetimes before the wait is
+removed. The wait will only be changed if that audit finds no unresolved shared
+resource hazard and Debug/Release GPU smoke tests pass without it.
+
+Claude's renderer, path tracer, acceleration-resource, shader, and documentation
+files are not touched by this claim.
+
+Instrumentation baseline (Debug, immediate present, 180 measured frames,
+capture disabled): raster 496.197 fps, stable RT 267.786 fps, full RT
+283.300 fps. Both RT modes report `rt_frame_sync=gpu_idle` before the proposed
+change.
+
+---
+
 # Parallel follow-up: generational RT mesh cache
 
 Integration baseline: `d79b3e9`, containing the completed descriptor lifetime

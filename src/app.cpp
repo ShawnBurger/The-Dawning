@@ -51,6 +51,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeFullQuality = HasOption(args, "--smoke-full");
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
+    options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
@@ -100,9 +101,10 @@ int App::Run(const char* commandLine)
     m_options = ParseOptions(commandLine);
     if (m_options.smoke)
     {
-        core::Log::Infof("Smoke mode enabled (rt=%s, full=%s, seconds=%.2f)",
+        core::Log::Infof("Smoke mode enabled (rt=%s, full=%s, unlocked=%s, seconds=%.2f)",
                          m_options.smokeRT ? "yes" : "no",
                          m_options.smokeFullQuality ? "yes" : "no",
+                         m_options.smokeUnlocked ? "yes" : "no",
                          m_options.smokeSeconds);
     }
 
@@ -513,6 +515,15 @@ int App::RunMainLoop()
 {
     core::Log::Info("=== Entering main loop (WASD+Mouse, click to capture, ESC to release) ===");
     m_running = true;
+    if (m_options.smoke)
+    {
+        LARGE_INTEGER frequency = {};
+        LARGE_INTEGER start = {};
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start);
+        m_smokeCounterFrequency = frequency.QuadPart;
+        m_smokeStartCounter = start.QuadPart;
+    }
     m_smokeRTStarted = false;
     m_captureThisFrame = false;
     m_frameCount = 0;
@@ -631,6 +642,21 @@ int App::RunMainLoop()
                                  m_debugOverlayReady ? "ok" : "unavailable");
                 core::Log::Infof("[SMOKE] frames=%llu",
                                  static_cast<unsigned long long>(m_frameCount));
+                LARGE_INTEGER smokeEnd = {};
+                QueryPerformanceCounter(&smokeEnd);
+                const double elapsedSeconds =
+                    m_smokeCounterFrequency > 0
+                        ? static_cast<double>(smokeEnd.QuadPart - m_smokeStartCounter) /
+                              static_cast<double>(m_smokeCounterFrequency)
+                        : 0.0;
+                const double throughput =
+                    elapsedSeconds > 0.0 ? static_cast<double>(m_frameCount) / elapsedSeconds : 0.0;
+                core::Log::Infof("[SMOKE] present=%s",
+                                 m_options.smokeUnlocked ? "immediate" : "vsync");
+                core::Log::Infof("[SMOKE] rt_frame_sync=%s",
+                                 m_options.smokeRT ? "gpu_idle" : "frames_in_flight");
+                core::Log::Infof("[SMOKE] elapsed_ms=%.3f throughput_fps=%.3f",
+                                 elapsedSeconds * 1000.0, throughput);
                 core::Log::Infof("[SMOKE] resize_requests=%u", m_smokeResizeRequests);
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
@@ -977,7 +1003,8 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (m_captureThisFrame && !m_device.RecordBackBufferReadback())
         m_captureThisFrame = false;
 
-    if (!m_device.ExecuteAndPresent(true))
+    const bool vsync = !(m_options.smoke && m_options.smokeUnlocked);
+    if (!m_device.ExecuteAndPresent(vsync))
         return false;
 
     if (m_captureThisFrame)

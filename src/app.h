@@ -21,6 +21,7 @@ struct AppOptions
     bool smokeFullQuality = false;
     bool smokeCapture = false;
     bool smokeResize = false;
+    bool smokeUnlocked = false;
     bool showOverlay = true;
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
@@ -78,6 +79,8 @@ private:
     render::DescriptorHandle m_smokeRetiredDescriptor;
     render::DescriptorHandle m_smokeHeldDescriptor;
     uint64_t m_frameCount = 0;
+    int64_t m_smokeStartCounter = 0;
+    int64_t m_smokeCounterFrequency = 0;
     float m_titleTimer = 0.0f;
 
     render::RTQualityMode m_rtQualityMode = render::RTQualityMode::StablePreview;

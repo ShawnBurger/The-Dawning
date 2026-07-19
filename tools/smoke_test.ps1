@@ -4,6 +4,7 @@ param(
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
+    [switch]$Unlocked,
     [int]$TimeoutSeconds = 15,
     [string]$Config = "Debug",
     [switch]$NoCapture
@@ -62,6 +63,7 @@ if (!$RasterOnly)  {
 }
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
+if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
 
 $process = Start-Process -FilePath $exe `
@@ -126,6 +128,7 @@ if ($logText -notmatch "Smoke mode complete") {
 
 Assert-Marker "overlay" "ok"
 Assert-Marker "timeline" "fixed"
+Assert-Marker "present" $(if ($Unlocked) { "immediate" } else { "vsync" })
 Assert-Marker "descriptor_reuse_before_fence" "blocked"
 Assert-Marker "descriptor_reuse_after_fence" "reused"
 Assert-Marker "descriptors_in_use_after_scene_shutdown" "0"
@@ -141,6 +144,13 @@ if ($markers["fixed_hz"] -ne "60") {
 }
 if ([uint64]$markers["frames"] -ne [uint64]$markers["target_frames"]) {
     throw "Smoke test stopped on frame $($markers['frames']); expected exact target frame $($markers['target_frames'])."
+}
+
+if ([double]$markers["elapsed_ms"] -le 0.0) {
+    throw "Smoke elapsed time was '$($markers['elapsed_ms'])'; expected a positive measurement."
+}
+if ([double]$markers["throughput_fps"] -le 0.0) {
+    throw "Smoke throughput was '$($markers['throughput_fps'])'; expected a positive measurement."
 }
 
 if ($RasterOnly) {
