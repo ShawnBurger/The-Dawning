@@ -53,6 +53,11 @@ struct MaterialData
     uint   useNormalTexture;
     uint   ormTextureIndex;
     uint   useOrmTexture;
+    float3 emissive;
+    float  emissiveStrength;
+    uint   emissiveTextureIndex;
+    uint   useEmissiveTexture;
+    uint2  materialPad;
 };
 StructuredBuffer<MaterialData> g_Materials : register(t1, space0);
 
@@ -96,6 +101,7 @@ StructuredBuffer<TrianglePositionData> g_TrianglePositions : register(t5, space0
 Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
 Texture2D<float4> g_NormalTextures[64] : register(t0, space5);
 Texture2D<float4> g_OrmTextures[64]    : register(t0, space6);
+Texture2D<float4> g_EmissiveTextures[64] : register(t0, space7);
 SamplerState g_TextureSampler : register(s0, space0);
 
 // =============================================================================
@@ -395,6 +401,19 @@ void RayGen()
         // and the VNDF alpha floor are conditioned for.
         mat.roughness = clamp(mat.roughness, 0.04f, 1.0f);
         mat.metallic  = saturate(mat.metallic);
+
+        // Emission is added along the current throughput and terminates nothing:
+        // a ray that lands on an emitter still continues, it just deposits this
+        // first. Matches basic_ps.hlsl. Emitters are NOT sampled by NEE, so they
+        // light only themselves - see ecs::Material.
+        float3 emission = mat.emissive * mat.emissiveStrength;
+        if (mat.useEmissiveTexture != 0 && mat.emissiveTextureIndex < 64)
+        {
+            uint emissiveIndex = NonUniformResourceIndex(mat.emissiveTextureIndex);
+            emission *= g_EmissiveTextures[emissiveIndex]
+                            .SampleLevel(g_TextureSampler, payload.uv, 0.0f).rgb;
+        }
+        radiance += throughput * emission;
         float3 hitPos = currentOrigin + currentDir * payload.hitT;
         float3 N = normalize(payload.normal);
         float3 V = -currentDir;

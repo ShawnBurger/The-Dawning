@@ -113,7 +113,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
     // Slot 8: Material texture descriptor table (albedo space4, normal space5, ORM space6)
-    D3D12_DESCRIPTOR_RANGE textureRanges[3] = {};
+    D3D12_DESCRIPTOR_RANGE textureRanges[4] = {};
     textureRanges[0].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     textureRanges[0].NumDescriptors     = kMaxRTAlbedoTextures;
     textureRanges[0].BaseShaderRegister = 0;
@@ -135,6 +135,13 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     textureRanges[2].RegisterSpace      = 6;
     textureRanges[2].OffsetInDescriptorsFromTableStart =
         kMaxRTAlbedoTextures + kMaxRTNormalTextures;
+
+    textureRanges[3].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRanges[3].NumDescriptors     = kMaxRTEmissiveTextures;
+    textureRanges[3].BaseShaderRegister = 0;
+    textureRanges[3].RegisterSpace      = 7;
+    textureRanges[3].OffsetInDescriptorsFromTableStart =
+        kMaxRTAlbedoTextures + kMaxRTNormalTextures + kMaxRTOrmTextures;
 
     rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParams[8].DescriptorTable.NumDescriptorRanges = _countof(textureRanges);

@@ -15,6 +15,7 @@ static constexpr uint32_t kRTUavDescriptorCount = 2;
 static constexpr uint32_t kRTAlbedoDescriptorBase = kRTUavDescriptorCount;
 static constexpr uint32_t kRTNormalDescriptorBase = kRTAlbedoDescriptorBase + kMaxRTAlbedoTextures;
 static constexpr uint32_t kRTOrmDescriptorBase    = kRTNormalDescriptorBase + kMaxRTNormalTextures;
+static constexpr uint32_t kRTEmissiveDescriptorBase = kRTOrmDescriptorBase + kMaxRTOrmTextures;
 
 static bool CreateMappedUploadBuffer(
     ID3D12Device5* device,
@@ -146,7 +147,7 @@ void PathTracer::Shutdown()
 bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = kRTOrmDescriptorBase + kMaxRTOrmTextures;
+    heapDesc.NumDescriptors = kRTEmissiveDescriptorBase + kMaxRTEmissiveTextures;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -187,6 +188,7 @@ void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
     clearRange(kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures);
     clearRange(kRTNormalDescriptorBase, kMaxRTNormalTextures);
     clearRange(kRTOrmDescriptorBase, kMaxRTOrmTextures);
+    clearRange(kRTEmissiveDescriptorBase, kMaxRTEmissiveTextures);
 
     m_boundAlbedoTextureCount = 0;
     m_boundAlbedoTextureResources.fill(nullptr);
@@ -194,6 +196,8 @@ void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
     m_boundNormalTextureResources.fill(nullptr);
     m_boundOrmTextureCount = 0;
     m_boundOrmTextureResources.fill(nullptr);
+    m_boundEmissiveTextureCount = 0;
+    m_boundEmissiveTextureResources.fill(nullptr);
 }
 
 uint32_t PathTracer::UpdateTextureDescriptors(
@@ -481,6 +485,8 @@ void PathTracer::Dispatch(
     uint32_t normalTextureCount,
     const Texture* const* ormTextures,
     uint32_t ormTextureCount,
+    const Texture* const* emissiveTextures,
+    uint32_t emissiveTextureCount,
     uint32_t instanceCount,
     RTQualityMode qualityMode)
 {
@@ -641,6 +647,9 @@ void PathTracer::Dispatch(
     UpdateTextureDescriptors(device.Device5(), ormTextures, ormTextureCount,
                              kRTOrmDescriptorBase, kMaxRTOrmTextures,
                              m_boundOrmTextureCount, m_boundOrmTextureResources.data());
+    UpdateTextureDescriptors(device.Device5(), emissiveTextures, emissiveTextureCount,
+                             kRTEmissiveDescriptorBase, kMaxRTEmissiveTextures,
+                             m_boundEmissiveTextureCount, m_boundEmissiveTextureResources.data());
 
     // --- Set up for DispatchRays ---
     cmd->SetComputeRootSignature(m_pipeline.GetGlobalRootSig());
