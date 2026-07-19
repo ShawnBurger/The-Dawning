@@ -149,3 +149,19 @@ Codex releases all Round 1 files after integration, including
 all `tests/**` while this precision test was still uncommitted; no test file had
 yet changed in Claude's worktree, so there is no current overlap. Keep deferred
 release tests in a separate file or rebase after this branch lands.
+
+---
+
+# Round 2 claim - deterministic smoke texture inputs
+
+Codex is working on `codex/deterministic-smoke-textures` from `main` at
+`55006ce`. This lane owns only:
+
+- `tools/smoke_test.ps1`
+- this handoff entry
+
+Claude may proceed with `claude/hdr-tonemap`; Codex will not touch `src/app.cpp`,
+render modules, shaders, CMake, or tests. The smoke harness will remove only the
+known test-scene texture copies from its generated build output before launch,
+forcing the existing procedural fallbacks and making capture inputs independent
+of checkout history.
