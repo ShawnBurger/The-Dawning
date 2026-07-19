@@ -147,3 +147,10 @@ Phase 7: Opacity Micro-Maps for alpha-tested geometry (foliage, fences)
 7. LEFT-HANDED coordinate system everywhere. +Z is forward (into screen).
    LookAt is LH. PerspectiveFovLH maps Z to [0,1]. Back-face culling is CW.
 8. Logger is NOT thread-safe. Call only from main thread until job system exists.
+
+## PARALLEL AGENT RULES
+
+Read `AGENT_COORDINATION.md` before editing. Codex and Claude Code must use
+separate Git worktrees and named branches, inspect live repository state before
+each pass, report branch/commit/files/tests at handoff, and check file overlap
+before integration.
