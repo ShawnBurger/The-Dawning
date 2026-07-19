@@ -285,7 +285,7 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
     if (instances.empty()) return;
 
     // Build TLAS
-    m_pathTracer.GetAcceleration().BuildTLAS(dev5, cmd4,
+    m_pathTracer.GetAcceleration().BuildTLAS(device,
         instances.data(), static_cast<uint32_t>(instances.size()));
 
     // Build shader table if instance count changed

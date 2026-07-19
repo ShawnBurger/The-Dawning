@@ -70,7 +70,9 @@ struct GpuCapabilities
 class D3D12Device
 {
 public:
-    bool Init(HWND hwnd, int width, int height, bool enableDebugLayer = true);
+    bool Init(HWND hwnd, int width, int height,
+              bool enableDebugLayer = true,
+              bool enableGpuValidation = false);
     void Shutdown();
 
     // Frame lifecycle
@@ -114,6 +116,14 @@ public:
     uint32_t PendingDeferredReleaseCount() const
     {
         return static_cast<uint32_t>(m_deferredReleases.Size());
+    }
+    uint32_t OutstandingSubmissionCount() const
+    {
+        if (!m_fence) return 0;
+        const uint64_t completed = m_fence->GetCompletedValue();
+        if (completed == UINT64_MAX || completed >= m_globalFenceValue) return 0;
+        const uint64_t outstanding = m_globalFenceValue - completed;
+        return outstanding > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(outstanding);
     }
 
     // Barrier helpers
@@ -162,7 +172,7 @@ public:
     bool WaitForGpu();
 
 private:
-    bool CreateDevice(bool enableDebugLayer);
+    bool CreateDevice(bool enableDebugLayer, bool enableGpuValidation);
     bool CreateCommandObjects();
     bool CreateSwapChain(HWND hwnd);
     bool CreateRTVs();

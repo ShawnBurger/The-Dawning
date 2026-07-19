@@ -6,6 +6,7 @@
 #include "../core/log.h"
 #include <cstring>
 #include <cstdint>
+#include <utility>
 
 namespace render
 {
@@ -178,16 +179,17 @@ uint32_t RTAcceleration::BuildBLAS(
 // BuildTLAS — rebuild every frame from instance descriptors
 // =============================================================================
 bool RTAcceleration::BuildTLAS(
-    ID3D12Device5* device,
-    ID3D12GraphicsCommandList4* cmdList,
+    D3D12Device& device,
     const TLASInstance* instances,
     uint32_t instanceCount)
 {
     if (instanceCount == 0) return true;
 
-    // Advance first, so GetTLAS/GetTLASAddress below and in PathTracer::Dispatch
-    // all name the slot this call is about to write.
-    m_frameSlot = (m_frameSlot + 1) % kFrameCount;
+    auto* d3dDevice = device.Device5();
+    auto* cmdList = device.CmdList4();
+    if (!d3dDevice || !cmdList) return false;
+
+    m_frameSlot = device.FrameIndex();
 
     const uint64_t instanceDescSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
 
@@ -195,18 +197,11 @@ bool RTAcceleration::BuildTLAS(
     // share one capacity.
     if (instanceCount > m_tlasMaxInstances)
     {
-        for (uint32_t i = 0; i < kFrameCount; ++i)
-        {
-            if (m_tlasInstanceBuffer[i] && m_tlasInstanceMapped[i])
-            {
-                m_tlasInstanceBuffer[i]->Unmap(0, nullptr);
-                m_tlasInstanceMapped[i] = nullptr;
-            }
-            m_tlasInstanceBuffer[i].Reset();
-        }
-
         const uint32_t newMax = instanceCount + 64; // headroom
         const uint64_t newSize = instanceDescSize * newMax;
+
+        ComPtr<ID3D12Resource> replacement[kFrameCount];
+        uint8_t* replacementMapped[kFrameCount] = {};
 
         D3D12_HEAP_PROPERTIES heapProps = {};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -223,33 +218,41 @@ bool RTAcceleration::BuildTLAS(
 
         for (uint32_t i = 0; i < kFrameCount; ++i)
         {
-            HRESULT hr = device->CreateCommittedResource(
+            HRESULT hr = d3dDevice->CreateCommittedResource(
                 &heapProps, D3D12_HEAP_FLAG_NONE,
                 &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                nullptr, IID_PPV_ARGS(&m_tlasInstanceBuffer[i]));
+                nullptr, IID_PPV_ARGS(&replacement[i]));
             if (FAILED(hr))
             {
                 core::Log::Errorf("BuildTLAS: failed to create instance buffer %u: 0x%08X", i, hr);
-                m_tlasMaxInstances = 0;
                 return false;
             }
             wchar_t name[48];
             swprintf_s(name, L"TLAS_InstanceBuffer[%u]", i);
-            m_tlasInstanceBuffer[i]->SetName(name);
+            replacement[i]->SetName(name);
 
             D3D12_RANGE readRange = { 0, 0 };
-            hr = m_tlasInstanceBuffer[i]->Map(0, &readRange,
-                                              reinterpret_cast<void**>(&m_tlasInstanceMapped[i]));
-            if (FAILED(hr) || !m_tlasInstanceMapped[i])
+            hr = replacement[i]->Map(0, &readRange,
+                                      reinterpret_cast<void**>(&replacementMapped[i]));
+            if (FAILED(hr) || !replacementMapped[i])
             {
-                // Do NOT commit m_tlasMaxInstances on failure: a later call would
-                // skip this branch and write through a null pointer, permanently.
                 core::Log::Errorf("BuildTLAS: failed to map instance buffer %u: 0x%08X", i, hr);
-                m_tlasInstanceMapped[i] = nullptr;
-                m_tlasInstanceBuffer[i].Reset();
-                m_tlasMaxInstances = 0;
+                for (uint32_t j = 0; j < i; ++j)
+                {
+                    if (replacement[j] && replacementMapped[j])
+                        replacement[j]->Unmap(0, nullptr);
+                }
                 return false;
             }
+        }
+
+        for (uint32_t i = 0; i < kFrameCount; ++i)
+        {
+            if (m_tlasInstanceBuffer[i] && m_tlasInstanceMapped[i])
+                m_tlasInstanceBuffer[i]->Unmap(0, nullptr);
+            device.DeferredRelease(m_tlasInstanceBuffer[i]);
+            m_tlasInstanceBuffer[i] = std::move(replacement[i]);
+            m_tlasInstanceMapped[i] = replacementMapped[i];
         }
         m_tlasMaxInstances = newMax;
     }
@@ -286,29 +289,45 @@ bool RTAcceleration::BuildTLAS(
     inputs.Flags         = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
-    device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    d3dDevice->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
 
     // Allocate/grow TLAS buffers if needed
     if (prebuild.ResultDataMaxSizeInBytes > m_tlasResultSize)
     {
+        ComPtr<ID3D12Resource> replacement[kFrameCount];
         for (uint32_t i = 0; i < kFrameCount; ++i)
         {
             wchar_t name[40];
             swprintf_s(name, L"TLAS_Result[%u]", i);
-            m_tlasResult[i] = CreateUAVBuffer(device, prebuild.ResultDataMaxSizeInBytes,
+            replacement[i] = CreateUAVBuffer(d3dDevice, prebuild.ResultDataMaxSizeInBytes,
                 D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, name);
+            if (!replacement[i])
+                return false;
+        }
+        for (uint32_t i = 0; i < kFrameCount; ++i)
+        {
+            device.DeferredRelease(m_tlasResult[i]);
+            m_tlasResult[i] = std::move(replacement[i]);
         }
         m_tlasResultSize = prebuild.ResultDataMaxSizeInBytes;
     }
 
     if (prebuild.ScratchDataSizeInBytes > m_tlasScratchSize)
     {
+        ComPtr<ID3D12Resource> replacement[kFrameCount];
         for (uint32_t i = 0; i < kFrameCount; ++i)
         {
             wchar_t name[40];
             swprintf_s(name, L"TLAS_Scratch[%u]", i);
-            m_tlasScratch[i] = CreateUAVBuffer(device, prebuild.ScratchDataSizeInBytes,
+            replacement[i] = CreateUAVBuffer(d3dDevice, prebuild.ScratchDataSizeInBytes,
                 D3D12_RESOURCE_STATE_COMMON, name);
+            if (!replacement[i])
+                return false;
+        }
+        for (uint32_t i = 0; i < kFrameCount; ++i)
+        {
+            device.DeferredRelease(m_tlasScratch[i]);
+            m_tlasScratch[i] = std::move(replacement[i]);
         }
         m_tlasScratchSize = prebuild.ScratchDataSizeInBytes;
     }

@@ -6,6 +6,7 @@
 #include "render/texture.h"
 
 #include <windows.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +53,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
     options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
+    options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
@@ -149,7 +151,8 @@ bool App::Initialize()
     constexpr bool enableDebug = true;
 #endif
 
-    if (!m_device.Init(m_window.GetHWND(), m_window.GetWidth(), m_window.GetHeight(), enableDebug))
+    if (!m_device.Init(m_window.GetHWND(), m_window.GetWidth(), m_window.GetHeight(),
+                       enableDebug, m_options.gpuValidation))
     {
         core::Log::Error("Failed to initialize D3D12");
         return false;
@@ -410,10 +413,13 @@ bool App::InitializeScene()
                        groundAlbedo.value, groundNormal.value },
         ecs::Transform{ { 0, 0, 0 }, core::Quatf::Identity(), { 1, 1, 1 } });
 
-    m_scene.CreateSpinner(
-        "BlueCube", cube,
+    m_smokeGrowthMesh = cube;
+    m_smokeGrowthMaterial =
         ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f,
-                       cubeAlbedo.value, cubeNormal.value },
+                       cubeAlbedo.value, cubeNormal.value };
+    m_smokeTextureEntity = m_scene.CreateSpinner(
+        "BlueCube", cube,
+        m_smokeGrowthMaterial,
         ecs::Transform{ { 0, 0.5f, 0 }, core::Quatf::Identity(), { 1, 1, 1 } },
         0.5f);
 
@@ -527,6 +533,7 @@ int App::RunMainLoop()
     m_smokeRTStarted = false;
     m_captureThisFrame = false;
     m_frameCount = 0;
+    m_smokeMaxOutstandingSubmissions = 0;
     m_exitCode = 0;
     m_titleTimer = 0.0f;
 
@@ -604,6 +611,12 @@ int App::RunMainLoop()
             m_running = false;
             break;
         }
+        if (!ApplySmokeRTMutationStress())
+        {
+            m_exitCode = 8;
+            m_running = false;
+            break;
+        }
 
         if (m_options.smoke)
         {
@@ -654,7 +667,9 @@ int App::RunMainLoop()
                 core::Log::Infof("[SMOKE] present=%s",
                                  m_options.smokeUnlocked ? "immediate" : "vsync");
                 core::Log::Infof("[SMOKE] rt_frame_sync=%s",
-                                 m_options.smokeRT ? "gpu_idle" : "frames_in_flight");
+                                 "frames_in_flight");
+                core::Log::Infof("[SMOKE] max_outstanding_submissions=%u",
+                                 m_smokeMaxOutstandingSubmissions);
                 core::Log::Infof("[SMOKE] elapsed_ms=%.3f throughput_fps=%.3f",
                                  elapsedSeconds * 1000.0, throughput);
                 core::Log::Infof("[SMOKE] resize_requests=%u", m_smokeResizeRequests);
@@ -898,6 +913,61 @@ bool App::ApplySmokeDescriptorStress()
     return true;
 }
 
+bool App::ApplySmokeRTMutationStress()
+{
+    if (!m_options.smokeRT)
+        return true;
+
+    auto& registry = m_scene.GetRegistry();
+    if (m_frameCount == 5)
+    {
+        if (!registry.Has<ecs::Material>(m_smokeTextureEntity))
+        {
+            core::Log::Error("RT smoke texture mutation entity is unavailable");
+            return false;
+        }
+        auto& material = registry.Get<ecs::Material>(m_smokeTextureEntity);
+        m_smokeSavedAlbedoTexture = material.albedoTextureHandle;
+        m_smokeSavedNormalTexture = material.normalTextureHandle;
+        material.albedoTextureHandle = UINT32_MAX;
+        material.normalTextureHandle = UINT32_MAX;
+    }
+    else if (m_frameCount == 7)
+    {
+        auto& material = registry.Get<ecs::Material>(m_smokeTextureEntity);
+        material.albedoTextureHandle = m_smokeSavedAlbedoTexture;
+        material.normalTextureHandle = m_smokeSavedNormalTexture;
+        core::Log::Info("[SMOKE] rt_texture_churn=passed");
+    }
+    else if (m_frameCount == 8)
+    {
+        m_smokeGrowthEntities.reserve(80);
+        for (uint32_t i = 0; i < 80; ++i)
+        {
+            char name[32] = {};
+            std::snprintf(name, sizeof(name), "RTGrowth_%u", i);
+            const ecs::Transform transform{
+                { 100000.0 + static_cast<double>(i) * 4.0, 0.5, 100000.0 },
+                core::Quatf::Identity(),
+                { 1.0f, 1.0f, 1.0f }
+            };
+            m_smokeGrowthEntities.push_back(
+                m_scene.CreateRenderable(name, m_smokeGrowthMesh,
+                                         m_smokeGrowthMaterial, transform));
+        }
+        core::Log::Infof("[SMOKE] rt_growth_entities=%zu", m_smokeGrowthEntities.size());
+    }
+    else if (m_frameCount == 16)
+    {
+        for (const ecs::Entity entity : m_smokeGrowthEntities)
+            m_scene.DestroyEntity(entity);
+        m_smokeGrowthEntities.clear();
+        core::Log::Info("[SMOKE] rt_topology_churn=passed");
+    }
+
+    return true;
+}
+
 render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep) const
 {
     render::DebugOverlayState state = {};
@@ -1007,6 +1077,13 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (!m_device.ExecuteAndPresent(vsync))
         return false;
 
+    if (m_options.smoke)
+    {
+        m_smokeMaxOutstandingSubmissions = (std::max)(
+            m_smokeMaxOutstandingSubmissions,
+            m_device.OutstandingSubmissionCount());
+    }
+
     if (m_captureThisFrame)
     {
         m_captureThisFrame = false;
@@ -1019,12 +1096,6 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         core::Log::Error("GPU device lost - exiting");
         m_exitCode = 3;
         m_running = false;
-    }
-
-    if (renderedPathTracing && !m_device.IsDeviceLost())
-    {
-        if (!m_device.WaitForGpu())
-            return false;
     }
 
     return !m_device.IsDeviceLost();

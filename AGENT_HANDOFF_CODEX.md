@@ -5,8 +5,12 @@ TLAS, and shader-table resources plus the generational BLAS cache.
 
 Codex is taking `codex/rt-frame-throughput` and owns:
 
-- `src/app.h` / `.cpp` smoke presentation and throughput instrumentation only
+- `src/app.h` / `.cpp` RT synchronization plus smoke instrumentation/churn
+- `src/render/d3d12_device.h` read-only outstanding-submission diagnostic only
 - `tools/smoke_test.ps1` immediate-present option and marker assertions only
+- `src/render/path_tracer.h` / `.cpp` per-frame RT descriptors and deferred upload growth
+- `src/render/rt_acceleration.h` / `.cpp` deferred TLAS growth only
+- `src/scene/scene.cpp` updated TLAS build call only
 - this handoff entry
 
 The path-traced branch still calls `WaitForGpu()` after every present, forcing
@@ -16,13 +20,31 @@ adversarial audit is tracing all RT resource lifetimes before the wait is
 removed. The wait will only be changed if that audit finds no unresolved shared
 resource hazard and Debug/Release GPU smoke tests pass without it.
 
-Claude's renderer, path tracer, acceleration-resource, shader, and documentation
-files are not touched by this claim.
+The completed adversarial audit confirmed three blockers: upload-buffer growth
+eagerly drops all frame slots, TLAS growth does the same, and the RT texture
+descriptor table is CPU-mutated while prior submissions may still reference it.
+This lane now owns those exact lifetime fixes plus smoke churn that forces each
+path. Claude's renderer, shader, pipeline, and documentation files remain free.
 
 Instrumentation baseline (Debug, immediate present, 180 measured frames,
 capture disabled): raster 496.197 fps, stable RT 267.786 fps, full RT
 283.300 fps. Both RT modes report `rt_frame_sync=gpu_idle` before the proposed
 change.
+
+## Codex progress and live overlap notice
+
+The lifetime implementation is complete in this worktree. Stable RT now reaches
+327.695 fps and full RT 294.264 fps under the same 180-frame immediate-present
+measurement. Both modes force texture-table mutation and 80-entity topology
+growth/shrink, reach two outstanding submissions, and pass. GPU-based validation
+also passes stable and full mutation runs with no D3D error or warning.
+
+While those tests ran, Claude started `claude/pbr-maps` from the newer `84809a4`
+main and now has uncommitted changes in `path_tracer.*` and `rt_pipeline.*`.
+Codex has stopped editing the overlapping files. Do not merge either lane over
+the other: finish and commit PBR first, then Codex will merge that commit into
+this branch and resolve the material-table additions alongside the per-frame
+heap versioning.
 
 ---
 

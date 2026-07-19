@@ -130,7 +130,7 @@ private:
     bool CreateConstantBuffer(ID3D12Device5* device);
     // One growth path for all five per-frame upload buffers. Allocates
     // kFrameCount instances so each frame in flight writes its own copy.
-    bool EnsureFrameUploadBuffer(ID3D12Device5* device,
+    bool EnsureFrameUploadBuffer(D3D12Device& device,
                                  FrameUploadBuffer& target,
                                  uint32_t elementCount,
                                  uint64_t elementSize,
@@ -154,12 +154,14 @@ private:
     uint32_t m_outputHeight = 0;
 
     // Descriptor heap for UAV
-    ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
+    ComPtr<ID3D12DescriptorHeap> m_srvUavHeap[kFrameCount];
     uint32_t m_srvUavDescSize = 0;
-    uint32_t m_boundAlbedoTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTAlbedoTextures> m_boundAlbedoTextureResources = {};
-    uint32_t m_boundNormalTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTNormalTextures> m_boundNormalTextureResources = {};
+    uint32_t m_boundAlbedoTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTAlbedoTextures>
+        m_boundAlbedoTextureResources[kFrameCount] = {};
+    uint32_t m_boundNormalTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTNormalTextures>
+        m_boundNormalTextureResources[kFrameCount] = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight

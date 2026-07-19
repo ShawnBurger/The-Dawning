@@ -10,6 +10,7 @@
 #include "scene/scene.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace dawning
 {
@@ -22,6 +23,7 @@ struct AppOptions
     bool smokeCapture = false;
     bool smokeResize = false;
     bool smokeUnlocked = false;
+    bool gpuValidation = false;
     bool showOverlay = true;
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
@@ -44,6 +46,7 @@ private:
     bool HandleResize();
     bool ApplySmokeResizeStep();
     bool ApplySmokeDescriptorStress();
+    bool ApplySmokeRTMutationStress();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
     void UpdateCamera(const core::TimeStep& timeStep);
     bool RenderFrame(const core::TimeStep& timeStep);
@@ -76,11 +79,18 @@ private:
     bool m_captureThisFrame = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
+    scene::MeshHandle m_smokeGrowthMesh;
+    ecs::Entity m_smokeTextureEntity;
+    ecs::Material m_smokeGrowthMaterial;
+    uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
+    uint32_t m_smokeSavedNormalTexture = UINT32_MAX;
+    std::vector<ecs::Entity> m_smokeGrowthEntities;
     render::DescriptorHandle m_smokeRetiredDescriptor;
     render::DescriptorHandle m_smokeHeldDescriptor;
     uint64_t m_frameCount = 0;
     int64_t m_smokeStartCounter = 0;
     int64_t m_smokeCounterFrequency = 0;
+    uint32_t m_smokeMaxOutstandingSubmissions = 0;
     float m_titleTimer = 0.0f;
 
     render::RTQualityMode m_rtQualityMode = render::RTQualityMode::StablePreview;

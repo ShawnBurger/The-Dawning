@@ -5,6 +5,7 @@ param(
     [switch]$FullQuality,
     [switch]$ResizeStress,
     [switch]$Unlocked,
+    [switch]$GPUValidation,
     [int]$TimeoutSeconds = 15,
     [string]$Config = "Debug",
     [switch]$NoCapture
@@ -64,6 +65,7 @@ if (!$RasterOnly)  {
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
+if ($GPUValidation){ $arguments += "--gpu-validation" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
 
 $process = Start-Process -FilePath $exe `
@@ -145,6 +147,9 @@ if ($markers["fixed_hz"] -ne "60") {
 if ([uint64]$markers["frames"] -ne [uint64]$markers["target_frames"]) {
     throw "Smoke test stopped on frame $($markers['frames']); expected exact target frame $($markers['target_frames'])."
 }
+if ($GPUValidation -and $logText -notmatch "D3D12 GPU-based validation enabled") {
+    throw "GPU-based validation was requested but the D3D12 debug interface did not enable it."
+}
 
 if ([double]$markers["elapsed_ms"] -le 0.0) {
     throw "Smoke elapsed time was '$($markers['elapsed_ms'])'; expected a positive measurement."
@@ -161,6 +166,14 @@ if ($RasterOnly) {
     Assert-Marker "rt_available" "yes"
     Assert-Marker "rt_active"    "yes"
     Assert-Marker "rt_quality"   $(if ($FullQuality) { "full" } else { "stable" })
+    Assert-Marker "rt_texture_churn" "passed"
+    Assert-Marker "rt_topology_churn" "passed"
+    # GPU-based validation may intentionally drain/serialize command execution.
+    # The ordinary unlocked run proves overlap; this run proves validator-clean work.
+    if ($Unlocked -and !$GPUValidation -and
+        [uint32]$markers["max_outstanding_submissions"] -lt 2) {
+        throw "Unlocked RT smoke observed only $($markers['max_outstanding_submissions']) outstanding submission(s); expected at least 2."
+    }
 }
 
 if ([int]$markers["frames"] -lt 2) {

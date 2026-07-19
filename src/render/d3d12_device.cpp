@@ -46,7 +46,8 @@ static bool IsDeviceRemovalError(HRESULT hr)
 // =============================================================================
 // Init
 // =============================================================================
-bool D3D12Device::Init(HWND hwnd, int width, int height, bool enableDebugLayer)
+bool D3D12Device::Init(HWND hwnd, int width, int height,
+                       bool enableDebugLayer, bool enableGpuValidation)
 {
     m_hwnd = hwnd;
     m_width = width;
@@ -55,7 +56,7 @@ bool D3D12Device::Init(HWND hwnd, int width, int height, bool enableDebugLayer)
     // DRED must be configured BEFORE device creation
     if (enableDebugLayer) SetupDRED();
 
-    if (!CreateDevice(enableDebugLayer)) return false;
+    if (!CreateDevice(enableDebugLayer, enableGpuValidation)) return false;
 
     // Probe GPU capabilities after device creation
     ProbeCapabilities();
@@ -72,7 +73,7 @@ bool D3D12Device::Init(HWND hwnd, int width, int height, bool enableDebugLayer)
 // =============================================================================
 // Device & Adapter
 // =============================================================================
-bool D3D12Device::CreateDevice(bool enableDebugLayer)
+bool D3D12Device::CreateDevice(bool enableDebugLayer, bool enableGpuValidation)
 {
     HRESULT hr;
 
@@ -89,7 +90,9 @@ bool D3D12Device::CreateDevice(bool enableDebugLayer)
             ComPtr<ID3D12Debug1> debug1;
             if (SUCCEEDED(debugController.As(&debug1)))
             {
-                debug1->SetEnableGPUBasedValidation(FALSE); // Enable for deep debugging, disable for perf
+                debug1->SetEnableGPUBasedValidation(enableGpuValidation ? TRUE : FALSE);
+                if (enableGpuValidation)
+                    core::Log::Info("D3D12 GPU-based validation enabled");
             }
         }
     }
