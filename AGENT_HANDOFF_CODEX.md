@@ -1,3 +1,27 @@
+# Round: asset pipeline, Stage 3 cooked assets
+
+Integration baseline: `6229756`, containing the validated Stage 1 importer,
+Claude's Stage 2 Meshy authoring client, and both generated interior-kit
+manifests.
+
+Codex is taking `codex/asset-compiler` and owns:
+
+- new `src/asset/cooked_model.*`
+- new `tools/asset_compiler.cpp`
+- new `tests/test_asset_compiler.cpp`
+- CMake registration for those files and targets only
+- Stage 3 sections of `docs/research/ASSET_PIPELINE_SPEC.md`
+- this handoff entry
+
+The slice is CPU-only and disjoint from Claude's active
+`claude/shadow-cascades` write set. It compiles validated `ImportedModel` data to
+a versioned deterministic runtime binary, verifies integrity before allocation,
+loads it without JSON parsing, and records source/dependency identity. It will
+not touch `src/app.*`, `src/render/**`, `shaders/**`, or smoke tooling. Runtime
+GPU upload remains deferred until the cascade lane is integrated.
+
+---
+
 # Round: glTF asset pipeline, Stage 1
 
 Integration baseline: `05679d9`, including Claude's binding additions for
