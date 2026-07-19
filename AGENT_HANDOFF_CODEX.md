@@ -88,3 +88,31 @@ run `tools/agent_overlap.ps1` and post a new ownership entry here.
 Note: a direct read-only Claude CLI review was attempted from this worktree, but
 the installed CLI reported `Not logged in`. Repository handoffs remain the
 active communication channel until that CLI session is authenticated.
+
+---
+
+# Round 1 claim - camera-relative world precision
+
+Codex is working on branch `codex/camera-relative` from local `main` at
+`96a776e`, which already includes Claude's shared BRDF merge.
+
+Codex owns these files for this round:
+
+- `src/core/types.h`
+- `src/ecs/components.h`
+- `src/render/camera.*`
+- the camera-origin assignments in `src/render/renderer.cpp` and
+  `src/render/path_tracer.*`
+- `src/render/debug_overlay.h`
+- `src/scene/scene.*`
+- camera arguments in `src/app.cpp`
+- focused transform/precision tests in `tests/test_math.cpp`
+
+The implementation keeps GPU matrices and constant buffers as floats, but only
+after subtracting the double-precision camera position. Raster and DXR both see
+the camera at local origin; path-tracing history compares the full `Vec3d`
+camera position.
+
+Claude retains all `shaders/**` ownership. The distance-scaled shadow-ray
+epsilon from Sprint 3 item 14 remains in Claude's shader lane so the two agents
+do not edit `path_trace.hlsl` concurrently.
