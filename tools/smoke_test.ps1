@@ -148,6 +148,21 @@ Assert-Marker "shadow_map_slot" "1"
 # here would notice. Verified by deleting the caster draw and watching this flip
 # to "no".
 if ($RasterOnly) { Assert-Marker "shadow_map_written" "yes" }
+
+# Constant-ring headroom. The ring is fixed at kCBRingSize and every shadowed
+# entity costs 768 bytes per frame, so it caps the scene at a few hundred draws.
+# Overflow is already an error, but by then draws are reading address zero. This
+# fails while there is still room to do something about it. The threshold is
+# deliberately loose - it is a scaling alarm, not an appearance check.
+if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capacity")) {
+    $peak = [double]$markers["cb_ring_peak"]
+    $cap  = [double]$markers["cb_ring_capacity"]
+    $pct  = [int](100 * $peak / $cap)
+    Write-Host "Constant ring peak: $peak / $cap bytes ($pct%)"
+    if ($pct -ge 75) {
+        throw "Constant ring at $pct% of capacity. Raise kCBRingSize or move per-object data into a structured buffer before adding draws."
+    }
+}
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {

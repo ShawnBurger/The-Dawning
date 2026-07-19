@@ -1245,10 +1245,17 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
 {
     uint32_t alignedSize = AlignCBSize(dataSize);
 
-    // Check for overflow
+    // Check for overflow. Returning 0 here makes the draw read from address zero,
+    // so this is an error rather than a warning - it is caught by the smoke
+    // harness, which forces a nonzero exit when anything logs an error.
     if (m_cbOffset + alignedSize > kCBRingSize)
     {
-        core::Log::Error("CB upload ring overflow! Increase kCBRingSize.");
+        core::Log::Errorf(
+            "CB upload ring overflow at %u/%u bytes. Every shadowed entity costs "
+            "768 bytes per frame (256 per-object + 256 material + 256 shadow), so "
+            "this ring caps the scene at roughly %u of them. The fix is per-object "
+            "data in a structured buffer indexed by draw, not a root CBV per draw.",
+            m_cbOffset, kCBRingSize, kCBRingSize / 768u);
         return 0;
     }
 
