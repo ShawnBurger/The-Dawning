@@ -37,3 +37,7 @@ CTestTestfile.cmake
 *.log
 *.tmp
 *.bak
+
+# Smoke-test capture output
+smoke_capture.ppm
+*.ppm

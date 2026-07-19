@@ -2,37 +2,39 @@ param(
     [double]$Seconds = 4.0,
     [switch]$RasterOnly,
     [switch]$FullQuality,
-    [int]$TimeoutSeconds = 15
+    [int]$TimeoutSeconds = 15,
+    [string]$Config = "Debug",
+    [switch]$NoCapture
 )
 
 $ErrorActionPreference = "Stop"
 
-$root = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $root "build\Debug\TheDawningV3.exe"
-$log = Join-Path $root "build\Debug\TheDawning.log"
-$shaderInclude = Join-Path $root "build\Debug\shaders\display_common.hlsli"
+$root   = Split-Path -Parent $PSScriptRoot
+$outDir = Join-Path $root "build\$Config"
+$exe    = Join-Path $outDir "TheDawningV3.exe"
+$log    = Join-Path $outDir "TheDawning.log"
+$capture = Join-Path $outDir "smoke_capture.ppm"
+$shaderInclude = Join-Path $outDir "shaders\display_common.hlsli"
 
 if (!(Test-Path -LiteralPath $exe)) {
-    throw "Executable not found: $exe. Run .\SETUP_AND_BUILD.bat first."
+    throw "Executable not found: $exe. Run .\SETUP_AND_BUILD.bat first (config '$Config')."
 }
 if (!(Test-Path -LiteralPath $shaderInclude)) {
     throw "Shader include not found in output: $shaderInclude. Rebuild before running smoke tests."
 }
 
-if (Test-Path -LiteralPath $log) {
-    Remove-Item -LiteralPath $log -Force
-}
+# Delete both artifacts up front so a stale file from an earlier run can never be
+# validated in place of one this run failed to produce.
+if (Test-Path -LiteralPath $log)     { Remove-Item -LiteralPath $log -Force }
+if (Test-Path -LiteralPath $capture) { Remove-Item -LiteralPath $capture -Force }
 
 $arguments = @("--smoke", "--smoke-seconds=$Seconds")
-if (!$RasterOnly) {
-    $arguments += "--smoke-rt"
-}
-if ($FullQuality) {
-    $arguments += "--smoke-full"
-}
+if (!$RasterOnly)  { $arguments += "--smoke-rt" }
+if ($FullQuality)  { $arguments += "--smoke-full" }
+if (!$NoCapture)   { $arguments += "--smoke-capture" }
 
 $process = Start-Process -FilePath $exe `
-    -WorkingDirectory (Split-Path -Parent $exe) `
+    -WorkingDirectory $outDir `
     -ArgumentList $arguments `
     -PassThru
 
@@ -42,9 +44,7 @@ if (!$process.WaitForExit($TimeoutSeconds * 1000)) {
 }
 
 if ($process.ExitCode -ne 0) {
-    if (Test-Path -LiteralPath $log) {
-        Get-Content -LiteralPath $log -Tail 80
-    }
+    if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 80 }
     throw "Smoke test failed with exit code $($process.ExitCode)."
 }
 
@@ -54,8 +54,7 @@ if (!(Test-Path -LiteralPath $log)) {
 
 $logText = Get-Content -LiteralPath $log -Raw
 
-# core::Log emits a four-character column-aligned prefix "[ERR ]", never "[ERROR]".
-# The previous pattern could not match any line this engine writes.
+# core::Log writes a four-character column-aligned prefix "[ERR ]", never "[ERROR]".
 $errors = Select-String -LiteralPath $log -Pattern "\[ERR\s*\]"
 if ($errors) {
     $errors | ForEach-Object { $_.Line }
@@ -68,47 +67,116 @@ if ($warnings) {
     $warnings | ForEach-Object { Write-Host $_.Line }
 }
 
+# -----------------------------------------------------------------------------
+# Structured markers
+# -----------------------------------------------------------------------------
+# Assertions match "[SMOKE] key=value" rather than human-readable log prose, so
+# rewording a log line cannot silently disarm a check.
+$markers = @{}
+foreach ($m in (Select-String -LiteralPath $log -Pattern "\[SMOKE\]\s+(.+)$")) {
+    foreach ($pair in ($m.Matches[0].Groups[1].Value -split "\s+")) {
+        $kv = $pair -split "=", 2
+        if ($kv.Count -eq 2) { $markers[$kv[0]] = $kv[1] }
+    }
+}
+
+function Assert-Marker($key, $expected) {
+    if (-not $markers.ContainsKey($key)) {
+        throw "Smoke test did not emit the '$key' marker. Markers seen: $($markers.Keys -join ', ')"
+    }
+    if ($markers[$key] -ne $expected) {
+        throw "Smoke marker '$key' was '$($markers[$key])', expected '$expected'."
+    }
+}
+
 if ($logText -notmatch "Smoke mode complete") {
     throw "Smoke test log did not record completion."
 }
-if ($logText -notmatch "Compiled shader: shaders/basic_ps.hlsl") {
-    throw "Smoke test did not compile the raster pixel shader."
+
+Assert-Marker "overlay" "ok"
+
+if ($RasterOnly) {
+    Assert-Marker "mode"      "raster"
+    Assert-Marker "rt_active" "no"
+} else {
+    Assert-Marker "mode"         "rt"
+    Assert-Marker "rt_available" "yes"
+    Assert-Marker "rt_active"    "yes"
+    Assert-Marker "rt_quality"   $(if ($FullQuality) { "full" } else { "stable" })
 }
-if ($logText -notmatch "Compiled shader: shaders/sky_ps.hlsl") {
-    throw "Smoke test did not compile the raster sky shader."
+
+if ([int]$markers["frames"] -lt 2) {
+    throw "Smoke test rendered only $($markers['frames']) frame(s); expected a sustained run."
 }
-if ($logText -notmatch "Sky PSO created") {
-    throw "Smoke test did not create the raster sky pipeline."
+
+# -----------------------------------------------------------------------------
+# Pixel assertions
+# -----------------------------------------------------------------------------
+# Everything above proves the engine did not crash. Only this section proves it
+# drew something. A black screen, inverted culling, a shader that outputs nothing,
+# or NaN-poisoned output would all pass every check above.
+if (!$NoCapture) {
+    Assert-Marker "capture" "ok"
+
+    if (!(Test-Path -LiteralPath $capture)) {
+        throw "Smoke test did not produce a capture: $capture"
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($capture)
+    if ($bytes.Length -lt 32) { throw "Capture file is truncated ($($bytes.Length) bytes)." }
+    if ($bytes[0] -ne 0x50 -or $bytes[1] -ne 0x36) { throw "Capture is not a binary P6 PPM." }
+
+    # Skip the three newline-terminated header fields.
+    $offset = 0; $newlines = 0
+    while ($newlines -lt 3 -and $offset -lt $bytes.Length) {
+        if ($bytes[$offset] -eq 10) { $newlines++ }
+        $offset++
+    }
+
+    $expectedW = [int]$markers["w"]
+    $expectedH = [int]$markers["h"]
+    $expectedBytes = $expectedW * $expectedH * 3
+    if (($bytes.Length - $offset) -ne $expectedBytes) {
+        throw ("Capture payload is {0} bytes; expected {1} for {2}x{3}." -f `
+               ($bytes.Length - $offset), $expectedBytes, $expectedW, $expectedH)
+    }
+
+    # Sample rather than walk every pixel; 1920x1080 in PowerShell is slow.
+    $pixels = $expectedBytes / 3
+    $step = 7
+    $sum = 0.0; $nonBlack = 0; $count = 0
+    $buckets = @{}
+    for ($i = 0; $i -lt $pixels; $i += $step) {
+        $b = $offset + $i * 3
+        $r = $bytes[$b]; $g = $bytes[$b + 1]; $bl = $bytes[$b + 2]
+        $lum = 0.2126 * $r + 0.7152 * $g + 0.0722 * $bl
+        $sum += $lum
+        if ($lum -gt 8) { $nonBlack++ }
+        $buckets["$([int]($r / 32)),$([int]($g / 32)),$([int]($bl / 32))"] = 1
+        $count++
+    }
+
+    $meanLum      = $sum / $count
+    $nonBlackFrac = $nonBlack / $count
+    $distinct     = $buckets.Count
+
+    Write-Host ("Capture stats: {0}x{1}  mean-luminance={2:N1}  non-black={3:P1}  distinct-buckets={4}" -f `
+                $expectedW, $expectedH, $meanLum, $nonBlackFrac, $distinct)
+
+    # Thresholds are deliberately loose. They are chosen to catch catastrophic
+    # failure (black frame, flat fill, blown-out white), not to pin down exact
+    # appearance - that would flake on any legitimate lighting change. A reference
+    # image comparison is the right tool for appearance and is future work.
+    if ($meanLum -lt 10)      { throw "Capture is essentially black (mean luminance $([math]::Round($meanLum,1)))." }
+    if ($meanLum -gt 245)     { throw "Capture is blown out (mean luminance $([math]::Round($meanLum,1)))." }
+    if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
+    if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
 }
 
 if ($RasterOnly) {
-    if ($logText -match "Path tracing initialized") {
-        throw "Raster-only smoke unexpectedly initialized path tracing."
-    }
     Write-Host "Smoke test passed (raster)."
+} elseif ($FullQuality) {
+    Write-Host "Smoke test passed (path tracing full)."
 } else {
-    if ($logText -notmatch "Path tracing initialized") {
-        throw "Path tracing smoke did not initialize DXR."
-    }
-    if ($logText -notmatch "Smoke mode: path tracing enabled") {
-        throw "Path tracing smoke did not enable path tracing."
-    }
-    if ($logText -notmatch "DXC compiled: shaders/path_trace.hlsl") {
-        throw "Path tracing smoke did not compile the DXR shader library."
-    }
-
-    if ($FullQuality) {
-        if ($logText -notmatch "Smoke mode enabled \(rt=yes, full=yes") {
-            throw "Full-quality smoke did not request full RT quality."
-        }
-        if ($logText -notmatch "Initial RT quality mode: Full Path Trace") {
-            throw "Full-quality smoke did not select full path tracing quality."
-        }
-        Write-Host "Smoke test passed (path tracing full)."
-    } else {
-        if ($logText -notmatch "Initial RT quality mode: Stable Preview") {
-            throw "Stable smoke did not select stable preview quality."
-        }
-        Write-Host "Smoke test passed (path tracing stable)."
-    }
+    Write-Host "Smoke test passed (path tracing stable)."
 }

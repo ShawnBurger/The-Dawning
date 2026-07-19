@@ -30,11 +30,17 @@
 namespace
 {
 
+// Written next to the exe (the working directory is set to the exe directory at
+// startup). The smoke harness deletes it before each run so a stale file from an
+// earlier run can never be validated in place of a missing one.
+constexpr const char* kSmokeCaptureFile = "smoke_capture.ppm";
+
 struct AppOptions
 {
     bool smoke = false;
     bool smokeRT = false;
     bool smokeFullQuality = false;
+    bool smokeCapture = false;
     bool showOverlay = true;
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
@@ -65,6 +71,7 @@ AppOptions ParseOptions(const char* commandLine)
     options.smoke = HasOption(args, "--smoke");
     options.smokeRT = HasOption(args, "--smoke-rt");
     options.smokeFullQuality = HasOption(args, "--smoke-full");
+    options.smokeCapture = HasOption(args, "--smoke-capture");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
@@ -511,9 +518,13 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
     // =========================================================================
     bool running = true;
     bool smokeRTStarted = false;
+    bool captureThisFrame = false;
+    uint64_t frameCount = 0;
     int exitCode = 0;
     while (running)
     {
+        ++frameCount;
+
         // --- Input ---
         core::input::BeginFrame();
 
@@ -580,6 +591,22 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
 
             if (ts.totalTime >= options.smokeSeconds)
             {
+                // Setting running = false does not skip this frame: the loop
+                // condition is only re-tested at the top, so this frame still
+                // renders and presents. That is what makes it capturable.
+                captureThisFrame = options.smokeCapture;
+
+                // Structured markers. The harness matches these rather than the
+                // human-readable prose above them, so log wording stays free to
+                // change without silently disarming an assertion.
+                core::Log::Infof("[SMOKE] mode=%s", options.smokeRT ? "rt" : "raster");
+                core::Log::Infof("[SMOKE] rt_available=%s", rtAvailable ? "yes" : "no");
+                core::Log::Infof("[SMOKE] rt_active=%s", (usePathTracing && rtAvailable) ? "yes" : "no");
+                core::Log::Infof("[SMOKE] rt_quality=%s",
+                                 rtQualityMode == render::RTQualityMode::FullPathTrace ? "full" : "stable");
+                core::Log::Infof("[SMOKE] overlay=%s", debugOverlayReady ? "ok" : "unavailable");
+                core::Log::Infof("[SMOKE] frames=%llu",
+                                 static_cast<unsigned long long>(frameCount));
                 core::Log::Info("Smoke mode complete");
                 running = false;
             }
@@ -761,7 +788,26 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
                                        D3D12_RESOURCE_STATE_PRESENT);
         }
 
+        // Record the readback while the command list is still open and the back
+        // buffer is back in PRESENT. A FLIP_DISCARD back buffer is undefined after
+        // Present, so the copy has to be part of the frame that drew the image.
+        if (captureThisFrame)
+        {
+            if (!device.RecordBackBufferReadback())
+                captureThisFrame = false;   // already logged; the latch will fail the run
+        }
+
         device.ExecuteAndPresent(true);
+
+        // The map has to wait until that frame's GPU work retires, which is why
+        // this is a second phase rather than part of the record above.
+        if (captureThisFrame)
+        {
+            captureThisFrame = false;
+            // WriteBackBufferCapture emits its own [SMOKE] capture= marker with
+            // the resolved dimensions, so nothing more is logged here.
+            device.WriteBackBufferCapture(kSmokeCaptureFile);
+        }
 
         if (device.IsDeviceLost())
         {
