@@ -86,15 +86,55 @@ public:
     bool IsInitialized() const { return m_initialized; }
 
 private:
+    // -------------------------------------------------------------------------
+    // Per-frame RT upload buffers
+    // -------------------------------------------------------------------------
+    // Every one of these is rewritten by the CPU on each dispatch and read by the
+    // GPU from the command list recorded that frame. They were single-instanced
+    // against kFrameCount frames in flight, which is the same defect the debug
+    // overlay had: resource barriers order GPU work, they do not synchronise CPU
+    // writes to persistently mapped memory, so no barrier can protect them.
+    //
+    // It was invisible only because the frame loop ends every path-traced frame
+    // with a full WaitForGpu(), serialising the GPU to zero frames in flight.
+    // That stall masked the race rather than fixing it, and capped RT throughput
+    // permanently. Instancing per frame is the prerequisite for removing it.
+    //
+    // The constant buffer above was already correct; these five were not.
+    struct FrameUploadBuffer
+    {
+        ComPtr<ID3D12Resource> buffer[kFrameCount];
+        uint8_t*               mapped[kFrameCount] = {};
+        uint32_t               capacity = 0;   // elements, not bytes
+
+        bool Valid() const { return buffer[0] != nullptr; }
+
+        void Reset()
+        {
+            for (uint32_t i = 0; i < kFrameCount; ++i)
+            {
+                if (buffer[i] && mapped[i])
+                {
+                    buffer[i]->Unmap(0, nullptr);
+                    mapped[i] = nullptr;
+                }
+                buffer[i].Reset();
+            }
+            capacity = 0;
+        }
+    };
+
+
     bool CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint32_t height);
     bool CreateDescriptorHeap(ID3D12Device5* device);
     bool CreateConstantBuffer(ID3D12Device5* device);
-    bool CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMaterials);
-    bool EnsureMaterialBuffer(ID3D12Device5* device, uint32_t materialCount);
-    bool EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount);
-    bool EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount);
-    bool EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangleCount);
-    bool EnsureTrianglePositionBuffer(ID3D12Device5* device, uint32_t triangleCount);
+    // One growth path for all five per-frame upload buffers. Allocates
+    // kFrameCount instances so each frame in flight writes its own copy.
+    bool EnsureFrameUploadBuffer(ID3D12Device5* device,
+                                 FrameUploadBuffer& target,
+                                 uint32_t elementCount,
+                                 uint64_t elementSize,
+                                 const wchar_t* debugName);
     void ClearMaterialTextureDescriptors(ID3D12Device5* device);
     uint32_t UpdateTextureDescriptors(ID3D12Device5* device,
                                       const Texture* const* textures,
@@ -125,27 +165,11 @@ private:
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
     uint8_t* m_cbMapped[3] = {};
 
-    // Material structured buffer (upload heap)
-    ComPtr<ID3D12Resource> m_materialBuffer;
-    uint8_t* m_materialMapped = nullptr;
-    uint32_t m_maxMaterials = 0;
-
-    // Geometry metadata consumed by closest-hit shaders
-    ComPtr<ID3D12Resource> m_instanceDataBuffer;
-    uint8_t* m_instanceDataMapped = nullptr;
-    uint32_t m_maxInstanceData = 0;
-
-    ComPtr<ID3D12Resource> m_triangleNormalBuffer;
-    uint8_t* m_triangleNormalMapped = nullptr;
-    uint32_t m_maxTriangleNormals = 0;
-
-    ComPtr<ID3D12Resource> m_triangleUVBuffer;
-    uint8_t* m_triangleUVMapped = nullptr;
-    uint32_t m_maxTriangleUVs = 0;
-
-    ComPtr<ID3D12Resource> m_trianglePositionBuffer;
-    uint8_t* m_trianglePositionMapped = nullptr;
-    uint32_t m_maxTrianglePositions = 0;
+    FrameUploadBuffer m_materialBuffers;
+    FrameUploadBuffer m_instanceDataBuffers;
+    FrameUploadBuffer m_triangleNormalBuffers;
+    FrameUploadBuffer m_triangleUVBuffers;
+    FrameUploadBuffer m_trianglePositionBuffers;
 
     core::Vec3d m_prevCameraPos = {};
     core::Vec3f m_prevCameraRight = {};
