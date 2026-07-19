@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>   // snprintf, for the MAX_RASTER_TEXTURES shader define
 
 namespace render
 {
@@ -506,7 +507,20 @@ bool Renderer::CreatePSO(ID3D12Device* device)
 {
     // Compile shaders
     auto vsBytecode = CompileShaderFromFile(L"shaders/basic_vs.hlsl", "main", "vs_5_1");
-    auto psBytecode = CompileShaderFromFile(L"shaders/basic_ps.hlsl", "main", "ps_5_1");
+    // Feed the heap size to HLSL rather than letting the shader hardcode it.
+    // The material texture table's size lives in THREE places that must agree:
+    // kMaxRasterTextures here, the root-signature SRV range NumDescriptors
+    // (which already uses the constant), and the HLSL array declaration. The
+    // third was a literal 128, so growing the heap would have produced a silent
+    // C++/HLSL mismatch rather than a compile error. Now there is one source.
+    char maxRasterTexturesText[16];
+    snprintf(maxRasterTexturesText, sizeof(maxRasterTexturesText), "%u", kMaxRasterTextures);
+    const D3D_SHADER_MACRO psDefines[] = {
+        { "MAX_RASTER_TEXTURES", maxRasterTexturesText },
+        { nullptr, nullptr }
+    };
+
+    auto psBytecode = CompileShaderFromFile(L"shaders/basic_ps.hlsl", "main", "ps_5_1", psDefines);
 
     if (!vsBytecode || !psBytecode)
     {
@@ -701,10 +715,24 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     nullSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     nullSrv.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(nullptr, &nullSrv, m_textureHeap->GetCPUDescriptorHandleForHeapStart());
+    // Null-fill the WHOLE table, not just slot 0. The root signature binds all
+    // kMaxRasterTextures descriptors as one range, so every slot is nominally
+    // part of a bound table even before any texture is registered. Leaving the
+    // unallocated ones uninitialised was safe only because the range is
+    // DESCRIPTORS_VOLATILE and every sample in basic_ps.hlsl is gated behind
+    // useAlbedoTexture / useNormalTexture - i.e. it relied on an invariant held
+    // in the shader rather than in this heap. path_tracer.cpp already null-fills
+    // its equivalent ranges; the two subsystems disagreed on this, and the
+    // raster side was the one depending on someone else being careful.
+    D3D12_CPU_DESCRIPTOR_HANDLE nullHandle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    for (uint32_t i = 0; i < kMaxRasterTextures; ++i)
+    {
+        device->CreateShaderResourceView(nullptr, &nullSrv, nullHandle);
+        nullHandle.ptr += m_textureDescSize;
+    }
 
-    // Slot 0 stays the null-SRV fallback written just above, so allocation
-    // starts at 1 and the allocator will never recycle index 0.
+    // Slot 0 stays the null-SRV fallback, so allocation starts at 1 and the
+    // allocator will never recycle index 0.
     m_textureAllocator.Init(kMaxRasterTextures, 1);
 
     core::Log::Infof("Raster texture heap created (%u descriptors, %u usable)",
