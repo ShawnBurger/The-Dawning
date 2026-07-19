@@ -27,6 +27,7 @@ bool Renderer::Init(D3D12Device& device)
                          static_cast<uint32_t>(device.Width()),
                          static_cast<uint32_t>(device.Height()))) return false;
     if (!CreateTonemapPipeline(device.Device())) return false;
+    if (!CreateBloomPipeline(device.Device())) return false;
 
     core::Log::Info("Renderer initialized");
     return true;
@@ -43,6 +44,13 @@ void Renderer::Shutdown()
             m_cbMappedPtrs[i] = nullptr;
         }
     }
+    m_bloomBlurPSO.Reset();
+    m_bloomPrefilterPSO.Reset();
+    m_bloomRootSig.Reset();
+    m_bloomRtvHeap.Reset();
+    for (auto& t : m_bloomTarget) t.Reset();
+    m_bloomWidth = 0;
+    m_bloomHeight = 0;
     m_tonemapPSO.Reset();
     m_tonemapRootSig.Reset();
     m_hdrSrvHeap.Reset();
@@ -131,7 +139,7 @@ bool Renderer::CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t he
     if (!m_hdrSrvHeap)
     {
         D3D12_DESCRIPTOR_HEAP_DESC srvDesc = {};
-        srvDesc.NumDescriptors = 1;
+        srvDesc.NumDescriptors = 3;   // scene HDR + bloom A + bloom B
         srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         hr = device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_hdrSrvHeap));
@@ -158,9 +166,67 @@ bool Renderer::CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t he
     device->CreateShaderResourceView(m_hdrTarget.Get(), &srv,
                                      m_hdrSrvHeap->GetCPUDescriptorHandleForHeapStart());
 
+    // ---- Bloom ping-pong pair at half resolution ----
+    m_bloomWidth  = (width  + 1) / 2;
+    m_bloomHeight = (height + 1) / 2;
+
+    D3D12_RESOURCE_DESC bloomDesc = desc;
+    bloomDesc.Width  = m_bloomWidth;
+    bloomDesc.Height = m_bloomHeight;
+
+    D3D12_CLEAR_VALUE bloomClear = {};
+    bloomClear.Format = kHDRFormat;   // black; bloom starts from nothing
+
+    if (!m_bloomRtvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC bloomRtvDesc = {};
+        bloomRtvDesc.NumDescriptors = kBloomTargetCount;
+        bloomRtvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        bloomRtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        hr = device->CreateDescriptorHeap(&bloomRtvDesc, IID_PPV_ARGS(&m_bloomRtvHeap));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Failed to create bloom RTV heap: 0x%08X", hr);
+            return false;
+        }
+        m_bloomRtvHeap->SetName(L"BloomRTVHeap");
+    }
+
+    const uint32_t rtvStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    const uint32_t srvStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    for (uint32_t i = 0; i < kBloomTargetCount; ++i)
+    {
+        m_bloomTarget[i].Reset();
+        hr = device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &bloomDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &bloomClear,
+            IID_PPV_ARGS(&m_bloomTarget[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Failed to create bloom target %u (%ux%u): 0x%08X",
+                              i, m_bloomWidth, m_bloomHeight, hr);
+            return false;
+        }
+        wchar_t bloomName[32];
+        swprintf_s(bloomName, L"BloomTarget[%u]", i);
+        m_bloomTarget[i]->SetName(bloomName);
+        m_bloomIsRenderTarget[i] = false;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_bloomRtvHeap->GetCPUDescriptorHandleForHeapStart();
+        rtvHandle.ptr += static_cast<SIZE_T>(i) * rtvStride;
+        device->CreateRenderTargetView(m_bloomTarget[i].Get(), nullptr, rtvHandle);
+
+        // Descriptors 1 and 2 of the shared SRV heap; 0 is the scene target.
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_hdrSrvHeap->GetCPUDescriptorHandleForHeapStart();
+        srvHandle.ptr += static_cast<SIZE_T>(1 + i) * srvStride;
+        device->CreateShaderResourceView(m_bloomTarget[i].Get(), &srv, srvHandle);
+    }
+
     m_hdrWidth  = width;
     m_hdrHeight = height;
-    core::Log::Infof("HDR scene target created: %ux%u (R16G16B16A16_FLOAT)", width, height);
+    core::Log::Infof("HDR scene target created: %ux%u (R16G16B16A16_FLOAT), bloom %ux%u",
+                     width, height, m_bloomWidth, m_bloomHeight);
     return true;
 }
 
@@ -172,6 +238,9 @@ bool Renderer::ResizeHDRTarget(D3D12Device& device, uint32_t width, uint32_t hei
     // through the fence-guarded queue rather than being dropped here.
     if (m_hdrTarget)
         device.DeferredRelease(m_hdrTarget);
+    for (uint32_t i = 0; i < kBloomTargetCount; ++i)
+        if (m_bloomTarget[i])
+            device.DeferredRelease(m_bloomTarget[i]);
 
     return CreateHDRTarget(device.Device(), width, height);
 }
@@ -192,36 +261,53 @@ bool Renderer::CreateTonemapPipeline(ID3D12Device* device)
     // Its own minimal root signature: one SRV table plus a point sampler.
     // Reusing the material root signature would drag along three constant
     // buffers this pass has no use for.
+    // Two descriptors: t0 = scene HDR, t1 = bloom. They are adjacent in the
+    // shared SRV heap by construction (0, 1), so one range covers both.
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors                    = 1;
+    srvRange.NumDescriptors                    = 2;
     srvRange.BaseShaderRegister                = 0;
     srvRange.RegisterSpace                     = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    D3D12_ROOT_PARAMETER rootParam = {};
-    rootParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParam.DescriptorTable.NumDescriptorRanges = 1;
-    rootParam.DescriptorTable.pDescriptorRanges   = &srvRange;
-    rootParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_ROOT_PARAMETER rootParams[2] = {};
+    rootParams[0].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[0].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[0].DescriptorTable.pDescriptorRanges   = &srvRange;
+    rootParams[0].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    D3D12_STATIC_SAMPLER_DESC sampler = {};
-    sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    sampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    sampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    sampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    sampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
-    sampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
-    sampler.MaxLOD           = D3D12_FLOAT32_MAX;
-    sampler.ShaderRegister   = 0;
-    sampler.RegisterSpace    = 0;
-    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    // exposure + bloomIntensity + padding. Root constants, so exposure can
+    // change per frame without touching the constant-buffer ring.
+    rootParams[1].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParams[1].Constants.ShaderRegister = 0;
+    rootParams[1].Constants.RegisterSpace  = 0;
+    rootParams[1].Constants.Num32BitValues = 4;
+    rootParams[1].ShaderVisibility         = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // s0 point for the 1:1 scene resolve, s1 linear for the half-res bloom
+    // upsample. Filtering the scene would soften a resolve that is not scaling;
+    // point-sampling the bloom would reintroduce the blockiness the blur removed.
+    D3D12_STATIC_SAMPLER_DESC samplers[2] = {};
+    samplers[0].Filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    samplers[0].AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplers[0].AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplers[0].AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplers[0].ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+    samplers[0].BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    samplers[0].MaxLOD           = D3D12_FLOAT32_MAX;
+    samplers[0].ShaderRegister   = 0;
+    samplers[0].RegisterSpace    = 0;
+    samplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    samplers[1] = samplers[0];
+    samplers[1].Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    samplers[1].ShaderRegister = 1;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
-    rsDesc.NumParameters     = 1;
-    rsDesc.pParameters       = &rootParam;
-    rsDesc.NumStaticSamplers = 1;
-    rsDesc.pStaticSamplers   = &sampler;
+    rsDesc.NumParameters     = _countof(rootParams);
+    rsDesc.pParameters       = rootParams;
+    rsDesc.NumStaticSamplers = _countof(samplers);
+    rsDesc.pStaticSamplers   = samplers;
     rsDesc.Flags =
         D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
@@ -281,6 +367,262 @@ bool Renderer::CreateTonemapPipeline(ID3D12Device* device)
 }
 
 // =============================================================================
+// Bloom
+// =============================================================================
+bool Renderer::CreateBloomPipeline(ID3D12Device* device)
+{
+    auto vs          = CompileShaderFromFile(L"shaders/bloom_vs.hlsl", "main", "vs_5_1");
+    auto prefilterPs = CompileShaderFromFile(L"shaders/bloom_prefilter_ps.hlsl", "main", "ps_5_1");
+    auto blurPs      = CompileShaderFromFile(L"shaders/bloom_blur_ps.hlsl", "main", "ps_5_1");
+    if (!vs || !prefilterPs || !blurPs)
+    {
+        core::Log::Error("Failed to compile bloom shaders");
+        return false;
+    }
+
+    // One SRV table plus root constants. Root constants rather than a constant
+    // buffer because the payload is 8 DWORDs and changes per pass - a CB would
+    // mean three ring allocations a frame for no benefit.
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors                    = 1;
+    srvRange.BaseShaderRegister                = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER params[2] = {};
+    params[0].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[0].DescriptorTable.NumDescriptorRanges = 1;
+    params[0].DescriptorTable.pDescriptorRanges   = &srvRange;
+    params[0].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    params[1].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    params[1].Constants.ShaderRegister = 0;
+    params[1].Constants.Num32BitValues = 8;
+    params[1].ShaderVisibility         = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+    sampler.MaxLOD           = D3D12_FLOAT32_MAX;
+    sampler.ShaderRegister   = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rs = {};
+    rs.NumParameters     = _countof(params);
+    rs.pParameters       = params;
+    rs.NumStaticSamplers = 1;
+    rs.pStaticSamplers   = &sampler;
+    rs.Flags =
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+    ComPtr<ID3DBlob> sigBlob;
+    ComPtr<ID3DBlob> errBlob;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errBlob);
+    if (FAILED(hr))
+    {
+        if (errBlob)
+            core::Log::Errorf("Bloom root signature error: %s",
+                              static_cast<const char*>(errBlob->GetBufferPointer()));
+        return false;
+    }
+    hr = device->CreateRootSignature(0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(),
+                                     IID_PPV_ARGS(&m_bloomRootSig));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Bloom CreateRootSignature failed: 0x%08X", hr);
+        return false;
+    }
+    m_bloomRootSig->SetName(L"BloomRootSignature");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature        = m_bloomRootSig.Get();
+    pso.VS.pShaderBytecode    = vs->GetBufferPointer();
+    pso.VS.BytecodeLength     = vs->GetBufferSize();
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode        = D3D12_CULL_MODE_NONE;
+    pso.RasterizerState.DepthClipEnable = TRUE;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    pso.DepthStencilState.DepthEnable   = FALSE;
+    pso.DepthStencilState.StencilEnable = FALSE;
+    pso.NumRenderTargets = 1;
+    pso.RTVFormats[0]    = kHDRFormat;   // bloom stays linear HDR throughout
+    pso.SampleDesc       = { 1, 0 };
+    pso.SampleMask       = UINT_MAX;
+
+    pso.PS.pShaderBytecode = prefilterPs->GetBufferPointer();
+    pso.PS.BytecodeLength  = prefilterPs->GetBufferSize();
+    hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_bloomPrefilterPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Bloom prefilter PSO failed: 0x%08X", hr);
+        return false;
+    }
+    m_bloomPrefilterPSO->SetName(L"BloomPrefilterPSO");
+
+    pso.PS.pShaderBytecode = blurPs->GetBufferPointer();
+    pso.PS.BytecodeLength  = blurPs->GetBufferSize();
+    hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_bloomBlurPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Bloom blur PSO failed: 0x%08X", hr);
+        return false;
+    }
+    m_bloomBlurPSO->SetName(L"BloomBlurPSO");
+
+    core::Log::Info("[SMOKE] bloom_pso=ok");
+    core::Log::Info("Bloom pipeline created (half-res prefilter + separable blur)");
+    return true;
+}
+
+// Prefilter scene into A, blur A->B horizontally, blur B->A vertically. The
+// result is left in A (SRV descriptor 1) so ResolveToBackBuffer can bind the
+// shared heap at descriptor 0 and receive t0 = scene, t1 = bloom.
+void Renderer::RenderBloom(D3D12Device& device)
+{
+    if (!m_bloomPrefilterPSO || !m_bloomBlurPSO || !m_bloomTarget[0] || !m_bloomTarget[1])
+        return;
+
+    auto* cmd = device.CmdList();
+    const uint32_t rtvStride =
+        device.Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    const uint32_t srvStride =
+        device.Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    D3D12_VIEWPORT vp = { 0.0f, 0.0f,
+                          static_cast<float>(m_bloomWidth),
+                          static_cast<float>(m_bloomHeight), 0.0f, 1.0f };
+    D3D12_RECT sc = { 0, 0,
+                      static_cast<LONG>(m_bloomWidth),
+                      static_cast<LONG>(m_bloomHeight) };
+    cmd->RSSetViewports(1, &vp);
+    cmd->RSSetScissorRects(1, &sc);
+
+    ID3D12DescriptorHeap* heaps[] = { m_hdrSrvHeap.Get() };
+    cmd->SetDescriptorHeaps(1, heaps);
+    cmd->SetGraphicsRootSignature(m_bloomRootSig.Get());
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->IASetVertexBuffers(0, 0, nullptr);
+    cmd->IASetIndexBuffer(nullptr);
+
+    struct BloomConstants
+    {
+        float texelSize[2];
+        float threshold;
+        float softKnee;
+        float intensity;
+        float pad[3];
+    };
+
+    auto srvAt = [&](uint32_t i) {
+        D3D12_GPU_DESCRIPTOR_HANDLE h = m_hdrSrvHeap->GetGPUDescriptorHandleForHeapStart();
+        h.ptr += static_cast<UINT64>(i) * srvStride;
+        return h;
+    };
+    auto rtvAt = [&](uint32_t i) {
+        D3D12_CPU_DESCRIPTOR_HANDLE h = m_bloomRtvHeap->GetCPUDescriptorHandleForHeapStart();
+        h.ptr += static_cast<SIZE_T>(i) * rtvStride;
+        return h;
+    };
+    auto toRenderTarget = [&](uint32_t i) {
+        if (!m_bloomIsRenderTarget[i])
+        {
+            device.TransitionResource(m_bloomTarget[i].Get(),
+                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                      D3D12_RESOURCE_STATE_RENDER_TARGET);
+            m_bloomIsRenderTarget[i] = true;
+        }
+    };
+    auto toShaderResource = [&](uint32_t i) {
+        if (m_bloomIsRenderTarget[i])
+        {
+            device.TransitionResource(m_bloomTarget[i].Get(),
+                                      D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            m_bloomIsRenderTarget[i] = false;
+        }
+    };
+
+    // Pass 1: prefilter scene -> A. texelSize is the SOURCE's, i.e. full res.
+    {
+        BloomConstants k = {};
+        k.texelSize[0] = 1.0f / static_cast<float>(m_hdrWidth  ? m_hdrWidth  : 1u);
+        k.texelSize[1] = 1.0f / static_cast<float>(m_hdrHeight ? m_hdrHeight : 1u);
+        k.threshold = m_bloomThreshold;
+        k.softKnee  = m_bloomSoftKnee;
+        k.intensity = m_bloomIntensity;
+
+        toRenderTarget(0);
+        auto rtv = rtvAt(0);
+        cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+        cmd->SetPipelineState(m_bloomPrefilterPSO.Get());
+        cmd->SetGraphicsRootDescriptorTable(0, srvAt(0));   // scene HDR
+        cmd->SetGraphicsRoot32BitConstants(1, 8, &k, 0);
+        cmd->DrawInstanced(3, 1, 0, 0);
+    }
+
+    const float invBloomW = 1.0f / static_cast<float>(m_bloomWidth  ? m_bloomWidth  : 1u);
+    const float invBloomH = 1.0f / static_cast<float>(m_bloomHeight ? m_bloomHeight : 1u);
+
+    // Blur iterations, each a horizontal then a vertical pass. A single pair
+    // reaches only about 3 half-res texels, i.e. a ~6 pixel glow at full
+    // resolution - measurably correct but far too tight to read as bloom. Each
+    // iteration doubles the tap spacing, so kIterations passes widen the reach
+    // geometrically (3 -> 6 -> 12 texels) for the cost of two more fullscreen
+    // draws at quarter the pixel count.
+    //
+    // Widening by spacing rather than by more taps keeps the sample count fixed;
+    // the gaps it leaves are filled because each iteration blurs the ALREADY
+    // blurred result, not the original.
+    //
+    // An H+V pair returns the result to A, so after any number of complete
+    // iterations the final image is in A, at SRV descriptor 1, which is what the
+    // resolve expects.
+    constexpr uint32_t kIterations = 3;
+    for (uint32_t iter = 0; iter < kIterations; ++iter)
+    {
+        const float spread = static_cast<float>(1u << iter);
+
+        // Horizontal: A -> B
+        {
+            BloomConstants k = {};
+            k.texelSize[0] = invBloomW * spread;
+            k.texelSize[1] = 0.0f;
+            toShaderResource(0);
+            toRenderTarget(1);
+            auto rtv = rtvAt(1);
+            cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+            cmd->SetPipelineState(m_bloomBlurPSO.Get());
+            cmd->SetGraphicsRootDescriptorTable(0, srvAt(1));   // bloom A
+            cmd->SetGraphicsRoot32BitConstants(1, 8, &k, 0);
+            cmd->DrawInstanced(3, 1, 0, 0);
+        }
+
+        // Vertical: B -> A
+        {
+            BloomConstants k = {};
+            k.texelSize[0] = 0.0f;
+            k.texelSize[1] = invBloomH * spread;
+            toShaderResource(1);
+            toRenderTarget(0);
+            auto rtv = rtvAt(0);
+            cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+            cmd->SetGraphicsRootDescriptorTable(0, srvAt(2));   // bloom B
+            cmd->SetGraphicsRoot32BitConstants(1, 8, &k, 0);
+            cmd->DrawInstanced(3, 1, 0, 0);
+        }
+    }
+
+    toShaderResource(0);   // A is now readable by the resolve
+}
+
+// =============================================================================
 // Scene pass / resolve
 // =============================================================================
 void Renderer::BeginScenePass(D3D12Device& device)
@@ -316,10 +658,25 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
         m_hdrIsRenderTarget = false;
     }
 
+    // Bloom runs here, between the scene pass and the resolve, reading the scene
+    // target as an SRV. It rebinds viewport/scissor to half resolution, so the
+    // full-res ones are restored below before the resolve draws.
+    if (m_bloomIntensity > 0.0f)
+        RenderBloom(device);
+
     // The back buffer becomes a render target only now, for the resolve itself.
     device.TransitionResource(device.CurrentBackBuffer(),
                               D3D12_RESOURCE_STATE_PRESENT,
                               D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    D3D12_VIEWPORT fullVp = { 0.0f, 0.0f,
+                              static_cast<float>(device.Width()),
+                              static_cast<float>(device.Height()), 0.0f, 1.0f };
+    D3D12_RECT fullSc = { 0, 0,
+                          static_cast<LONG>(device.Width()),
+                          static_cast<LONG>(device.Height()) };
+    cmd->RSSetViewports(1, &fullVp);
+    cmd->RSSetScissorRects(1, &fullSc);
 
     auto rtv = device.CurrentRTV();
     cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);   // no depth: full overwrite
@@ -327,7 +684,22 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
     ID3D12DescriptorHeap* heaps[] = { m_hdrSrvHeap.Get() };
     cmd->SetDescriptorHeaps(1, heaps);
     cmd->SetGraphicsRootSignature(m_tonemapRootSig.Get());
+    // Table starts at descriptor 0, so the shader sees t0 = scene HDR and
+    // t1 = bloom A - which is exactly where RenderBloom leaves its result.
     cmd->SetGraphicsRootDescriptorTable(0, m_hdrSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+    struct TonemapConstants
+    {
+        float exposure;
+        float bloomIntensity;
+        float pad[2];
+    } tonemapConstants = {};
+    tonemapConstants.exposure = m_exposure;
+    // Zero here also makes the shader skip the bloom fetch entirely, so a
+    // disabled bloom costs nothing rather than sampling a stale target.
+    tonemapConstants.bloomIntensity = m_bloomIntensity;
+    cmd->SetGraphicsRoot32BitConstants(1, 4, &tonemapConstants, 0);
+
     cmd->SetPipelineState(m_tonemapPSO.Get());
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmd->IASetVertexBuffers(0, 0, nullptr);
