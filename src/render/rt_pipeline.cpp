@@ -149,6 +149,11 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
+    // Deliberately NOT anisotropic, unlike the raster sampler. path_trace.hlsl
+    // samples with SampleLevel(..., 0), so mip 0 is forced and anisotropy - which
+    // is selected across mips - would be inert. Setting it here would repeat the
+    // exact mistake the raster path had for months: a quality knob that reads as
+    // intentional while doing nothing. See the comment on g_TextureSampler.
     sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
     sampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     sampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
