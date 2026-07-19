@@ -9,7 +9,7 @@
 namespace render
 {
 
-void Camera::Init(const core::Vec3f& position, float yawDeg, float pitchDeg)
+void Camera::Init(const core::Vec3d& position, float yawDeg, float pitchDeg)
 {
     m_position = position;
     m_yaw = yawDeg;
@@ -71,13 +71,15 @@ void Camera::Update(float dt,
     // Normalize to prevent faster diagonal movement
     float len = moveDir.Length();
     if (len > 0.001f)
-        m_position += moveDir * (speed / len);
+        m_position += core::Vec3d::FromFloat(moveDir) * static_cast<double>(speed / len);
 }
 
 core::Mat4x4 Camera::ViewMatrix() const
 {
-    core::Vec3f target = m_position + Forward();
-    return core::Mat4x4::LookAt(m_position, target, { 0.0f, 1.0f, 0.0f });
+    // Scene transforms are camera-relative before narrowing to float, so the
+    // GPU camera always sits at the local origin.
+    const core::Vec3f origin = { 0.0f, 0.0f, 0.0f };
+    return core::Mat4x4::LookAt(origin, Forward(), { 0.0f, 1.0f, 0.0f });
 }
 
 core::Mat4x4 Camera::ProjectionMatrix(float aspectRatio) const

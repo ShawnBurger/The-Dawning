@@ -14,19 +14,20 @@ namespace ecs
 {
 
 // =============================================================================
-// Transform — local position/rotation/scale
+// Transform — double-precision world position with local rotation/scale
 // =============================================================================
 struct Transform
 {
-    core::Vec3f position = { 0.0f, 0.0f, 0.0f };
+    core::Vec3d position = { 0.0, 0.0, 0.0 };
     core::Quatf rotation = core::Quatf::Identity();
     core::Vec3f scale    = { 1.0f, 1.0f, 1.0f };
 
-    core::Mat4x4 ToMatrix() const
+    core::Mat4x4 ToCameraRelativeMatrix(const core::Vec3d& cameraPosition) const
     {
+        const core::Vec3f relativePosition = (position - cameraPosition).ToFloat();
         core::Mat4x4 s = core::Mat4x4::Scaling(scale.x, scale.y, scale.z);
         core::Mat4x4 r = core::Mat4x4::FromQuaternion(rotation.Normalized());
-        core::Mat4x4 t = core::Mat4x4::Translation(position);
+        core::Mat4x4 t = core::Mat4x4::Translation(relativePosition);
         return s * r * t;
     }
 };

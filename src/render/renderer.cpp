@@ -494,7 +494,7 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     // Cache view-projection
     float aspect = static_cast<float>(device.Width()) / static_cast<float>(device.Height());
     m_viewProj = camera.ViewProjectionMatrix(aspect);
-    m_eyePos = camera.Position();
+    m_eyePos = {};
 
     // Upload per-frame constants (b1)
     CBPerFrame perFrame = {};
