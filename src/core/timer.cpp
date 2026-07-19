@@ -4,6 +4,7 @@
 
 #include "timer.h"
 #include <windows.h>
+#include <cstdint>
 
 namespace core
 {

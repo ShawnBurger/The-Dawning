@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <cstdint>
 
 namespace core { namespace Log {
 

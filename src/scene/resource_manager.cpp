@@ -5,6 +5,7 @@
 #include "resource_manager.h"
 #include "../core/log.h"
 #include <cstring>
+#include <cstdint>
 
 namespace scene
 {

@@ -4,11 +4,11 @@
 
 #include "input.h"
 #include <cstring>
+#include <cstdint>
 
 namespace core { namespace input {
 
 static InputState s_state;
-static InputState s_prevState;
 
 void BeginFrame()
 {

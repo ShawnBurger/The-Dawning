@@ -6,6 +6,7 @@
 #include "../core/log.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
 
 namespace render
 {

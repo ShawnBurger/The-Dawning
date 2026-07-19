@@ -66,9 +66,13 @@ public:
         if (m_slotCount >= Entity::kMaxIndex)
             return NullEntity; // Out of entity slots
 
-        uint32_t index = m_slotCount++;
+        // Grow BEFORE bumping m_slotCount. With the post-increment first, Grow()'s
+        // copy loop ran to m_slotCount == index + 1 while the old array held only
+        // m_capacity == index elements, reading one full Slot past the allocation.
+        uint32_t index = m_slotCount;
         if (index >= m_capacity)
             Grow();
+        m_slotCount++;
 
         m_slots[index].generation = 0;
         m_slots[index].alive = true;

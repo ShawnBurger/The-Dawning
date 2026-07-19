@@ -224,17 +224,21 @@ struct Quatf
         return { a.x * s, a.y * s, a.z * s, c };
     }
 
+    // pitch about X, yaw about Y, roll about Z - matching this engine's LH, Y-up,
+    // +Z-forward convention. Composed intrinsically as yaw, then pitch, then roll:
+    // because Rotate() evaluates q*v*q^-1, in (a*b) the RIGHT factor applies first.
+    //
+    // Built by explicit axis-angle composition rather than an expanded closed form.
+    // The previous implementation was the Wikipedia ZYX aerospace formula verbatim,
+    // whose slots are (roll=X, pitch=Y, yaw=Z), but its parameters were named
+    // (pitch, yaw, roll) - so every argument drove the wrong axis: FromEuler(p,0,0)
+    // rotated about +Y, (0,y,0) about +Z, and (0,0,r) about +X.
     static Quatf FromEuler(float pitchRad, float yawRad, float rollRad)
     {
-        float cp = std::cos(pitchRad * 0.5f), sp = std::sin(pitchRad * 0.5f);
-        float cy = std::cos(yawRad   * 0.5f), sy = std::sin(yawRad   * 0.5f);
-        float cr = std::cos(rollRad  * 0.5f), sr = std::sin(rollRad  * 0.5f);
-        return {
-            sr * cp * cy - cr * sp * sy,
-            cr * sp * cy + sr * cp * sy,
-            cr * cp * sy - sr * sp * cy,
-            cr * cp * cy + sr * sp * sy
-        };
+        const Quatf qYaw   = FromAxisAngle(Vec3f(0.0f, 1.0f, 0.0f), yawRad);
+        const Quatf qPitch = FromAxisAngle(Vec3f(1.0f, 0.0f, 0.0f), pitchRad);
+        const Quatf qRoll  = FromAxisAngle(Vec3f(0.0f, 0.0f, 1.0f), rollRad);
+        return (qYaw * qPitch * qRoll).Normalized();
     }
 
     Quatf operator*(const Quatf& q) const

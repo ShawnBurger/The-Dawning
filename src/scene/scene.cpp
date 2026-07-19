@@ -4,6 +4,7 @@
 
 #include "scene.h"
 #include "../core/log.h"
+#include <cstdint>
 
 namespace scene
 {

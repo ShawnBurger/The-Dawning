@@ -5,6 +5,7 @@
 #include "rt_acceleration.h"
 #include "../core/log.h"
 #include <cstring>
+#include <cstdint>
 
 namespace render
 {

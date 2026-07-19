@@ -5,6 +5,7 @@
 #include "d3d12_device.h"
 #include "../core/log.h"
 #include <d3d12sdklayers.h>
+#include <cstdint>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -708,7 +709,10 @@ void D3D12Device::ProbeCapabilities()
     core::Log::Info("=== GPU Capabilities ===");
     core::Log::Infof("  Adapter: %s (%llu MB VRAM)", m_caps.adapterName,
                      static_cast<unsigned long long>(m_caps.dedicatedVideoMemoryMB));
-    core::Log::Infof("  Feature Level: 12.%d", (m_caps.maxFeatureLevel & 0xF));
+    // D3D_FEATURE_LEVEL_12_0/12_1/12_2 are 0xc000/0xc100/0xc200 - the minor version
+    // lives in bits 8-11, not 0-3. Masking the low nibble reported "12.0" on every
+    // adapter, including 12_2 / DX12 Ultimate parts.
+    core::Log::Infof("  Feature Level: 12.%d", ((m_caps.maxFeatureLevel >> 8) & 0xF));
     core::Log::Infof("  Shader Model: %d.%d", m_caps.highestShaderModel / 10,
                      m_caps.highestShaderModel % 10);
     core::Log::Infof("  Resource Binding Tier: %d%s", m_caps.resourceBindingTier,

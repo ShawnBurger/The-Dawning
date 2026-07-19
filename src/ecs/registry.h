@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <memory>
 #include <typeindex>
+#include <cstdint>
 
 namespace ecs
 {
@@ -64,10 +65,17 @@ public:
 
     // --- Component operations ---
 
+    // Every Entity-keyed operation below validates the generation via
+    // m_entities.IsAlive(). Without that check a stale handle to a destroyed and
+    // recycled slot silently addressed the NEW occupant's components, which
+    // defeats the entire point of a 20-bit index + 12-bit generation handle.
+
     template<typename T>
     T& Assign(Entity entity, const T& component = T{})
     {
         auto& pool = GetOrCreatePool<T>();
+        if (!m_entities.IsAlive(entity))
+            return FallbackComponent<T>();
         pool.Add(entity.Index(), component);
         return pool.Get(entity.Index());
     }
@@ -75,6 +83,7 @@ public:
     template<typename T>
     void Remove(Entity entity)
     {
+        if (!m_entities.IsAlive(entity)) return;
         auto* pool = GetPool<T>();
         if (pool) pool->Remove(entity.Index());
     }
@@ -82,27 +91,58 @@ public:
     template<typename T>
     bool Has(Entity entity) const
     {
+        if (!m_entities.IsAlive(entity)) return false;
         auto* pool = GetPool<T>();
         return pool && pool->Has(entity.Index());
     }
 
+    // Preferred accessor: nullptr when the handle is stale or the component is
+    // absent. Get() cannot express that, since it must return a reference.
+    template<typename T>
+    T* TryGet(Entity entity)
+    {
+        if (!m_entities.IsAlive(entity)) return nullptr;
+        auto* pool = GetPool<T>();
+        if (!pool || !pool->Has(entity.Index())) return nullptr;
+        return &pool->Get(entity.Index());
+    }
+
+    template<typename T>
+    const T* TryGet(Entity entity) const
+    {
+        if (!m_entities.IsAlive(entity)) return nullptr;
+        auto* pool = GetPool<T>();
+        if (!pool || !pool->Has(entity.Index())) return nullptr;
+        return &pool->Get(entity.Index());
+    }
+
+    // Returns a shared fallback instance rather than dereferencing null when the
+    // handle is stale or the type was never assigned. Previously GetPool<T>()
+    // returned nullptr for a never-seen type and this dereferenced it outright.
+    // Prefer TryGet() where absence is expected.
     template<typename T>
     T& Get(Entity entity)
     {
-        return GetPool<T>()->Get(entity.Index());
+        if (T* found = TryGet<T>(entity)) return *found;
+        return FallbackComponent<T>();
     }
 
     template<typename T>
     const T& Get(Entity entity) const
     {
-        return GetPool<T>()->Get(entity.Index());
+        if (const T* found = TryGet<T>(entity)) return *found;
+        return FallbackComponent<T>();
     }
 
-    // Get by raw index (for systems iterating pools)
+    // Get by raw index (for systems iterating pools). No generation is available
+    // here by construction, so this is only safe while iterating a live pool.
+    // Guarded against a never-created pool, which previously null-dereferenced.
     template<typename T>
     T& GetByIndex(uint32_t entityIndex)
     {
-        return GetPool<T>()->Get(entityIndex);
+        auto* pool = GetPool<T>();
+        if (!pool || !pool->Has(entityIndex)) return FallbackComponent<T>();
+        return pool->Get(entityIndex);
     }
 
     template<typename T>
@@ -128,6 +168,19 @@ public:
         auto it = m_pools.find(std::type_index(typeid(T)));
         if (it == m_pools.end()) return nullptr;
         return static_cast<const ComponentPool<T>*>(it->second.get());
+    }
+
+    // Shared per-type sink returned when a component access is invalid (stale
+    // handle, never-assigned type, absent component). Reset on every handout so a
+    // write through one invalid access cannot be observed by a later one. This
+    // trades a hard crash for defined-but-wrong data; use TryGet() when absence is
+    // an expected outcome rather than a bug.
+    template<typename T>
+    static T& FallbackComponent()
+    {
+        static T fallback{};
+        fallback = T{};
+        return fallback;
     }
 
     // --- Utility ---
@@ -164,6 +217,13 @@ public:
     }
 
     // Iterate all entities with components A, B, AND C.
+    //
+    // REENTRANCY: the callback receives references directly into the pools' dense
+    // arrays. Calling Assign<A/B/C>() from inside the callback can reallocate a
+    // dense array (see ComponentPool::EnsureDense) and dangle every reference the
+    // callback is holding, including the loop's own. Queue structural changes and
+    // apply them after iteration finishes. Spawning during update is the single
+    // most common thing a gameplay system does, so this will matter.
     template<typename A, typename B, typename C, typename Func>
     void Each(Func&& func)
     {
@@ -172,13 +232,10 @@ public:
         auto* poolC = GetPool<C>();
         if (!poolA || !poolB || !poolC) return;
 
-        // Find smallest pool
-        ComponentPool<A>* smallest = poolA;
-        uint32_t minCount = poolA->Count();
-        if (poolB->Count() < minCount) minCount = poolB->Count();
-        if (poolC->Count() < minCount) minCount = poolC->Count();
-
-        // Iterate smallest
+        // Always driven from pool A. The two-pool overload above picks the smaller
+        // pool, but doing that here would require dispatching over three distinct
+        // pool types; the previous code computed a `smallest`/`minCount` pair and
+        // then ignored both, which read as an optimization that was not happening.
         for (uint32_t i = 0; i < poolA->Count(); i++)
         {
             uint32_t idx = poolA->EntityAt(i);

@@ -5,6 +5,7 @@
 #include "mesh.h"
 #include "../core/log.h"
 #include <cstring>
+#include <cstdint>
 
 namespace render
 {

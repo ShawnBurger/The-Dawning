@@ -5,6 +5,7 @@
 #include "window.h"
 #include "log.h"
 #include "input.h"
+#include <cstdint>
 
 namespace core
 {
@@ -67,7 +68,13 @@ bool Window::Init(const WindowDesc& desc)
     rid.usUsage     = 0x02;  // Mouse
     rid.dwFlags     = 0;
     rid.hwndTarget  = m_hwnd;
-    RegisterRawInputDevices(&rid, 1, sizeof(rid));
+    if (!RegisterRawInputDevices(&rid, 1, sizeof(rid)))
+    {
+        // Not fatal - the window still works - but mouse look is dead without it,
+        // and silently losing camera control is a confusing way to find out.
+        Log::Warnf("RegisterRawInputDevices failed (error %lu); mouse look disabled",
+                   GetLastError());
+    }
 
     ShowWindow(m_hwnd, SW_SHOW);
     UpdateWindow(m_hwnd);
@@ -150,9 +157,15 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     if (msg == WM_NCCREATE)
     {
         auto* cs = reinterpret_cast<CREATESTRUCTA*>(lParam);
-        self = reinterpret_cast<Window*>(cs->lpCreateParams);
-        SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
-        self->m_hwnd = hwnd;
+        self = cs ? reinterpret_cast<Window*>(cs->lpCreateParams) : nullptr;
+        if (self)
+        {
+            SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+            self->m_hwnd = hwnd;
+        }
+        // A null lpCreateParams means someone created this class's window without
+        // passing the instance. Fall through to DefWindowProc rather than
+        // dereferencing null inside the window procedure.
     }
     else
     {

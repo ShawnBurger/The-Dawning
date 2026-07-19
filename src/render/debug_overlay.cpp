@@ -8,6 +8,7 @@
 #include <d3dcompiler.h>
 #include <cstdio>
 #include <cstring>
+#include <cstdint>
 
 namespace render
 {
