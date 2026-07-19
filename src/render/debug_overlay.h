@@ -66,8 +66,13 @@ private:
     ComPtr<ID3D12PipelineState> m_pso;
     ComPtr<ID3D12DescriptorHeap> m_srvHeap;
     ComPtr<ID3D12Resource> m_texture;
-    ComPtr<ID3D12Resource> m_uploadBuffer;
-    uint8_t* m_uploadMapped = nullptr;
+
+    // One upload buffer per frame in flight. A single shared buffer would be
+    // rewritten by the CPU while earlier frames' CopyTextureRegion still read it:
+    // resource barriers order GPU work, they do not synchronise CPU writes to
+    // persistently mapped memory, so no barrier can protect this.
+    ComPtr<ID3D12Resource> m_uploadBuffers[kFrameCount];
+    uint8_t* m_uploadMapped[kFrameCount] = {};
 
     HDC m_textDC = nullptr;
     HBITMAP m_textBitmap = nullptr;

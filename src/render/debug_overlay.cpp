@@ -44,14 +44,17 @@ void DebugOverlay::Shutdown()
 {
     ReleaseTextResources();
 
-    if (m_uploadBuffer && m_uploadMapped)
+    for (uint32_t i = 0; i < kFrameCount; ++i)
     {
-        m_uploadBuffer->Unmap(0, nullptr);
-        m_uploadMapped = nullptr;
+        if (m_uploadBuffers[i] && m_uploadMapped[i])
+        {
+            m_uploadBuffers[i]->Unmap(0, nullptr);
+            m_uploadMapped[i] = nullptr;
+        }
+        m_uploadBuffers[i].Reset();
     }
 
     m_texture.Reset();
-    m_uploadBuffer.Reset();
     m_srvHeap.Reset();
     m_pso.Reset();
     m_rootSig.Reset();
@@ -222,22 +225,31 @@ bool DebugOverlay::CreateTextureResources(ID3D12Device* device)
     uploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     uploadDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-    hr = device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
-        &uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, IID_PPV_ARGS(&m_uploadBuffer));
-    if (FAILED(hr))
-    {
-        core::Log::Errorf("Overlay upload buffer failed: 0x%08X", hr);
-        return false;
-    }
-    m_uploadBuffer->SetName(L"DebugOverlayUpload");
+    const wchar_t* uploadNames[kFrameCount] = {
+        L"DebugOverlayUpload[0]", L"DebugOverlayUpload[1]", L"DebugOverlayUpload[2]"
+    };
 
-    D3D12_RANGE readRange = { 0, 0 };
-    hr = m_uploadBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_uploadMapped));
-    if (FAILED(hr))
+    for (uint32_t i = 0; i < kFrameCount; ++i)
     {
-        core::Log::Errorf("Overlay upload map failed: 0x%08X", hr);
-        return false;
+        hr = device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+            &uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&m_uploadBuffers[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Overlay upload buffer %u failed: 0x%08X", i, hr);
+            return false;
+        }
+        m_uploadBuffers[i]->SetName(uploadNames[i]);
+
+        D3D12_RANGE readRange = { 0, 0 };
+        hr = m_uploadBuffers[i]->Map(0, &readRange,
+                                     reinterpret_cast<void**>(&m_uploadMapped[i]));
+        if (FAILED(hr) || !m_uploadMapped[i])
+        {
+            core::Log::Errorf("Overlay upload map %u failed: 0x%08X", i, hr);
+            m_uploadMapped[i] = nullptr;
+            return false;
+        }
     }
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -432,9 +444,16 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
 
 void DebugOverlay::UploadTexture(D3D12Device& device)
 {
+    // Write the slot belonging to this frame in flight. WaitForCurrentFrame() has
+    // already retired the frame that last used this slot, so no GPU copy can still
+    // be reading it.
+    const uint32_t slot = device.FrameIndex();
+    uint8_t* mapped = (slot < kFrameCount) ? m_uploadMapped[slot] : nullptr;
+    if (!mapped || !m_uploadBuffers[slot]) return;
+
     for (uint32_t y = 0; y < kOverlayHeight; ++y)
     {
-        std::memcpy(m_uploadMapped + static_cast<size_t>(y) * m_uploadPitch,
+        std::memcpy(mapped + static_cast<size_t>(y) * m_uploadPitch,
                     m_pixels.data() + static_cast<size_t>(y) * kOverlayWidth * 4,
                     kOverlayWidth * 4);
     }
@@ -454,7 +473,7 @@ void DebugOverlay::UploadTexture(D3D12Device& device)
     dst.SubresourceIndex = 0;
 
     D3D12_TEXTURE_COPY_LOCATION src = {};
-    src.pResource = m_uploadBuffer.Get();
+    src.pResource = m_uploadBuffers[slot].Get();
     src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     src.PlacedFootprint.Offset = 0;
     src.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
