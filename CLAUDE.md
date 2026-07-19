@@ -34,15 +34,12 @@ Layer 3 provides ECS architecture; the RT extension adds full DXR path tracing:
 - Path tracing shader (path_trace.hlsl):
   - Multi-bounce iterative path tracing (max bounces driven by the quality mode)
   - Cook-Torrance BRDF (GGX NDF, Smith geometry, Fresnel-Schlick) for direct
-    lighting under NEE. The indirect specular bounce (path_trace.hlsl:486-498)
-    does NOT evaluate the BRDF or divide by a PDF — it multiplies throughput by
-    Fresnel alone, which is only correct in the mirror limit
+    lighting under NEE
   - Next Event Estimation with shadow rays (ACCEPT_FIRST_HIT optimization)
   - Cosine-weighted hemisphere sampling for diffuse bounces
-  - Roughness-perturbed reflection for specular bounces
-  - Russian roulette path termination. Note the estimator is not unbiased:
-    throughput is hard-clamped to 4.0 (path_trace.hlsl:502) and radiance is
-    firefly-clamped against the previous frame
+  - Russian roulette path termination. The estimator is still not unbiased:
+    throughput is hard-clamped to 4.0 (path_trace.hlsl) and samples are
+    firefly-clamped to a fixed luminance ceiling before accumulation
   - PCG hash RNG, each dimension hashed in sequence. Seeded from a wall-clock
     dispatch counter (`seedIndex`), NOT the accumulation index — the two are
     separate fields precisely because the accumulation index resets on camera
@@ -129,15 +126,15 @@ Phase 7: Opacity Micro-Maps for alpha-tested geometry (foliage, fences)
 
 ## RULES
 
-1. TARGET, NOT YET ENFORCED — double precision (Vec3d) for world positions,
-   Vec3f only after camera subtraction. This is aspirational for Layer 5+ and
-   matches CONVERSATION_CONTEXT.md:72. Reality today: `Vec3d` has zero
-   references anywhere outside its own definition in `core/types.h`.
-   `ecs::Transform::position` and `Camera::m_position` are both `Vec3f`, and
-   `Vec3d` (types.h:126-160) lacks `Cross`, `operator*=`, `operator/=`,
-   scalar-left `operator*`, and `Lerp` — all of which `Vec3f` has — so it cannot
-   receive the conversion as written. Do not write new code that assumes
-   double-precision world positions are available.
+1. TARGET, PARTIALLY ENFORCED — double precision (Vec3d) for world positions,
+   Vec3f only after camera subtraction. Groundwork is now in place: `Vec3d` has
+   `Cross`, compound assignment, scalar-left `operator*`, `Lerp`, `Distance` and
+   `FromFloat`, and `Mat4x4::Inverse` exists. What remains is the retrofit
+   itself: `ecs::Transform::position` and `Camera::m_position` are still `Vec3f`,
+   and nothing subtracts the camera position at the extraction boundary. Until
+   that lands, do not write new code that assumes world positions are already
+   double-precision — but DO use `Vec3d` for any new world-space quantity you
+   introduce, so the retrofit does not grow.
 2. Proper .h/.cpp split. No header-only implementations except tiny inlines/templates.
 3. No copyrighted terms. Rename map: Starfleet→Vanguard, LCARS→HELIX, Phaser→Arc Lance,
    Photon Torpedo→Fusion Torpedo, Dilithium→Helion, Federation→Commonwealth, etc.
