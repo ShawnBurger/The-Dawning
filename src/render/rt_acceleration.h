@@ -63,8 +63,7 @@ public:
                        const Mesh& mesh);
 
     // Rebuild TLAS from a set of instances. Call every frame.
-    bool BuildTLAS(ID3D12Device5* device,
-                   ID3D12GraphicsCommandList4* cmdList,
+    bool BuildTLAS(D3D12Device& device,
                    const TLASInstance* instances,
                    uint32_t instanceCount);
 
@@ -99,12 +98,9 @@ private:
     // N+1's build would overwrite the structure frame N is still tracing against.
     // A UAV barrier does not help: it orders work within a frame, not across.
     //
-    // m_frameSlot is an internal round-robin rather than the device frame index,
-    // deliberately. BuildTLAS runs at most once per device frame, so the slot
-    // advances no faster than the frame counter; if RT is toggled off for a
-    // while it advances SLOWER, which only increases the gap before reuse. That
-    // keeps this class independent of the device's frame index without weakening
-    // the guarantee.
+    // m_frameSlot follows the swap-chain frame index. App waits that slot's fence
+    // before recording, so CPU writes and GPU builds cannot overlap an earlier
+    // use of the same resources.
     ComPtr<ID3D12Resource> m_tlasResult[kFrameCount];
     ComPtr<ID3D12Resource> m_tlasScratch[kFrameCount];
     ComPtr<ID3D12Resource> m_tlasInstanceBuffer[kFrameCount];

@@ -82,12 +82,14 @@ public:
                   const Texture* const* emissiveTextures,
                   uint32_t emissiveTextureCount,
                   uint32_t instanceCount,
+                  uint64_t sceneSignature,
                   RTQualityMode qualityMode);
 
     // Copy the RT output to the back buffer for display
     void CopyToBackBuffer(D3D12Device& device);
 
     bool IsInitialized() const { return m_initialized; }
+    uint32_t AccumulationFrameIndex() const { return m_accumFrameIndex; }
 
 private:
     // -------------------------------------------------------------------------
@@ -134,7 +136,7 @@ private:
     bool CreateConstantBuffer(ID3D12Device5* device);
     // One growth path for all five per-frame upload buffers. Allocates
     // kFrameCount instances so each frame in flight writes its own copy.
-    bool EnsureFrameUploadBuffer(ID3D12Device5* device,
+    bool EnsureFrameUploadBuffer(D3D12Device& device,
                                  FrameUploadBuffer& target,
                                  uint32_t elementCount,
                                  uint64_t elementSize,
@@ -158,16 +160,20 @@ private:
     uint32_t m_outputHeight = 0;
 
     // Descriptor heap for UAV
-    ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
+    ComPtr<ID3D12DescriptorHeap> m_srvUavHeap[kFrameCount];
     uint32_t m_srvUavDescSize = 0;
-    uint32_t m_boundAlbedoTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTAlbedoTextures> m_boundAlbedoTextureResources = {};
-    uint32_t m_boundNormalTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTNormalTextures> m_boundNormalTextureResources = {};
-    uint32_t m_boundOrmTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTOrmTextures> m_boundOrmTextureResources = {};
-    uint32_t m_boundEmissiveTextureCount = 0;
-    std::array<ID3D12Resource*, kMaxRTEmissiveTextures> m_boundEmissiveTextureResources = {};
+    uint32_t m_boundAlbedoTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTAlbedoTextures>
+        m_boundAlbedoTextureResources[kFrameCount] = {};
+    uint32_t m_boundNormalTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTNormalTextures>
+        m_boundNormalTextureResources[kFrameCount] = {};
+    uint32_t m_boundOrmTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTOrmTextures>
+        m_boundOrmTextureResources[kFrameCount] = {};
+    uint32_t m_boundEmissiveTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTEmissiveTextures>
+        m_boundEmissiveTextureResources[kFrameCount] = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
@@ -186,11 +192,13 @@ private:
     RTQualityMode m_prevQualityMode = RTQualityMode::StablePreview;
     uint32_t m_prevSamplesPerPixel = 0;
     uint32_t m_prevMaxBounces = 0;
-    uint32_t m_accumFrameIndex = 0;   // Resets on camera/quality change — drives accumulation
+    uint64_t m_prevSceneSignature = 0;
+    uint32_t m_accumFrameIndex = 0;   // Resets when the rendered view changes; drives accumulation
     uint32_t m_seedFrameCounter = 0;  // Never resets — drives RNG decorrelation
     uint32_t m_frameIndex = 0;        // Frame-in-flight slot (0..kFrameCount-1)
     bool     m_hasPrevCamera = false;
     bool     m_hasPrevQuality = false;
+    bool     m_hasPrevScene = false;
     bool     m_initialized = false;
 };
 

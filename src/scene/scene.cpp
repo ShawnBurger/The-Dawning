@@ -5,10 +5,35 @@
 #include "scene.h"
 #include "../ecs/systems.h"
 #include "../core/log.h"
+#include <cstddef>
 #include <cstdint>
 
 namespace scene
 {
+
+namespace
+{
+
+constexpr uint64_t kSceneHashOffset = 14695981039346656037ull;
+constexpr uint64_t kSceneHashPrime  = 1099511628211ull;
+
+void HashSceneBytes(uint64_t& hash, const void* data, size_t byteCount)
+{
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < byteCount; ++i)
+    {
+        hash ^= bytes[i];
+        hash *= kSceneHashPrime;
+    }
+}
+
+template <typename T>
+void HashSceneValue(uint64_t& hash, const T& value)
+{
+    HashSceneBytes(hash, &value, sizeof(value));
+}
+
+} // namespace
 
 // =============================================================================
 // Init / Shutdown
@@ -321,7 +346,7 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
     if (instances.empty()) return;
 
     // Build TLAS
-    m_pathTracer.GetAcceleration().BuildTLAS(dev5, cmd4,
+    m_pathTracer.GetAcceleration().BuildTLAS(device,
         instances.data(), static_cast<uint32_t>(instances.size()));
 
     // Build shader table if instance count changed
@@ -343,6 +368,16 @@ void Scene::PathTraceEntities(
     if (!m_rtReady) return;
 
     const core::Vec3d& cameraPosition = camera.Position();
+    uint64_t sceneSignature = kSceneHashOffset;
+    HashSceneValue(sceneSignature, lightDir.x);
+    HashSceneValue(sceneSignature, lightDir.y);
+    HashSceneValue(sceneSignature, lightDir.z);
+    HashSceneValue(sceneSignature, lightColor.x);
+    HashSceneValue(sceneSignature, lightColor.y);
+    HashSceneValue(sceneSignature, lightColor.z);
+    HashSceneValue(sceneSignature, ambientColor.x);
+    HashSceneValue(sceneSignature, ambientColor.y);
+    HashSceneValue(sceneSignature, ambientColor.z);
 
     // Collect materials in instance order (matching TLAS instance IDs)
     auto* meshPool = m_registry.GetPool<ecs::MeshInstance>();
@@ -408,6 +443,35 @@ void Scene::PathTraceEntities(
             continue;
 
         const auto& mat = m_registry.GetByIndex<ecs::Material>(entityIdx);
+        const auto& instTransform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
+
+        HashSceneValue(sceneSignature, entityIdx);
+        HashSceneValue(sceneSignature, meshInst.meshHandle);
+        HashSceneValue(sceneSignature, instTransform.position.x);
+        HashSceneValue(sceneSignature, instTransform.position.y);
+        HashSceneValue(sceneSignature, instTransform.position.z);
+        HashSceneValue(sceneSignature, instTransform.rotation.x);
+        HashSceneValue(sceneSignature, instTransform.rotation.y);
+        HashSceneValue(sceneSignature, instTransform.rotation.z);
+        HashSceneValue(sceneSignature, instTransform.rotation.w);
+        HashSceneValue(sceneSignature, instTransform.scale.x);
+        HashSceneValue(sceneSignature, instTransform.scale.y);
+        HashSceneValue(sceneSignature, instTransform.scale.z);
+        HashSceneValue(sceneSignature, mat.albedo.r);
+        HashSceneValue(sceneSignature, mat.albedo.g);
+        HashSceneValue(sceneSignature, mat.albedo.b);
+        HashSceneValue(sceneSignature, mat.albedo.a);
+        HashSceneValue(sceneSignature, mat.roughness);
+        HashSceneValue(sceneSignature, mat.metallic);
+        HashSceneValue(sceneSignature, mat.albedoTextureHandle);
+        HashSceneValue(sceneSignature, mat.normalTextureHandle);
+        HashSceneValue(sceneSignature, mat.ormTextureHandle);
+        HashSceneValue(sceneSignature, mat.emissive.r);
+        HashSceneValue(sceneSignature, mat.emissive.g);
+        HashSceneValue(sceneSignature, mat.emissive.b);
+        HashSceneValue(sceneSignature, mat.emissive.a);
+        HashSceneValue(sceneSignature, mat.emissiveStrength);
+        HashSceneValue(sceneSignature, mat.emissiveTextureHandle);
         const uint32_t albedoTextureIndex =
             resolveTextureIndex(mat.albedoTextureHandle, albedoTextures,
                                 render::kMaxRTAlbedoTextures, "albedo");
@@ -453,7 +517,6 @@ void Scene::PathTraceEntities(
         // same InverseTranspose3x3 the raster path uses, so both paths now shade
         // identically under non-uniform scale.
         {
-            const auto& instTransform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
             const core::Mat4x4 instWorld =
                 instTransform.ToCameraRelativeMatrix(cameraPosition);
             const core::Mat4x4 normalMat = core::Mat4x4::InverseTranspose3x3(instWorld);
@@ -491,6 +554,7 @@ void Scene::PathTraceEntities(
                           emissiveTextures.data(),
                           static_cast<uint32_t>(emissiveTextures.size()),
                           static_cast<uint32_t>(materials.size()),
+                          sceneSignature,
                           qualityMode);
 }
 
