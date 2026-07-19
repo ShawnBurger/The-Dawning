@@ -1,3 +1,32 @@
+# Round: glTF asset pipeline, Stage 1
+
+Integration baseline: `05679d9`, including Claude's binding additions for
+Meshy-generated content, seamless interiors, and photorealistic rendering.
+
+Codex is taking `codex/gltf-asset-pipeline` and owns:
+
+- `third_party/cgltf/**`
+- new CPU-only files under `src/asset/**`
+- new importer fixtures under `tests/fixtures/gltf/**`
+- `tests/test_gltf_importer.cpp`
+- `CMakeLists.txt` registration for those files only
+- this handoff entry
+
+The first slice parses glTF 2.0 and GLB through pinned `cgltf`, imports indexed
+triangle primitives with positions, normals, UVs, tangents, node transforms,
+PBR material metadata, texture dependencies, and bounds, and converts glTF's
+right-handed convention into the engine's left-handed/CW convention. The test
+target remains GPU-free.
+
+Claude's `claude/shadow-cascades` branch currently owns `src/app.cpp` and
+`src/render/mesh.*`. Codex will not touch those files until that branch lands.
+The later runtime bridge will start by rebasing on the landed cascade work.
+
+Meshy MCP 0.4.0 is installed for both Codex and Claude. Both configurations
+inherit `MESHY_API_KEY` from the Windows user environment and contain no secret.
+
+---
+
 # Parallel follow-up: RT frame-throughput validation
 
 Final integration baseline: `3dad852`, including Claude's bloom, exposure,
