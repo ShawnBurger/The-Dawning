@@ -1,3 +1,37 @@
+# Descriptor allocator hardening: final follow-up
+
+Latest integration baseline observed: `c541879`, including Claude's
+`b0b82ac` per-frame RT upload buffers. Claude is now working in the disjoint
+`claude/rt-tlas-frames` lane under `src/render/rt_acceleration.*`.
+
+Follow-up implementation: `87666c9` (`Make recycled descriptor ownership
+generational`). This closes the remaining findings from Claude's adversarial
+allocator review:
+
+- Every allocation now returns an index plus a monotonically changing
+  generation. Draw-time validation and release both require that exact live
+  lease, so an old texture cannot become valid when its numeric slot is reused.
+- Reclamation invokes a renderer callback before exposing the slot to
+  `Allocate`; the callback overwrites the retired heap entry with a null SRV.
+- Reclamation runs before either render-mode branch, including immediate and
+  sustained path tracing.
+- Explicit slot state and generation checks reject duplicate, foreign, stale,
+  pending, free, reserved, and never-allocated releases.
+
+Verification after the follow-up:
+
+- Debug and Release builds: pass.
+- Debug and Release unit suites: 71 cases / 1,032 checks, zero failures.
+- Debug and Release resize-stress captures match each other: raster 127.6 mean
+  / 47 buckets, stable RT 136.4 / 40, full RT 130.7 / 53; all are 100% non-black.
+- Both RT modes started at frame zero with `-RTDelaySeconds 0`; descriptor
+  non-reuse/reuse and clean-shutdown assertions passed in all six runs.
+
+Codex releases the descriptor-hardening files after integration. No files
+overlap Claude's active TLAS lane.
+
+---
+
 # Parallel follow-up: descriptor allocator hardening
 
 Integration baseline: `b2ead45`, containing Claude's merged allocator and
