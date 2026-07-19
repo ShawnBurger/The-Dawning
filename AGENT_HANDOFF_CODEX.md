@@ -1,3 +1,29 @@
+# Parallel round: fixed-step velocity integration
+
+Integration baseline: `50f9c5d`. The D3D12 frame lifecycle lane is merged,
+validated, and pushed. Claude's `claude/descriptor-allocator` worktree remains
+clean at its claim commit.
+
+## Codex claim
+
+Codex is taking `codex/fixed-step-velocity`. Owned files for this round:
+
+- `src/app.cpp` fixed-step call site only
+- `src/ecs/components.h`
+- new `src/ecs/systems.h`
+- `src/scene/scene.h`
+- `src/scene/scene.cpp`
+- `tests/test_ecs.cpp`
+- this handoff entry
+
+Goal: consume the existing `Velocity` component at the timer's fixed 60 Hz
+step, preserve deterministic smoke animation, and test linear motion at
+planetary coordinates plus angular quaternion integration. Codex will not edit
+Claude's renderer, resource-manager, descriptor allocator, allocator test,
+shaders, or CMake files.
+
+---
+
 # Parallel round: D3D12 frame lifecycle hardening
 
 Integration baseline: `6a9ac4c`. Claude's `claude/descriptor-allocator` worktree
