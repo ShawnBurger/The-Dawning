@@ -3,13 +3,47 @@
 // core/types.h — The Dawning Engine Foundation Types
 // =============================================================================
 // Every math type the engine uses. Designed for:
-//   - Vec3d (double) for world-space positions (interstellar precision)
+//   - Vec3d (double) for world-space positions (interstellar precision).
+//     NOTE: aspirational only. Vec3d currently has zero references outside this
+//     file — Transform::position and Camera::m_position are both Vec3f.
 //   - Vec3f (float) for GPU-bound data and local calculations
-//   - Mat4x4 (float) for GPU constant buffers (column-major, D3D convention)
+//   - Mat4x4 (float) for GPU constant buffers — see the layout warning below
 //   - Quatf (float) for rotations
 //   - Color (float RGBA) for materials and lighting
 //
 // All types are POD-compatible for direct memcpy to GPU constant buffers.
+//
+// =============================================================================
+// MATRIX LAYOUT — READ THIS BEFORE TOUCHING ANY TRANSFORM CODE
+// =============================================================================
+// Mat4x4 is ROW-MAJOR STORAGE with ROW-VECTOR SEMANTICS. It is NOT column-major
+// and nothing in the engine ever transposes it.
+//
+//   - Storage is m[row][col]. Data() returns those bytes in row order.
+//   - Translation lives at m[3][0..2] (Mat4x4::Translation, ~line 307).
+//   - TransformPoint computes v * M, not M * v (~line 434): the input vector is
+//     a row vector multiplied on the LEFT.
+//   - Consequently composition reads left-to-right: `world * viewProj` applies
+//     world first. That is the order renderer.cpp uses.
+//
+// CORRECTNESS DEPENDS ON AN UNSTATED HLSL INTERACTION. UploadCB memcpys these
+// raw row-major bytes straight into a constant buffer. HLSL cbuffers default to
+// COLUMN-MAJOR packing, so the GPU reinterprets the upload as the TRANSPOSE of
+// what the CPU wrote. basic_vs.hlsl:36 then does mul(worldViewProj, float4(...)),
+// i.e. the column-vector form M * v. Those two transposes cancel exactly, which
+// is the only reason transforms render correctly.
+//
+// WARNING: this cancellation is silent and load-bearing. Either of the
+// following will break EVERY transform in the engine with no compile error and
+// no validation-layer message:
+//   - adding `#pragma pack_matrix(row_major)` (or the /Zpr compile flag) to any
+//     shader that consumes these matrices — this removes the GPU-side transpose
+//     while the CPU still uploads row-major;
+//   - "fixing" the shader to mul(v, M) to match the CPU's row-vector convention
+//     — this removes the shader-side transpose instead.
+// Change one and you must change the other. If you touch either side, verify
+// against a translated, rotated, non-uniformly scaled object, not just a cube
+// at the origin — a pure rotation about a single axis can mask a transpose.
 // =============================================================================
 
 #include <cstdint>

@@ -7,9 +7,31 @@
 //
 // Features:
 //   - Slot-map pools with O(1) lookup by handle
-//   - Generational handles prevent use-after-free
-//   - Deferred GPU resource release via fence-guarded queue
+//   - Generational handles catch stale CPU-side handle reuse
 //   - Multiple entities can share the same mesh/material
+//
+// HAZARD — GPU RELEASE IS SYNCHRONOUS, NOT DEFERRED.
+//   There is no deferred-release queue and no fence guard in this class.
+//   RemoveMesh (resource_manager.cpp:94-107) assigns `slot.mesh = render::Mesh{}`
+//   and RemoveTexture (resource_manager.cpp:209-221) assigns
+//   `slot.texture = render::Texture{}`. Both drop the last ComPtr reference
+//   immediately, on the calling thread, at the moment of the call. If the GPU
+//   still references that buffer or texture from a command list that has been
+//   recorded but not yet retired — the normal case, since the device runs up to
+//   kFrameCount frames in flight — this is a use-after-free. The generational
+//   handle does NOT protect against it: it only invalidates future CPU lookups,
+//   and the GPU never consults it.
+//
+//   Do not call RemoveMesh or RemoveTexture mid-frame. The only safe sequence
+//   today is a full D3D12Device::WaitForGpu() before the removal.
+//   (RemoveMaterial is exempt — MaterialData is CPU-only and holds no GPU
+//   objects. RemoveTexture additionally leaks the shader-visible descriptor slot
+//   that Renderer::RegisterTexture allocated for it; that allocator has no free
+//   list.)
+//
+//   If you add a real deferred path, put it in D3D12Device (a fence-value-tagged
+//   release queue drained at frame start) rather than here, so every subsystem
+//   gets it; several other subsystems have the same problem.
 // =============================================================================
 
 #include "../render/mesh.h"
@@ -17,7 +39,9 @@
 #include "../core/types.h"
 #include <cstdint>
 #include <vector>
-#include <queue>
+#include <queue>   // UNUSED — left over from the deferred-release design that was
+                   // never implemented. Nothing in this header or its .cpp uses
+                   // std::queue. Safe to delete; see the HAZARD note above.
 
 namespace scene
 {

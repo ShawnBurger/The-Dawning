@@ -10,7 +10,9 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
-- Layer 4 material path with albedo/normal textures and GGX-style shading.
+- Layer 4 material work is partially landed: albedo/normal textures and
+  Cook-Torrance GGX shading exist; SM 6.6 bindless, HDR targets, and a separate
+  tone-map pass do not. See "Material System Status" below and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -58,10 +60,25 @@ After building, run a short automated render test:
 ```
 
 The smoke test launches `build\Debug\TheDawningV3.exe --smoke --smoke-rt`,
-waits for the engine to enter path tracing, exits cleanly, and fails if the
-runtime log contains errors or expected render milestones are missing. Use
-`-RasterOnly` to test the raster path or `-FullQuality` to exercise the higher
-path-tracing quality mode.
+waits for the engine to enter path tracing, and exits cleanly. It fails if:
+
+- the process returns a nonzero exit code. `main.cpp:775-780` latches
+  `core::Log::ErrorCount()` and forces exit code 4 when anything logged an
+  error during the run, even if the frame loop otherwise completed. This
+  catches the paths that log an error and skip their work while rendering
+  continues (`PathTracer::Dispatch` has several).
+- the log contains an error line. `tools/smoke_test.ps1:59` matches
+  `\[ERR\s*\]`, which is the prefix `core::Log` actually writes
+  (`log.cpp:82` emits `[ERR ]`).
+- an expected render milestone string is missing from the log.
+
+The milestone checks are matched against human-readable log prose, so editing
+those log strings will break the test. The test is a liveness check only — it
+never inspects rendered pixels, so it cannot catch an incorrect image.
+
+Use `-RasterOnly` to test the raster path or `-FullQuality` to exercise the
+higher path-tracing quality mode. Only the Debug build is tested; the paths in
+`tools/smoke_test.ps1` are hardcoded to `build\Debug\`.
 
 ## Path Tracing Runtime
 
@@ -76,21 +93,42 @@ Microsoft.Direct3D.DXC NuGet package.
 
 ## Material System Status
 
+Layer 4 is partially implemented. What exists is described below; SM 6.6
+bindless, an HDR render target, a separate tone-map pass, and
+metallic/roughness/AO/emissive maps do not exist yet. See `CLAUDE.md` for the
+full done/not-done split.
+
 Raster materials bind textures through descriptor indices stored on material
-constants. The current scene first looks for KTX v1 albedo textures
-in `assets/textures/`, then PNG via Windows Imaging Component, then DDS files.
-If the starter DDS files are missing from the executable directory, the app
-writes generated checker DDS files and loads those. RGBA/WIC textures generate
-CPU mip chains, while KTX/DDS files upload declared mip levels. Raster and DXR
-path-traced materials now sample albedo textures from their respective texture
-tables. Raster and DXR materials can also bind normal maps; the demo scene loads
-`ground_normal` / `cube_normal` KTX, PNG, or DDS files when present and
-otherwise uses procedural wave normal textures for the floor and cube. Raster
-and DXR now both use indexed shader-visible texture tables at demo scale.
+constants. The demo scene resolves each texture from `assets\textures\`
+relative to the process working directory — which is the executable directory
+in normal use, so this is `build\Debug\assets\textures\`, not the
+`assets/textures/` folder at the repository root (that folder ships only a
+README). For albedo it tries KTX v1, then PNG via Windows Imaging Component,
+then DDS; if the starter DDS files are absent it first writes generated checker
+DDS files and loads those, and if even that fails it falls back to an in-memory
+procedural checker. Because no textures are committed, a clean clone always
+takes the generated-checker path and the KTX and WIC loaders go unexercised.
+
+RGBA/WIC sources generate CPU mip chains; KTX and DDS files upload the mip
+levels declared in their headers. Raster and DXR path-traced materials both
+sample albedo through indexed shader-visible texture tables, and both can bind
+normal maps: the demo scene loads `ground_normal` / `cube_normal` KTX, PNG, or
+DDS when present and otherwise generates procedural wave normal textures for
+the floor and cube. These tables are fixed-size and allocated from a monotonic
+counter with no reclamation, so they are sized for demo scale only.
+
 Raster lighting uses Cook-Torrance/GGX direct lighting so material roughness and
 metallic response track more closely between preview and path tracing.
-Raster mode also draws a tone-mapped sky gradient from the same sky helper used
-by DXR misses and environment reflections.
+
+Raster mode also draws a tone-mapped sky gradient, but it is NOT the same
+evaluation the DXR path uses. Both include `shaders/sky_common.hlsli` and share
+the gradient ramp `DawningSkyRadianceFromBlend`, however they feed it different
+inputs: `sky_ps.hlsl:16` uses a screen-space blend (`1.0 - saturate(input.uv.y)`),
+while the path tracer calls `DawningSkyRadiance(direction)`
+(`path_trace.hlsl:383, 448`), a function of world-space elevation. The raster sky
+is therefore nailed to the framebuffer — it does not rotate with the camera and
+does not respond to pitch or FOV. Pitching the camera and pressing `F1` visibly
+moves the horizon.
 
 ## Runtime Controls
 
