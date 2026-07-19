@@ -15,12 +15,37 @@ $exe    = Join-Path $outDir "TheDawningV3.exe"
 $log    = Join-Path $outDir "TheDawning.log"
 $capture = Join-Path $outDir "smoke_capture.ppm"
 $shaderInclude = Join-Path $outDir "shaders\display_common.hlsli"
+$textureDir = Join-Path $outDir "assets\textures"
 
 if (!(Test-Path -LiteralPath $exe)) {
     throw "Executable not found: $exe. Run .\SETUP_AND_BUILD.bat first (config '$Config')."
 }
 if (!(Test-Path -LiteralPath $shaderInclude)) {
     throw "Shader include not found in output: $shaderInclude. Rebuild before running smoke tests."
+}
+
+# Smoke captures must not depend on stale, untracked texture files left in a
+# build directory. Remove only the known test-scene copies so App falls back to
+# its deterministic procedural checker and normal textures for every run.
+$smokeTextureNames = @(
+    "ground_grid.ktx",
+    "ground_grid.png",
+    "ground_grid.dds",
+    "blue_panels.ktx",
+    "blue_panels.png",
+    "blue_panels.dds",
+    "ground_normal.ktx",
+    "ground_normal.png",
+    "ground_normal.dds",
+    "cube_normal.ktx",
+    "cube_normal.png",
+    "cube_normal.dds"
+)
+foreach ($name in $smokeTextureNames) {
+    $path = Join-Path $textureDir $name
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Force
+    }
 }
 
 # Delete both artifacts up front so a stale file from an earlier run can never be
