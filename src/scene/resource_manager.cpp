@@ -92,7 +92,7 @@ bool ResourceManager::IsValidMesh(MeshHandle handle) const
     return m_meshSlots[idx].alive && m_meshSlots[idx].generation == handle.Generation();
 }
 
-void ResourceManager::RemoveMesh(MeshHandle handle)
+void ResourceManager::RemoveMesh(MeshHandle handle, render::D3D12Device& device)
 {
     if (!IsValidMesh(handle)) return;
     uint32_t idx = handle.Index();
@@ -100,8 +100,14 @@ void ResourceManager::RemoveMesh(MeshHandle handle)
 
     slot.alive = false;
     slot.generation++;
-    // GPU resources released when Mesh's ComPtrs go out of scope or are overwritten
-    slot.mesh = render::Mesh{}; // Release GPU refs
+
+    // Hand the GPU buffers to the device's fence-guarded queue rather than
+    // dropping them here. Overwriting the slot releases the last reference
+    // immediately, and up to kFrameCount frames may still have command lists
+    // referencing these buffers - that is a use-after-free, not a leak.
+    device.DeferredRelease(slot.mesh.vertexBuffer);
+    device.DeferredRelease(slot.mesh.indexBuffer);
+    slot.mesh = render::Mesh{};
 
     m_meshFreeList.push_back(idx);
     m_meshAliveCount--;
@@ -207,7 +213,7 @@ bool ResourceManager::IsValidTexture(TextureHandle handle) const
     return m_textureSlots[idx].alive && m_textureSlots[idx].generation == handle.Generation();
 }
 
-void ResourceManager::RemoveTexture(TextureHandle handle)
+void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& device)
 {
     if (!IsValidTexture(handle)) return;
     uint32_t idx = handle.Index();
@@ -215,6 +221,13 @@ void ResourceManager::RemoveTexture(TextureHandle handle)
 
     slot.alive = false;
     slot.generation++;
+
+    // Same hazard as RemoveMesh. Note this still leaks the texture's
+    // shader-visible descriptor slot: Renderer::RegisterTexture allocates from a
+    // monotonic counter with no free list, so the descriptor cannot be reclaimed
+    // until that allocator gains one. Deferred release fixes the lifetime bug,
+    // not the descriptor leak.
+    device.DeferredRelease(slot.texture.resource);
     slot.texture = render::Texture{};
 
     m_textureFreeList.push_back(idx);

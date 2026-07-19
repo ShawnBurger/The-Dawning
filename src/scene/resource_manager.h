@@ -10,38 +10,33 @@
 //   - Generational handles catch stale CPU-side handle reuse
 //   - Multiple entities can share the same mesh/material
 //
-// HAZARD — GPU RELEASE IS SYNCHRONOUS, NOT DEFERRED.
-//   There is no deferred-release queue and no fence guard in this class.
-//   RemoveMesh (resource_manager.cpp:94-107) assigns `slot.mesh = render::Mesh{}`
-//   and RemoveTexture (resource_manager.cpp:209-221) assigns
-//   `slot.texture = render::Texture{}`. Both drop the last ComPtr reference
-//   immediately, on the calling thread, at the moment of the call. If the GPU
-//   still references that buffer or texture from a command list that has been
-//   recorded but not yet retired — the normal case, since the device runs up to
-//   kFrameCount frames in flight — this is a use-after-free. The generational
-//   handle does NOT protect against it: it only invalidates future CPU lookups,
-//   and the GPU never consults it.
+// GPU release is deferred and fence-guarded.
+//   RemoveMesh and RemoveTexture hand their GPU objects to
+//   D3D12Device::DeferredRelease rather than dropping the last ComPtr on the
+//   spot. The device retains each one until the GPU has passed the fence value
+//   signalled at the end of the frame in which it was retired, then frees it.
+//   Both are therefore safe to call mid-frame, which is the normal case since
+//   the device runs up to kFrameCount frames in flight.
 //
-//   Do not call RemoveMesh or RemoveTexture mid-frame. The only safe sequence
-//   today is a full D3D12Device::WaitForGpu() before the removal.
-//   (RemoveMaterial is exempt — MaterialData is CPU-only and holds no GPU
-//   objects. RemoveTexture additionally leaks the shader-visible descriptor slot
-//   that Renderer::RegisterTexture allocated for it; that allocator has no free
-//   list.)
+//   This replaces a real use-after-free: overwriting the slot released the
+//   resource immediately while recorded-but-not-yet-retired command lists could
+//   still reference it. The generational handle never protected against that —
+//   it invalidates future CPU lookups, and the GPU does not consult it.
 //
-//   If you add a real deferred path, put it in D3D12Device (a fence-value-tagged
-//   release queue drained at frame start) rather than here, so every subsystem
-//   gets it; several other subsystems have the same problem.
+//   Still true and NOT fixed by deferred release: RemoveTexture leaks the
+//   shader-visible descriptor slot that Renderer::RegisterTexture allocated,
+//   because that allocator is a monotonic counter with no free list. Runtime
+//   texture churn will exhaust the heap. RemoveMaterial needs no deferral —
+//   MaterialData is CPU-only and holds no GPU objects.
 // =============================================================================
 
 #include "../render/mesh.h"
 #include "../render/texture.h"
 #include "../core/types.h"
+#include "../render/d3d12_device.h"   // for D3D12Device, whose fence-guarded
+                                       // queue owns deferred GPU release
 #include <cstdint>
 #include <vector>
-#include <queue>   // UNUSED — left over from the deferred-release design that was
-                   // never implemented. Nothing in this header or its .cpp uses
-                   // std::queue. Safe to delete; see the HAZARD note above.
 
 namespace scene
 {
@@ -96,7 +91,7 @@ public:
     MeshHandle AddMesh(render::Mesh&& mesh, const char* name = nullptr);
     const render::Mesh* GetMesh(MeshHandle handle) const;
     bool IsValidMesh(MeshHandle handle) const;
-    void RemoveMesh(MeshHandle handle);
+    void RemoveMesh(MeshHandle handle, render::D3D12Device& device);
 
     // --- Material management ---
     MaterialHandle AddMaterial(const MaterialData& material);
@@ -107,7 +102,7 @@ public:
     TextureHandle AddTexture(render::Texture&& texture, const char* name = nullptr);
     const render::Texture* GetTexture(TextureHandle handle) const;
     bool IsValidTexture(TextureHandle handle) const;
-    void RemoveTexture(TextureHandle handle);
+    void RemoveTexture(TextureHandle handle, render::D3D12Device& device);
 
     // --- Statistics ---
     uint32_t MeshCount() const { return m_meshAliveCount; }
