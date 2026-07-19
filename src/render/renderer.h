@@ -57,8 +57,15 @@ struct CBPerFrame
     float aspect;
     float camForward[3];
     float pad4;
+
+    // Camera-relative light view-projection, so the pixel shader can project a
+    // world position into shadow-map space. Camera-relative because every world
+    // matrix the raster path sees already is - see RULES #1 in CLAUDE.md. A
+    // light matrix built in absolute world space would be correct only while the
+    // camera sat at the origin.
+    float lightViewProj[16];
 };
-static_assert(sizeof(CBPerFrame) == 112,
+static_assert(sizeof(CBPerFrame) == 176,
               "CBPerFrame must match cbuffer CBPerFrame (b1) in the raster shaders");
 
 struct CBMaterial
@@ -171,6 +178,25 @@ public:
     // in which case the target is released and the caller must not render.
     bool ResizeHDRTarget(D3D12Device& device, uint32_t width, uint32_t height);
 
+    // ---- Shadow pass -------------------------------------------------------
+    // Runs BEFORE BeginScenePass. Renders scene depth from the light's point of
+    // view into a dedicated depth target, which the main pass then samples.
+    //
+    // The light matrix is rebuilt every frame around the camera-relative origin
+    // (i.e. the camera), so the map follows the viewer. That is a single
+    // cascade covering kShadowExtent units - fine for the demo scene, and the
+    // obvious place to add cascades later.
+    void BeginShadowPass(D3D12Device& device);
+    void EndShadowPass(D3D12Device& device);
+
+    // Depth-only draw. Deliberately a separate entry point rather than a flag on
+    // DrawMesh: the shadow pass binds no material, no textures and no per-frame
+    // constants, and folding it in would mean a pile of branches on a hot path.
+    void DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
+                        const core::Mat4x4& worldMatrix);
+
+    bool ShadowsAvailable() const { return m_shadowMap != nullptr; }
+
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
                              const core::Vec3f& color,
@@ -186,6 +212,9 @@ private:
     bool CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t height);
     bool CreateTonemapPipeline(ID3D12Device* device);
     bool CreateBloomPipeline(ID3D12Device* device);
+    bool CreateShadowResources(ID3D12Device* device);
+    bool CreateShadowPSO(ID3D12Device* device);
+    void UpdateLightMatrix();
     void RenderBloom(D3D12Device& device);
 
     // Upload a constant buffer and return its GPU virtual address
@@ -240,7 +269,29 @@ private:
     float m_bloomThreshold = 1.0f;
     float m_bloomSoftKnee  = 0.5f;
 
-    // Shader-visible texture descriptors. Slot 0 is a null SRV fallback.
+    // ---- Shadow map --------------------------------------------------------
+    // R32_TYPELESS so the same resource can carry a D32_FLOAT DSV for the shadow
+    // pass and an R32_FLOAT SRV for the main pass.
+    //
+    // The SRV lives in m_textureHeap at kShadowDescriptorIndex, NOT in a heap of
+    // its own: only one shader-visible CBV_SRV_UAV heap can be bound at a time,
+    // so anything the material pass samples has to share that heap. The slot is
+    // reserved by starting the descriptor allocator past it, so it can never be
+    // handed out to a material texture.
+    static constexpr uint32_t kShadowMapSize = 2048;
+    static constexpr uint32_t kShadowDescriptorIndex = 1;  // 0 is the null SRV
+    // Half-extent of the orthographic light frustum, in world units, centred on
+    // the camera. Sized for the demo scene; a real world needs cascades.
+    static constexpr float    kShadowExtent = 24.0f;
+    static constexpr float    kShadowDepthRange = 120.0f;
+    ComPtr<ID3D12Resource>       m_shadowMap;
+    ComPtr<ID3D12DescriptorHeap> m_shadowDsvHeap;
+    ComPtr<ID3D12PipelineState>  m_shadowPSO;
+    core::Mat4x4                 m_lightViewProj;
+    bool                         m_shadowIsDepthTarget = false;
+
+    // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
+    // slot 1 the shadow map.
     static constexpr uint32_t kMaxRasterTextures = 128;
     ComPtr<ID3D12DescriptorHeap> m_textureHeap;
     uint32_t m_textureDescSize = 0;

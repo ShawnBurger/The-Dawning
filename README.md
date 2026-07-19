@@ -13,8 +13,8 @@ Do not merge old snapshots directly into this source tree.
 - Layer 4 material work is partially landed: albedo/normal textures,
   Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
   linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
-  emissive maps; SM 6.6 bindless does not. See "Material System Status" below
-  and `CLAUDE.md`.
+  emissive maps, and a directional shadow map for the raster path; SM 6.6
+  bindless does not. See "Material System Status" below and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -170,6 +170,40 @@ produces rather than radiance it reflects.
 tracer sees emission when a ray happens to land on an emitter, but there is no
 next-event estimation of emitters, so a bright panel lights only itself. Making
 emitters illuminate the scene needs light sampling, which is separate work.
+
+### Shadows
+
+The raster path renders a 2048x2048 depth-only pass from the light's point of
+view before the scene pass, and samples it with a 3x3 grid of hardware
+comparison taps - 9 taps, each already 2x2 filtered by the comparison sampler,
+so the effective kernel is 4x4 texels.
+
+The light matrix is built in CAMERA-RELATIVE space, like every other matrix the
+raster path uses (see RULES #1 in `CLAUDE.md`). The camera is therefore at the
+origin of that space and the light frustum is centred on it, so the map follows
+the viewer for free. No camera position enters the calculation, and none should.
+
+Two separate biases fight shadow acne, because they address different errors:
+slope-scaled rasteriser depth bias acts along the light direction, while a
+normal offset in the pixel shader pushes the sampling point across the surface.
+Neither alone keeps the ground plane clean at grazing angles.
+
+It is a SINGLE cascade covering 24 world units around the camera. The comparison
+sampler uses a white (farthest) border, so anything outside the frustum reads as
+fully lit rather than fully shadowed - the demo scene is larger than the
+frustum, and the alternative is a hard black square around the shadowed region.
+That is the right failure mode, but it is still a failure mode: cascades are
+what this needs to cover a real world.
+
+Shadowing multiplies DIRECT light only. Ambient and emission are untouched -
+ambient stands in for everything the single directional light does not carry, so
+occluding it too would make shadowed regions pure black. This matches the path
+tracer, where the shadow ray gates the next-event-estimation term and nothing
+else.
+
+The DXR path does not use the shadow map at all; it traces shadow rays, which is
+strictly better and needs no bias tuning. The two paths agree on where shadows
+fall, which is the property worth checking after any change to either.
 
 Raster geometry and sky render into a linear `R16G16B16A16_FLOAT` scene target,
 and a fullscreen pass tone-maps that into the back buffer at the end of the

@@ -28,6 +28,8 @@ bool Renderer::Init(D3D12Device& device)
                          static_cast<uint32_t>(device.Height()))) return false;
     if (!CreateTonemapPipeline(device.Device())) return false;
     if (!CreateBloomPipeline(device.Device())) return false;
+    if (!CreateShadowResources(device.Device())) return false;
+    if (!CreateShadowPSO(device.Device())) return false;
 
     core::Log::Info("Renderer initialized");
     return true;
@@ -745,6 +747,30 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     staticSampler.MinLOD           = 0.0f;
     staticSampler.MaxLOD           = D3D12_FLOAT32_MAX;
     staticSampler.ShaderRegister   = 0;
+
+    // s1: hardware depth comparison. The GPU compares against the reference
+    // depth and bilinearly filters the RESULT of four comparisons, so a single
+    // SampleCmpLevelZero already gives 2x2 percentage-closer filtering for the
+    // cost of one tap. BORDER address mode with a white (1.0 = farthest) border
+    // means anything outside the light frustum reads as fully lit rather than
+    // fully shadowed - the demo scene is larger than kShadowExtent, and the
+    // alternative is a hard black square around the shadowed region.
+    D3D12_STATIC_SAMPLER_DESC shadowSampler = {};
+    shadowSampler.Filter           = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    shadowSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.MipLODBias       = 0.0f;
+    shadowSampler.MaxAnisotropy    = 1;
+    shadowSampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    shadowSampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    shadowSampler.MinLOD           = 0.0f;
+    shadowSampler.MaxLOD           = D3D12_FLOAT32_MAX;
+    shadowSampler.ShaderRegister   = 1;
+    shadowSampler.RegisterSpace    = 0;
+    shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
     staticSampler.RegisterSpace    = 0;
     staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
@@ -769,7 +795,15 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         textureRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[4] = {};
+        D3D12_DESCRIPTOR_RANGE1 shadowRange = {};
+        shadowRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        shadowRange.NumDescriptors                    = 1;
+        shadowRange.BaseShaderRegister                = 0;
+        shadowRange.RegisterSpace                     = 1;
+        shadowRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+        shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER1 rootParams[5] = {};
 
         // Slot 0: Per-object CBV (b0) — changes every draw call (hottest)
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -798,12 +832,20 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
         rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 4: shadow map (t0, space1). A separate table from the material
+        // one because it is bound at a fixed heap slot the allocator never hands
+        // out, and because it must be valid before any material exists.
+        rootParams[4].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[4].DescriptorTable.pDescriptorRanges   = &shadowRange;
+        rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
         vrsDesc.Desc_1_1.pParameters       = rootParams;
-        vrsDesc.Desc_1_1.NumStaticSamplers = 1;
-        vrsDesc.Desc_1_1.pStaticSamplers   = &staticSampler;
+        vrsDesc.Desc_1_1.NumStaticSamplers = _countof(staticSamplers);
+        vrsDesc.Desc_1_1.pStaticSamplers   = staticSamplers;
         vrsDesc.Desc_1_1.Flags             = flags;
 
         hr = D3D12SerializeVersionedRootSignature(&vrsDesc, &sigBlob, &errorBlob);
@@ -818,7 +860,14 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         textureRange.RegisterSpace                     = 0;
         textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER rootParams[4] = {};
+        D3D12_DESCRIPTOR_RANGE shadowRange = {};
+        shadowRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        shadowRange.NumDescriptors                    = 1;
+        shadowRange.BaseShaderRegister                = 0;
+        shadowRange.RegisterSpace                     = 1;
+        shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER rootParams[5] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -840,11 +889,16 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[3].DescriptorTable.pDescriptorRanges   = &textureRange;
         rootParams[3].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        rootParams[4].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[4].DescriptorTable.pDescriptorRanges   = &shadowRange;
+        rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
         rsDesc.pParameters       = rootParams;
-        rsDesc.NumStaticSamplers = 1;
-        rsDesc.pStaticSamplers   = &staticSampler;
+        rsDesc.NumStaticSamplers = _countof(staticSamplers);
+        rsDesc.pStaticSamplers   = staticSamplers;
         rsDesc.Flags             = flags;
 
         hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errorBlob);
@@ -867,7 +921,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + 1 static sampler, 7 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 9 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1094,12 +1148,13 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     for (uint32_t i = 0; i < kMaxRasterTextures; ++i)
         WriteNullTextureDescriptor(device, i);
 
-    // Slot 0 stays the null-SRV fallback, so allocation starts at 1 and the
-    // allocator will never recycle index 0.
-    m_textureAllocator.Init(kMaxRasterTextures, 1);
+    // Slot 0 stays the null-SRV fallback and slot 1 the shadow map, so
+    // allocation starts at 2 and the allocator can never recycle either.
+    m_textureAllocator.Init(kMaxRasterTextures, kShadowDescriptorIndex + 1);
 
     core::Log::Infof("Raster texture heap created (%u descriptors, %u usable)",
-                     kMaxRasterTextures, kMaxRasterTextures - 1);
+                     kMaxRasterTextures,
+                     kMaxRasterTextures - (kShadowDescriptorIndex + 1));
     return true;
 }
 
@@ -1255,11 +1310,19 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     const float fovYRad    = camera.GetFOV() * (3.14159265358979323846f / 180.0f);
     perFrame.tanHalfFovY   = std::tan(fovYRad * 0.5f);
     perFrame.aspect        = aspect;
+    memcpy(perFrame.lightViewProj, m_lightViewProj.Data(), sizeof(float) * 16);
 
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
 
     cmd->SetGraphicsRootDescriptorTable(3, m_textureHeap->GetGPUDescriptorHandleForHeapStart());
+
+    // Shadow map SRV. Its own root parameter rather than a slot the material
+    // table reaches, so material descriptor allocation and the shadow map stay
+    // independent - the shadow map must exist before any material is registered.
+    D3D12_GPU_DESCRIPTOR_HANDLE shadowGpu = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
+    shadowGpu.ptr += static_cast<UINT64>(kShadowDescriptorIndex) * m_textureDescSize;
+    cmd->SetGraphicsRootDescriptorTable(4, shadowGpu);
 }
 
 void Renderer::DrawSky(D3D12Device& device)
@@ -1362,6 +1425,249 @@ void Renderer::SetDirectionalLight(const core::Vec3f& direction,
     m_lightDir = direction.Normalized();
     m_lightColor = color;
     m_ambientColor = ambient;
+    UpdateLightMatrix();
+}
+
+// =============================================================================
+// Shadow map
+// =============================================================================
+
+void Renderer::UpdateLightMatrix()
+{
+    // Everything the raster path draws is already camera-relative, so the camera
+    // sits at the origin of the space these matrices operate in. The light
+    // frustum is therefore centred on the origin and the map follows the viewer
+    // for free - no camera position enters this calculation, and none should.
+    //
+    // m_lightDir points TOWARD the light, so the light is up that direction and
+    // looks back down it at the origin.
+    const core::Vec3f eye = m_lightDir * (kShadowDepthRange * 0.5f);
+
+    // Any up vector works except one parallel to the view direction, which would
+    // make the cross product in LookAt degenerate.
+    core::Vec3f up = core::Vec3f(0.0f, 1.0f, 0.0f);
+    if (std::fabs(m_lightDir.y) > 0.99f)
+        up = core::Vec3f(0.0f, 0.0f, 1.0f);
+
+    const core::Mat4x4 lightView =
+        core::Mat4x4::LookAt(eye, core::Vec3f(0.0f, 0.0f, 0.0f), up);
+    const core::Mat4x4 lightProj =
+        core::Mat4x4::OrthoLH(kShadowExtent * 2.0f, kShadowExtent * 2.0f,
+                              0.1f, kShadowDepthRange);
+
+    m_lightViewProj = lightView * lightProj;
+}
+
+bool Renderer::CreateShadowResources(ID3D12Device* device)
+{
+    // R32_TYPELESS so one resource can carry both a D32_FLOAT DSV (shadow pass)
+    // and an R32_FLOAT SRV (material pass). A D32_FLOAT resource cannot be given
+    // a shader-resource view directly.
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width            = kShadowMapSize;
+    desc.Height           = kShadowMapSize;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_R32_TYPELESS;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clear = {};
+    clear.Format               = DXGI_FORMAT_D32_FLOAT;
+    clear.DepthStencil.Depth   = 1.0f;
+    clear.DepthStencil.Stencil = 0;
+
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear,
+        IID_PPV_ARGS(&m_shadowMap));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create shadow map: 0x%08X", hr);
+        return false;
+    }
+    m_shadowMap->SetName(L"ShadowMap");
+    m_shadowIsDepthTarget = false;
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    hr = device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_shadowDsvHeap));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create shadow DSV heap: 0x%08X", hr);
+        m_shadowMap.Reset();
+        return false;
+    }
+    m_shadowDsvHeap->SetName(L"ShadowDsvHeap");
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format        = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    device->CreateDepthStencilView(m_shadowMap.Get(), &dsvDesc,
+        m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // SRV into the reserved slot of the shared material heap. Only one
+    // shader-visible CBV_SRV_UAV heap can be bound at a time, so anything the
+    // material pass samples has to live here. The allocator was initialised to
+    // start past this index, so nothing else can claim it.
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels     = 1;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    srvCpu.ptr += static_cast<SIZE_T>(kShadowDescriptorIndex) * m_textureDescSize;
+    device->CreateShaderResourceView(m_shadowMap.Get(), &srvDesc, srvCpu);
+
+    UpdateLightMatrix();
+
+    // Structured marker rather than prose: the smoke harness asserts on this,
+    // so rewording the human-readable line above cannot silently disarm it.
+    core::Log::Infof("[SMOKE] shadow_map=ok shadow_map_size=%u shadow_map_slot=%u",
+                     kShadowMapSize, kShadowDescriptorIndex);
+    core::Log::Infof("Shadow map created (%ux%u D32_FLOAT, descriptor slot %u)",
+                     kShadowMapSize, kShadowMapSize, kShadowDescriptorIndex);
+    return true;
+}
+
+bool Renderer::CreateShadowPSO(ID3D12Device* device)
+{
+    auto vsBytecode = CompileShaderFromFile(L"shaders/shadow_vs.hlsl", "main", "vs_5_1");
+    if (!vsBytecode)
+    {
+        core::Log::Error("Failed to compile shadow vertex shader");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_rootSig.Get();
+    psoDesc.VS.pShaderBytecode = vsBytecode->GetBufferPointer();
+    psoDesc.VS.BytecodeLength  = vsBytecode->GetBufferSize();
+    // No pixel shader: depth only.
+    psoDesc.InputLayout.pInputElementDescs = kVertexLayout;
+    psoDesc.InputLayout.NumElements        = kVertexLayoutCount;
+
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_BACK;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
+    // Constant and slope-scaled depth bias push stored depth away from the
+    // light, so a surface does not shadow itself where the shadow-map texel and
+    // the shaded pixel disagree by less than a texel of depth. Slope scaling
+    // matters more than the constant term: the error grows with the angle
+    // between surface and light, which is exactly what acne is.
+    psoDesc.RasterizerState.DepthBias             = 2000;
+    psoDesc.RasterizerState.DepthBiasClamp        = 0.0f;
+    psoDesc.RasterizerState.SlopeScaledDepthBias  = 2.5f;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+
+    psoDesc.DepthStencilState.DepthEnable    = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;
+    psoDesc.DepthStencilState.StencilEnable  = FALSE;
+
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 0;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_shadowPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (shadow) failed: 0x%08X", hr);
+        return false;
+    }
+    m_shadowPSO->SetName(L"ShadowDepthPSO");
+    core::Log::Info("Shadow depth PSO created (VS only, no render targets)");
+    return true;
+}
+
+void Renderer::BeginShadowPass(D3D12Device& device)
+{
+    if (!m_shadowMap || !m_shadowPSO) return;
+
+    auto* cmd = device.CmdList();
+
+    // Rebuild every frame: the light can move, and the frustum is anchored to
+    // the camera, which certainly does.
+    UpdateLightMatrix();
+
+    if (!m_shadowIsDepthTarget)
+    {
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource   = m_shadowMap.Get();
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        cmd->ResourceBarrier(1, &barrier);
+        m_shadowIsDepthTarget = true;
+    }
+
+    auto dsv = m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+    cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    D3D12_VIEWPORT vp = { 0.0f, 0.0f,
+                          static_cast<float>(kShadowMapSize),
+                          static_cast<float>(kShadowMapSize), 0.0f, 1.0f };
+    D3D12_RECT sc = { 0, 0,
+                      static_cast<LONG>(kShadowMapSize),
+                      static_cast<LONG>(kShadowMapSize) };
+    cmd->RSSetViewports(1, &vp);
+    cmd->RSSetScissorRects(1, &sc);
+
+    cmd->SetGraphicsRootSignature(m_rootSig.Get());
+    cmd->SetPipelineState(m_shadowPSO.Get());
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+}
+
+void Renderer::EndShadowPass(D3D12Device& device)
+{
+    if (!m_shadowMap || !m_shadowIsDepthTarget) return;
+
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource   = m_shadowMap.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    device.CmdList()->ResourceBarrier(1, &barrier);
+    m_shadowIsDepthTarget = false;
+}
+
+void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
+                              const core::Mat4x4& worldMatrix)
+{
+    if (!mesh.IsValid() || !m_shadowMap) return;
+
+    auto* cmd = device.CmdList();
+
+    // The same CBPerObject the main pass uses, with the light matrix
+    // substituted for the camera one. world and worldInvTranspose are filled in
+    // even though shadow_vs.hlsl ignores them: the struct is shared, and leaving
+    // stale bytes in a mapped upload ring is how a later shader change turns
+    // into a heisenbug.
+    CBPerObject perObject = {};
+    const core::Mat4x4 wvp = worldMatrix * m_lightViewProj;
+    memcpy(perObject.worldViewProj, wvp.Data(), sizeof(float) * 16);
+    memcpy(perObject.world, worldMatrix.Data(), sizeof(float) * 16);
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    memcpy(perObject.worldInvTranspose, worldInvTranspose.Data(), sizeof(float) * 16);
+
+    cmd->SetGraphicsRootConstantBufferView(0, UploadCB(&perObject, sizeof(perObject)));
+    cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
+    cmd->IASetIndexBuffer(&mesh.ibView);
+    cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 }
 
 } // namespace render
