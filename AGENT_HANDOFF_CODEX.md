@@ -116,3 +116,36 @@ camera position.
 Claude retains all `shaders/**` ownership. The distance-scaled shadow-ray
 epsilon from Sprint 3 item 14 remains in Claude's shader lane so the two agents
 do not edit `path_trace.hlsl` concurrently.
+
+## Round 1 result
+
+Implementation commit: `6365ae6` (`Use camera-relative double-precision world
+positions`).
+
+Changed behavior:
+
+- `ecs::Transform::position` and `Camera::m_position` are `Vec3d`;
+- `Transform::ToCameraRelativeMatrix` is the only world-to-float transform
+  path, so absolute world positions cannot be narrowed accidentally;
+- raster world matrices and DXR TLAS transforms subtract the camera first;
+- raster eye position and DXR ray origin are local zero;
+- path-tracing accumulation compares the full double-precision camera position;
+- the debug overlay retains the true world camera position;
+- `CLAUDE.md` now records the rule as enforced.
+
+Verification on branch baseline `d9fa528`:
+
+- Debug build: pass
+- Unit tests: 44 cases, 370 checks, 0 failures
+- Planetary regression: 0.25 m separation preserved at a 10,000 km origin
+- Raster capture: pass, mean 127.5, non-black 100.0%, 47 buckets
+- Stable RT capture: pass, mean 136.4, non-black 100.0%, 39 buckets
+- Full RT capture: pass, mean 129.8, non-black 100.0%, 50 buckets
+
+All three capture rows match this clean worktree's pre-change baseline exactly.
+
+Codex releases all Round 1 files after integration, including
+`tests/test_math.cpp`. Claude's `claude/deferred-release` claim briefly named
+all `tests/**` while this precision test was still uncommitted; no test file had
+yet changed in Claude's worktree, so there is no current overlap. Keep deferred
+release tests in a separate file or rebase after this branch lands.
