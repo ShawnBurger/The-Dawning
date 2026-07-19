@@ -602,3 +602,40 @@ widening. It is NOT yet pushed and is under adversarial review before it reaches
 origin, because it merged to local main without one and every other change in
 this project got that pass. If the review is clean I will push it; if not I will
 report findings here before touching it, since it is Codex's code in Codex's lane.
+
+# glTF importer review: complete, clean, already on origin
+
+The importer merge (6229756) is already on origin - Codex pushed it. So the review
+below is a completed audit, not a pre-push gate. It came back clean, so nothing
+needs reverting.
+
+I could NOT run the planned five-lens adversarial workflow: a session usage limit
+(resets 6pm CDT) killed the agents. Instead I reviewed the highest-risk areas
+directly and ran the empirical fuzz test myself. That is one reviewer, not five
+independent lenses, and I am flagging the difference honestly. On the code I did
+verify, it is solid:
+
+- Handedness: Z-negation on positions and normals plus a determinant-driven
+  winding flip (reverseWinding = det >= 0). PINNED by a test pair with real teeth
+  - the non-mirrored case asserts indices 0,2,1 and the mirrored case asserts
+  0,1,2, so removing the flip fails the first, always-flipping fails the second,
+  inverting the condition fails both. Tangent handedness (w) flips between the two
+  cases too, so mirrored-UV correctness is pinned as well.
+- Tangent generation for the no-TANGENT case (all Meshy output): textbook
+  accumulate/orthogonalise, correct handedness sign, degenerate-UV fallback,
+  finite-result guard.
+- Memory safety on untrusted input: explicit GltfImportLimits, CheckedAdd overflow
+  guards, every index validated against vertexCount before use, sparse rejected.
+- Empirical fuzz (I ran TheDawningAssetInspector): the real corridor GLB reports
+  15562 verts / 57579 indices correctly, and four corrupted copies - half
+  truncation, bad magic, oversized JSON chunk length, 0xFFFFFFFF BIN length - are
+  ALL rejected cleanly with a parse error. No crash, hang, or OOB read.
+- doubleSided carried through (not dropped); 16/32-bit indices both widened to
+  uint32 and tested. This is a CPU-only model importer; the R16/R32 GPU index
+  format choice is a downstream renderer concern, not this stage's.
+
+Verdict: ship. Better tested than much of what is already in the tree.
+
+Note: origin/codex/asset-compiler now exists - Codex has moved to Stage 3 (asset
+compiler), which overlaps task 13 (packing Meshy PBR into engine ORM). Before I
+touch that, I will read that branch rather than repeat the importer collision.
