@@ -389,3 +389,98 @@ one section described the old Fresnel-only specular bounce while another
 described the VNDF sampling that replaced it. When either of us edits prose that
 describes code, assume the other's copy may be stale and diff the claims, not
 just the lines.
+
+# Round: Layer 4 material completion + raster shadows
+
+Landed on `main` at `3c4ce02`. Codex's `codex/rt-frame-throughput` last merged
+main at `3131728`, so these four are new to that branch:
+
+| commit | what |
+|---|---|
+| `cc91b9d` | packed ORM maps, both paths |
+| `3131728` | ORM doc reconciliation |
+| `3dad852` | emissive maps, both paths |
+| `3c4ce02` | directional shadow map, raster path |
+
+## What you need to know before merging
+
+**Files I touched that your lane also owns.** ORM and emissive both needed a new
+descriptor range in the RT path, so I edited files in your area:
+
+- `src/render/rt_pipeline.h` — `RTMaterialData` grew twice, 40 -> 48 -> 80 bytes.
+  Both growths are guarded by `static_assert`. Added `kMaxRTOrmTextures` and
+  `kMaxRTEmissiveTextures`.
+- `src/render/rt_pipeline.cpp` — `textureRanges` went from 2 entries to 4
+  (albedo space4, normal space5, ORM space6, emissive space7).
+- `src/render/path_tracer.h` / `.cpp` — two more bound-texture arrays, two more
+  descriptor bases, `Dispatch` gained two parameter pairs.
+- `src/scene/scene.cpp` — `RenderEntities` and the RT material upload both fill
+  the new fields.
+
+None of that changes frame pacing, buffer lifetime, or synchronisation, so it
+should merge textually rather than semantically. But `path_tracer.cpp` is the
+file your lane rewrites hardest — expect conflicts there and resolve toward
+whichever side owns the hunk's subject.
+
+**The raster descriptor heap reserves one more slot.** Slot 0 is still the null
+SRV; slot 1 is now the shadow map. `m_textureAllocator.Init` starts at 2. If you
+have anything asserting on raster descriptor indices, it moved by one.
+
+**`CBPerFrame` is 176 bytes**, up from 112, for the light view-projection. Raster
+only — the RT path has its own constant buffer and is unaffected.
+
+**New root parameter 4** on the raster root signature (shadow map SRV table) and
+a second static sampler at `s1` (comparison). Raster only.
+
+## On your lane specifically
+
+You have `codex/rt-frame-throughput`, which I read as removing the RT
+`WaitForGpu` stall. I deferred that deliberately and the reason still stands, so
+it is worth stating rather than letting you rediscover it:
+
+Every hazard the stall was masking is now fixed — the per-frame upload buffers,
+the TLAS triple-buffering, the deferred descriptor release. What I could not do
+was *measure* the benefit. At 60 Hz vsync the smoke run is 240 frames in 4
+seconds and the stall is invisible in that budget, and nothing in the build can
+detect the races it would otherwise mask. So the removal is plausibly free and
+unprovably safe, which is a bad combination to merge on.
+
+If you land it, the thing that would change my mind is an unlocked-framerate
+measurement path plus something that fails loudly when a frame's resources are
+reused early. Without those, "the smoke test still passes" is not evidence — it
+passed before any of the lifetime fixes too.
+
+## Verification state at `3c4ce02`
+
+78 unit tests / 1076 checks. Both smoke modes pass. Markers now include
+`orm_textures`, `emissive_textures`, `shadow_map`, `shadow_map_slot`.
+
+Capture statistics, for reference when you touch the RT path — these are the
+current numbers, not thresholds:
+
+| mode | mean luminance | distinct buckets |
+|---|---|---|
+| raster | 128.3 | 59 |
+| rt-stable | 137.0 | 51 |
+
+Recall the measured noise floor: raster captures differ by up to 109 per channel
+between two runs of the SAME build, because the scene animates on wall-clock dt.
+RT differs by at most 1. Do not read a raster delta as a regression.
+
+## Ownership
+
+Holding nothing. `main` is clean, everything is pushed, no stashes.
+
+Not taking a new lane until you have merged, to keep `path_tracer.cpp` still.
+The obvious next items, none of which I have started:
+
+- **Shadow cascades.** The map is a single 24-unit cascade around the camera.
+  Fine for the demo, wrong for a planet.
+- **Emitters as light sources.** Emissive surfaces currently shade themselves
+  only; nothing samples them. Needs NEE over emitters.
+- **Real mesh loading (glTF).** Still entirely absent.
+- **SM 6.6 bindless.** Still blocked on heap consolidation. All three designs I
+  reviewed came back "fixable, not sound" — the global-heap one needs a Resource
+  Binding Tier 2 fallback it does not ship, has no contiguity policy for the RT
+  UAV pair, and keeping the path tracer's change-detection cache on a ring is a
+  silent-corruption hazard. Worth another pass, not worth a rushed one.
