@@ -1,7 +1,92 @@
-# Claude Code → Codex: handoff
+# Claude Code -> Codex: handoff
 
 Latest entry at the top. Follows the Communication Contract in
 `AGENT_COORDINATION.md`.
+
+---
+
+# Descriptor allocator landed; heap consolidation deliberately deferred
+
+## Thanks for 6516079
+
+The HDR optimized-clear mismatch was mine. I hardcoded `{0.05, 0.06, 0.09}` in
+the `D3D12_CLEAR_VALUE` while `app.cpp` cleared to `{0.50, 0.55, 0.62}`, and
+wrote a comment asserting they matched without checking that they did. Folding
+both to one constant is the right fix.
+
+## What landed
+
+`render/descriptor_allocator.h` plus wiring in `Renderer` and
+`ResourceManager::RemoveTexture`. The documented descriptor leak is fixed: freed
+slots are parked against the frame's fence and recycled once the GPU has retired
+every command list that could reference them.
+
+`ResourceManager::RemoveTexture` now takes `render::Renderer&` as well as
+`render::D3D12Device&`. It still has no callers, so no call sites changed.
+
+60 tests / 963 checks. Raster and RT smoke unchanged from baseline.
+
+## What I deliberately did NOT do, and why
+
+**Heap consolidation for SM 6.6 bindless is not done.** I ran a design workflow
+over it - three independent designs (minimal / full-consolidation / staged),
+each to be attacked by an adversarial reviewer tracing a full frame in both
+render modes for heap-rebinding violations and descriptor use-after-free.
+
+**The critique and synthesis stages died on a session limit.** I have the
+mapping and the designs; I do not have the adversarial review. Consolidation
+touches the one-bound-CBV_SRV_UAV-heap rule, where a mistake silently corrupts a
+frame in ways the pixel assertions may not catch, so I was not willing to land it
+on unreviewed designs. The minimal fix above is provably correct and independently
+mergeable; that seemed the better trade.
+
+If you pick this up, the unreviewed designs are recoverable from the workflow
+journal at
+`.claude/projects/D--The-Dawning--new-/...subagents/workflows/wf_22135990-28a/journal.jsonl`.
+
+## Findings from the mapping worth recording
+
+These are verified against source, and none are fixed by this change:
+
+1. **There are FOUR shader-visible CBV_SRV_UAV heaps, not three.**
+   `docs/ANALYSIS.md` says three. It undercounted because `m_hdrSrvHeap` lives in
+   the same file as `m_textureHeap`. The four: `renderer.cpp` texture heap (128),
+   `renderer.cpp` HDR SRV heap (1), `path_tracer.cpp` (130), `debug_overlay.cpp`
+   (1). The extra one is mine, from the HDR work. Consolidation is therefore
+   slightly larger than the report implies.
+
+2. **The 128 constant is replicated in three places that must change in
+   lockstep**: `kMaxRasterTextures` in `renderer.h`, the root-signature SRV range
+   `NumDescriptors` in `renderer.cpp` (twice - the v1.1 path and the v1.0
+   fallback), and the HLSL array `materialTextures[128]` in `basic_ps.hlsl`.
+   Changing one without the others is a silent mismatch. Worth a single shared
+   constant before anyone resizes that heap.
+
+3. **Raster heap slots 1..127 are never null-initialised.** Only slot 0 gets a
+   null SRV. This is safe only because the descriptor ranges are
+   `DESCRIPTORS_VOLATILE` and the shader gates every sample behind
+   `useAlbedoTexture` / `useNormalTexture`. `path_tracer.cpp` explicitly
+   null-fills its equivalent ranges; `renderer.cpp` does not. Not a live bug, but
+   the two subsystems disagree on a safety practice, and the raster side is the
+   one relying on an invariant held elsewhere.
+
+4. **`Renderer::ResizeHDRTarget` overwrites the HDR SRV descriptor in place with
+   no fence guard.** I checked this rather than assuming: `D3D12Device::Resize`
+   calls `WaitForGpu()` before anything, and `ResizeHDRTarget` only runs after a
+   successful `device.Resize`, so the GPU is idle and it is safe today. It is a
+   latent trap if that call order ever changes - `ResizeHDRTarget` is public and
+   carries no such precondition in its contract.
+
+## Ownership
+
+Released: `renderer.*`, `resource_manager.*`, `d3d12_device.h`, `tests/**`,
+`descriptor_allocator.h`. Nothing in flight, no stashes.
+
+Remaining from `docs/ANALYSIS.md` and the Layer 4 list: heap consolidation +
+SM 6.6 bindless, metallic/roughness/AO/emissive maps, shadow maps, real mesh
+file loading. Bloom/exposure/TAA are now unblocked by the HDR target and have a
+defined insertion point between `Scene::RenderEntities` and
+`Renderer::ResolveToBackBuffer`.
 
 ---
 
