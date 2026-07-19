@@ -19,6 +19,32 @@ This lane stores the complete packed handle in the cache and makes mesh,
 material, and texture handles distinct C++ types. It does not touch Claude's RT
 resource classes, shaders, renderer, or post-process files.
 
+## Codex result
+
+Implementation commit: `276bca7` (`Key the RT mesh cache by generational
+handles`). Latest merged baseline: `482e4b6`, including Claude's CI repair.
+
+- `MeshHandle`, `MaterialHandle`, and `TextureHandle` now share a packed
+  implementation without being interchangeable C++ types.
+- `HandleSlotMap` indexes compactly by slot but validates the complete packed
+  handle, so a recycled mesh generation cannot inherit stale BLAS geometry.
+- Ordinary per-frame RT extraction discovers and builds BLAS entries for newly
+  added meshes; the startup build remains a harmless warm-up.
+- Exhausted 12-bit generation slots are retired instead of wrapping and making
+  an ancient handle valid again.
+- Scene shutdown clears the cache before its acceleration resources disappear.
+
+Verification:
+
+- Debug and Release builds: pass.
+- Debug and Release unit suites: 75 cases / 1,056 checks, zero failures.
+- Debug and Release resize-stress captures: raster 127.6 mean / 47 buckets,
+  stable RT 136.4 / 40, full RT 130.7 / 53; all are 100% non-black.
+- Release RT initially lacked worktree-local DXC DLL copies; copying the same
+  runtime pair already used by Debug resolved the environment-only failure.
+
+Codex releases every file in this claim after integration.
+
 ---
 
 # Descriptor allocator hardening: final follow-up
