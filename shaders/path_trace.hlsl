@@ -123,6 +123,23 @@ float3 SafeNormalize(float3 value, float3 fallback)
     return lenSq > 1e-8f ? value * rsqrt(lenSq) : fallback;
 }
 
+float3 SpawnRayOrigin(float3 hitPosition, float3 surfaceNormal, float3 outgoingDirection)
+{
+    // Camera-relative rendering keeps this scale tied to camera distance instead
+    // of absolute world position. The proportional term is about two fp32 ULPs;
+    // the floor covers local intersection and normal-reconstruction error near
+    // the origin without the old scene-wide 1 mm bias. Offset toward the side
+    // the spawned ray actually leaves so this also remains valid for future
+    // transmission rays.
+    const float kMinimumOffset = 1.0e-4f;
+    const float kPositionErrorScale = 4.76837158203125e-7f; // 2^-21
+    float positionMagnitude = max(abs(hitPosition.x),
+                                  max(abs(hitPosition.y), abs(hitPosition.z)));
+    float offsetDistance = max(kMinimumOffset, positionMagnitude * kPositionErrorScale);
+    float side = dot(surfaceNormal, outgoingDirection) >= 0.0f ? 1.0f : -1.0f;
+    return hitPosition + surfaceNormal * (side * offsetDistance);
+}
+
 // PCG hash for random number generation
 uint PCGHash(uint input)
 {
@@ -326,7 +343,7 @@ void RayGen()
         RayDesc ray;
         ray.Origin    = currentOrigin;
         ray.Direction = currentDir;
-        ray.TMin      = 0.001f;
+        ray.TMin      = 0.0f;
         ray.TMax      = 10000.0f;
 
         RayPayload payload;
@@ -368,9 +385,9 @@ void RayGen()
         {
             // Trace shadow ray
             RayDesc shadowRay;
-            shadowRay.Origin    = hitPos + N * 0.001f;
+            shadowRay.Origin    = SpawnRayOrigin(hitPos, N, L);
             shadowRay.Direction = L;
-            shadowRay.TMin      = 0.001f;
+            shadowRay.TMin      = 0.0f;
             shadowRay.TMax      = 10000.0f;
 
             ShadowPayload shadowPayload;
@@ -503,7 +520,7 @@ void RayGen()
         }
 
         // Set up next bounce
-        currentOrigin = hitPos + N * 0.001f;
+        currentOrigin = SpawnRayOrigin(hitPos, N, newDir);
         currentDir    = newDir;
     }
 
