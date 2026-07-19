@@ -70,15 +70,31 @@ waits for the engine to enter path tracing, and exits cleanly. It fails if:
 - the log contains an error line. `tools/smoke_test.ps1:59` matches
   `\[ERR\s*\]`, which is the prefix `core::Log` actually writes
   (`log.cpp:82` emits `[ERR ]`).
-- an expected render milestone string is missing from the log.
+- an expected `[SMOKE] key=value` marker is missing or has the wrong value.
+  Assertions match these structured markers rather than human-readable log
+  prose, so rewording a log line cannot silently disarm a check.
+- the captured frame fails its pixel assertions (see below).
 
-The milestone checks are matched against human-readable log prose, so editing
-those log strings will break the test. The test is a liveness check only — it
-never inspects rendered pixels, so it cannot catch an incorrect image.
+### Pixel assertions
 
-Use `-RasterOnly` to test the raster path or `-FullQuality` to exercise the
-higher path-tracing quality mode. Only the Debug build is tested; the paths in
-`tools/smoke_test.ps1` are hardcoded to `build\Debug\`.
+`--smoke-capture` reads the final frame's back buffer back to the CPU and writes
+`build\<Config>\smoke_capture.ppm` (binary P6). The harness then checks the image
+is the expected size, is not essentially black, is not blown out, has a
+reasonable fraction of non-black pixels, and contains more than a handful of
+distinct colours.
+
+This is what separates the harness from a liveness check. Everything else it
+verifies proves the engine did not crash; only this proves it drew something. A
+black frame, inverted culling, a shader emitting nothing, or NaN-poisoned output
+would pass every other assertion.
+
+The thresholds are deliberately loose — they catch catastrophic failure, not
+appearance regressions, because pinning down appearance would flake on any
+legitimate lighting change. A reference-image comparison is the right tool for
+that and is still future work. Pass `-NoCapture` to skip this section.
+
+Use `-RasterOnly` for the raster path, `-FullQuality` for the higher
+path-tracing quality mode, and `-Config Release` to test a Release build.
 
 ## Path Tracing Runtime
 

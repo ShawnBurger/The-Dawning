@@ -84,6 +84,25 @@ public:
                             D3D12_RESOURCE_STATES before,
                             D3D12_RESOURCE_STATES after);
 
+    // -------------------------------------------------------------------------
+    // Back-buffer capture (smoke test "eyes")
+    // -------------------------------------------------------------------------
+    // Two-phase because the copy has to be recorded inside the frame that drew
+    // the image (a FLIP_DISCARD back buffer is undefined after Present) while the
+    // Map can only happen once that frame's GPU work has retired.
+    //
+    //   1. RecordBackBufferReadback() — call after the frame's render commands,
+    //      with the back buffer in PRESENT state and the command list still open.
+    //      Leaves the back buffer in PRESENT so ExecuteAndPresent() stays legal.
+    //   2. ExecuteAndPresent()
+    //   3. WriteBackBufferCapture(path) — waits for the GPU, maps the readback
+    //      buffer and writes a binary P6 PPM.
+    //
+    // Both return false and log via core::Log::Errorf on any failure.
+    bool RecordBackBufferReadback();
+    bool WriteBackBufferCapture(const char* path);
+    bool HasPendingCapture() const { return m_capturePending; }
+
     // Accessors
     ID3D12Device*              Device()   const { return m_device.Get(); }
     ID3D12GraphicsCommandList* CmdList()  const { return m_cmdList.Get(); }
@@ -142,6 +161,14 @@ private:
 
     // Depth buffer
     ComPtr<ID3D12Resource>   m_depthBuffer;
+
+    // Back-buffer capture (READBACK heap; only allocated if a capture is requested)
+    ComPtr<ID3D12Resource>   m_captureBuffer;
+    uint64_t                 m_captureBufferSize = 0;
+    uint64_t                 m_captureRowPitch = 0;   // 256-aligned, != width * 4
+    uint32_t                 m_captureWidth = 0;
+    uint32_t                 m_captureHeight = 0;
+    bool                     m_capturePending = false;
 
     // Fence
     ComPtr<ID3D12Fence>      m_fence;

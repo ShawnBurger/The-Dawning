@@ -6,6 +6,8 @@
 #include "../core/log.h"
 #include <d3d12sdklayers.h>
 #include <cstdint>
+#include <cstdio>
+#include <vector>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -540,6 +542,186 @@ void D3D12Device::TransitionResource(ID3D12Resource* resource,
     barrier.Transition.StateAfter  = after;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_cmdList->ResourceBarrier(1, &barrier);
+}
+
+// =============================================================================
+// Back-Buffer Capture
+// =============================================================================
+// Phase 1: record the back buffer → READBACK copy into the frame's command list.
+// The destination row pitch is D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256) aligned
+// and is therefore wider than width * 4 for most resolutions; the writer below
+// walks rows by that pitch rather than assuming a packed image.
+bool D3D12Device::RecordBackBufferReadback()
+{
+    ID3D12Resource* backBuffer = CurrentBackBuffer();
+    if (!backBuffer)
+    {
+        core::Log::Error("Back-buffer capture: no current back buffer");
+        return false;
+    }
+    if (!m_device || !m_cmdList)
+    {
+        core::Log::Error("Back-buffer capture: device or command list unavailable");
+        return false;
+    }
+
+    const D3D12_RESOURCE_DESC bbDesc = backBuffer->GetDesc();
+    if (bbDesc.Format != DXGI_FORMAT_R8G8B8A8_UNORM)
+    {
+        core::Log::Errorf("Back-buffer capture: unexpected format %d (expected R8G8B8A8_UNORM)",
+                          static_cast<int>(bbDesc.Format));
+        return false;
+    }
+
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    UINT   numRows      = 0;
+    UINT64 rowSizeBytes = 0;
+    UINT64 totalBytes   = 0;
+    m_device->GetCopyableFootprints(&bbDesc, 0, 1, 0, &footprint, &numRows, &rowSizeBytes, &totalBytes);
+
+    if (totalBytes == 0 || numRows == 0 || footprint.Footprint.RowPitch == 0)
+    {
+        core::Log::Error("Back-buffer capture: GetCopyableFootprints returned an empty footprint");
+        return false;
+    }
+
+    // Allocate (or grow) the readback buffer.
+    if (!m_captureBuffer || m_captureBufferSize < totalBytes)
+    {
+        m_captureBuffer.Reset();
+        m_captureBufferSize = 0;
+
+        D3D12_HEAP_PROPERTIES heapProps = {};
+        heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+
+        D3D12_RESOURCE_DESC bufDesc = {};
+        bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufDesc.Width            = totalBytes;
+        bufDesc.Height           = 1;
+        bufDesc.DepthOrArraySize = 1;
+        bufDesc.MipLevels        = 1;
+        bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
+        bufDesc.SampleDesc       = { 1, 0 };
+        bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        bufDesc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+        HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE,
+            &bufDesc, D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr, IID_PPV_ARGS(&m_captureBuffer));
+        CHECK_HR(hr, "CreateCommittedResource (back-buffer capture readback)");
+        m_captureBuffer->SetName(L"BackBufferCaptureReadback");
+        m_captureBufferSize = totalBytes;
+    }
+
+    // PRESENT → COPY_SOURCE, copy, COPY_SOURCE → PRESENT. The caller is about to
+    // Present, so the back buffer must be handed back in the state it arrived in.
+    TransitionResource(backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+    D3D12_TEXTURE_COPY_LOCATION dst = {};
+    dst.pResource       = m_captureBuffer.Get();
+    dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = footprint;
+
+    D3D12_TEXTURE_COPY_LOCATION src = {};
+    src.pResource        = backBuffer;
+    src.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = 0;
+
+    m_cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+    TransitionResource(backBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
+
+    m_captureRowPitch = footprint.Footprint.RowPitch;
+    m_captureWidth    = footprint.Footprint.Width;
+    m_captureHeight   = footprint.Footprint.Height;
+    m_capturePending  = true;
+    return true;
+}
+
+// Phase 2: drain the GPU, map the readback buffer, write a binary P6 PPM.
+// P6 is deliberate: three bytes per pixel, an ASCII header, no dependencies, and
+// every image tool plus a dozen lines of PowerShell can read it.
+bool D3D12Device::WriteBackBufferCapture(const char* path)
+{
+    if (!path || !*path)
+    {
+        core::Log::Error("Back-buffer capture: no output path given");
+        return false;
+    }
+    if (!m_capturePending || !m_captureBuffer)
+    {
+        core::Log::Error("Back-buffer capture: no readback was recorded");
+        return false;
+    }
+    if (m_deviceLost)
+    {
+        core::Log::Error("Back-buffer capture: device lost before readback completed");
+        return false;
+    }
+
+    // The copy was recorded in the frame that has since been submitted; make sure
+    // it has actually retired before touching the mapped bytes.
+    WaitForGpu();
+
+    const uint64_t readBytes = m_captureRowPitch * static_cast<uint64_t>(m_captureHeight);
+
+    D3D12_RANGE readRange = { 0, static_cast<SIZE_T>(readBytes) };
+    void* mapped = nullptr;
+    HRESULT hr = m_captureBuffer->Map(0, &readRange, &mapped);
+    CHECK_HR(hr, "Map (back-buffer capture readback)");
+    if (!mapped)
+    {
+        core::Log::Error("Back-buffer capture: Map returned a null pointer");
+        return false;
+    }
+
+    FILE* file = nullptr;
+    const errno_t openErr = fopen_s(&file, path, "wb");
+    if (openErr != 0 || !file)
+    {
+        const D3D12_RANGE noWrite = { 0, 0 };
+        m_captureBuffer->Unmap(0, &noWrite);
+        core::Log::Errorf("Back-buffer capture: failed to open '%s' for writing (errno %d)",
+                          path, static_cast<int>(openErr));
+        return false;
+    }
+
+    bool ok = fprintf(file, "P6\n%u %u\n255\n", m_captureWidth, m_captureHeight) > 0;
+
+    // Drop alpha row by row. Source rows are m_captureRowPitch apart, not width*4.
+    const auto* base = static_cast<const uint8_t*>(mapped);
+    std::vector<uint8_t> rgbRow(static_cast<size_t>(m_captureWidth) * 3);
+    for (uint32_t y = 0; ok && y < m_captureHeight; y++)
+    {
+        const uint8_t* srcRow = base + static_cast<size_t>(y * m_captureRowPitch);
+        for (uint32_t x = 0; x < m_captureWidth; x++)
+        {
+            rgbRow[x * 3 + 0] = srcRow[x * 4 + 0];
+            rgbRow[x * 3 + 1] = srcRow[x * 4 + 1];
+            rgbRow[x * 3 + 2] = srcRow[x * 4 + 2];
+        }
+        ok = fwrite(rgbRow.data(), 1, rgbRow.size(), file) == rgbRow.size();
+    }
+
+    if (ferror(file)) ok = false;
+    if (fclose(file) != 0) ok = false;
+
+    const D3D12_RANGE noWrite = { 0, 0 };
+    m_captureBuffer->Unmap(0, &noWrite);
+
+    if (!ok)
+    {
+        core::Log::Errorf("Back-buffer capture: failed to write '%s'", path);
+        return false;
+    }
+
+    m_capturePending = false;
+    core::Log::Infof("Back buffer captured: %s (%ux%u, row pitch %llu)",
+                     path, m_captureWidth, m_captureHeight,
+                     static_cast<unsigned long long>(m_captureRowPitch));
+    core::Log::Infof("[SMOKE] capture=ok file=%s w=%u h=%u", path, m_captureWidth, m_captureHeight);
+    return true;
 }
 
 // =============================================================================
