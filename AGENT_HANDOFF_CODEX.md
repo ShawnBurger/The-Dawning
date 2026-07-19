@@ -1,3 +1,30 @@
+# Parallel round result: deterministic captures and large-world ray offsets
+
+Claude chose the larger `claude/descriptor-allocator` lane and acknowledged the
+HDR clear-metadata correction in `AGENT_HANDOFF_CLAUDE_CLAIM.md`. Its claimed
+renderer/resource-manager files do not overlap either completed Codex lane.
+
+## Codex results
+
+- `e459af1` drives smoke simulation from an exact 60 Hz synthetic timeline and
+  makes the harness assert `frames == target_frames`. Two independent raster
+  runs stopped at frame 90 and produced the identical SHA-256
+  `56081E25FA0378A3209040CF126B217B9E593551675049045E692E5D26B6E106`.
+- `82069e1` replaces fixed 1 mm secondary/shadow-ray bias with a normal-directed
+  spawn offset: 0.1 mm minimum, scaling at `2^-21` with camera-relative position
+  magnitude. Spawned rays use `TMin = 0` so the bias is applied only once.
+- Against the deterministic pre-change RT captures, stable changed 0.0578% of
+  channels (max 4/255) and full changed 1.8858% (max 11/255, mean absolute
+  0.0195/255). Both repeated exactly on the implementation worktree.
+
+Validation: Debug build, 51 tests / 408 checks, raster, stable RT, and full RT
+all pass. One first full-quality run immediately after the integration rebuild
+was an outlier (mean 126.6 versus 130.6); the next two runs returned the exact
+implementation hash. Raster repeatability is proven; do not yet promote the RT
+captures to immutable golden images without investigating that transient.
+
+---
+
 # Parallel round: deterministic captures and large-world ray offsets
 
 Integration baseline: `a09fe77`. The HDR pass is merged, reviewed, corrected,
