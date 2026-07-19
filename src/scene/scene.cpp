@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "scene.h"
+#include "../ecs/systems.h"
 #include "../core/log.h"
 #include <cstdint>
 
@@ -80,21 +81,30 @@ void Scene::DestroyEntity(ecs::Entity entity)
 // =============================================================================
 // Phase 1: Update Systems
 // =============================================================================
-void Scene::UpdateSystems(float dt)
+void Scene::UpdateSystems(double dt)
 {
+    SystemVelocity(dt);
     SystemRotation(dt);
-    // Future systems: velocity integration, physics, AI, etc.
+    // Future systems: physics, AI, etc.
+}
+
+// =============================================================================
+// System: Velocity - integrates entities that have Transform + Velocity
+// =============================================================================
+void Scene::SystemVelocity(double dt)
+{
+    ecs::systems::IntegrateVelocities(m_registry, dt);
 }
 
 // =============================================================================
 // System: Rotation — spins entities that have Transform + RotationSpeed
 // =============================================================================
-void Scene::SystemRotation(float dt)
+void Scene::SystemRotation(double dt)
 {
     m_registry.Each<ecs::Transform, ecs::RotationSpeed>(
         [dt](uint32_t /*entityIdx*/, ecs::Transform& transform, ecs::RotationSpeed& spin)
         {
-            float angle = spin.radiansPerSecond * dt;
+            const float angle = spin.radiansPerSecond * static_cast<float>(dt);
             core::Quatf delta = core::Quatf::FromAxisAngle(spin.axis, angle);
             transform.rotation = (transform.rotation * delta).Normalized();
         }

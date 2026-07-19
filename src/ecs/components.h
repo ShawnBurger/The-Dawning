@@ -38,7 +38,7 @@ struct Transform
 struct Velocity
 {
     core::Vec3f linear  = { 0.0f, 0.0f, 0.0f };
-    core::Vec3f angular = { 0.0f, 0.0f, 0.0f };  // Euler rates (rad/s)
+    core::Vec3f angular = { 0.0f, 0.0f, 0.0f };  // Body-local axis * angular rate (rad/s)
 };
 
 // =============================================================================

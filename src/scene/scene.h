@@ -50,7 +50,7 @@ public:
     // --- Systems ---
 
     // Phase 1: Update all gameplay systems
-    void UpdateSystems(float dt);
+    void UpdateSystems(double dt);
 
     // Phase 2a: Render all visible entities with rasterization
     void RenderEntities(render::D3D12Device& device,
@@ -86,7 +86,8 @@ public:
 
 private:
     // System implementations
-    void SystemRotation(float dt);
+    void SystemVelocity(double dt);
+    void SystemRotation(double dt);
 
     ecs::Registry        m_registry;
     ResourceManager      m_resources;

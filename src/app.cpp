@@ -637,16 +637,26 @@ int App::RunMainLoop()
             continue;
         if (m_window.IsMinimized())
         {
+            // Simulation is suspended with rendering. Discard elapsed fixed
+            // steps so restoring the window cannot trigger an unbounded catch-up.
+            while (m_timer.ConsumeFixedStep()) {}
             Sleep(10);
             continue;
         }
 
-        while (m_timer.ConsumeFixedStep())
+        if (m_options.smoke)
         {
-            // Future fixed-step simulation.
+            // The smoke timeline is frame-driven so capture hashes do not depend
+            // on how quickly this machine happens to render the test.
+            while (m_timer.ConsumeFixedStep()) {}
+            m_scene.UpdateSystems(kSmokeFixedDeltaSeconds);
+        }
+        else
+        {
+            while (m_timer.ConsumeFixedStep())
+                m_scene.UpdateSystems(m_timer.GetFixedDt());
         }
 
-        m_scene.UpdateSystems(static_cast<float>(timeStep.dt));
         if (!RenderFrame(timeStep))
         {
             m_exitCode = m_device.IsDeviceLost() ? 3 : 5;

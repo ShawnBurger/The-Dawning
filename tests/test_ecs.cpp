@@ -12,7 +12,9 @@
 #include "ecs/component_pool.h"
 #include "ecs/components.h"
 #include "ecs/registry.h"
+#include "ecs/systems.h"
 
+#include <limits>
 #include <vector>
 
 namespace
@@ -512,6 +514,102 @@ TEST_CASE(Registry_EachVisitsOnlyEntitiesWithBothComponents)
     reg.Each<ecs::Transform, ecs::Velocity>(
         [&](uint32_t, ecs::Transform&, ecs::Velocity&) { neverVisited++; });
     CHECK_EQ(neverVisited, 0);
+}
+
+// =============================================================================
+// Velocity integration
+// =============================================================================
+
+TEST_CASE(VelocitySystem_PreservesLinearMotionAtPlanetaryCoordinates)
+{
+    ecs::Transform transform;
+    transform.position = { 1.0e10, -2.0e10, 3.0e10 };
+    const core::Vec3d start = transform.position;
+
+    ecs::Velocity velocity;
+    velocity.linear = { 15.0f, -6.0f, 0.25f };
+
+    ecs::systems::IntegrateVelocity(transform, velocity, 0.5);
+
+    CHECK_APPROX_EPS(transform.position.x - start.x, 7.5, 1e-6);
+    CHECK_APPROX_EPS(transform.position.y - start.y, -3.0, 1e-6);
+    CHECK_APPROX_EPS(transform.position.z - start.z, 0.125, 1e-6);
+}
+
+TEST_CASE(VelocitySystem_IntegratesAxisScaledAngularVelocity)
+{
+    ecs::Transform transform;
+    ecs::Velocity velocity;
+    velocity.angular = { 0.0f, core::PI, 0.0f };
+
+    ecs::systems::IntegrateVelocity(transform, velocity, 0.5);
+
+    const core::Vec3f rotated = transform.rotation.Rotate({ 1.0f, 0.0f, 0.0f });
+    CHECK_APPROX(rotated.x, 0.0f);
+    CHECK_APPROX(rotated.y, 0.0f);
+    CHECK_APPROX(rotated.z, -1.0f);
+    CHECK_APPROX(transform.rotation.LengthSq(), 1.0f);
+}
+
+TEST_CASE(VelocitySystem_AngularVelocityUsesBodyLocalAxes)
+{
+    ecs::Transform transform;
+    transform.rotation = core::Quatf::FromAxisAngle(
+        { 0.0f, 1.0f, 0.0f }, core::HALF_PI);
+
+    ecs::Velocity velocity;
+    velocity.angular = { core::PI, 0.0f, 0.0f };
+
+    ecs::systems::IntegrateVelocity(transform, velocity, 0.5);
+
+    // Local +X rotation applies before the existing world orientation. Under
+    // this engine's convention, local +Y therefore ends at world +X. Reversing
+    // the quaternion product would incorrectly leave it on world +Z.
+    const core::Vec3f rotated = transform.rotation.Rotate({ 0.0f, 1.0f, 0.0f });
+    CHECK_APPROX(rotated.x, 1.0f);
+    CHECK_APPROX(rotated.y, 0.0f);
+    CHECK_APPROX(rotated.z, 0.0f);
+}
+
+TEST_CASE(VelocitySystem_RegistryVisitsOnlyCompleteMotionPairs)
+{
+    ecs::Registry registry;
+    const ecs::Entity moving = registry.Create();
+    const ecs::Entity transformOnly = registry.Create();
+    const ecs::Entity velocityOnly = registry.Create();
+
+    registry.Assign<ecs::Transform>(moving);
+    registry.Assign<ecs::Velocity>(moving, ecs::Velocity{ { 2.0f, 0.0f, 0.0f }, {} });
+    registry.Assign<ecs::Transform>(transformOnly);
+    registry.Assign<ecs::Velocity>(velocityOnly, ecs::Velocity{ { 20.0f, 0.0f, 0.0f }, {} });
+
+    ecs::systems::IntegrateVelocities(registry, 0.25);
+
+    CHECK_APPROX(registry.Get<ecs::Transform>(moving).position.x, 0.5);
+    CHECK_APPROX(registry.Get<ecs::Transform>(transformOnly).position.x, 0.0);
+}
+
+TEST_CASE(VelocitySystem_RejectsNonPositiveAndNonFiniteTimesteps)
+{
+    ecs::Transform transform;
+    transform.position = { 4.0, 5.0, 6.0 };
+    transform.rotation = core::Quatf::FromAxisAngle({ 1.0f, 0.0f, 0.0f }, 0.25f);
+
+    ecs::Velocity velocity;
+    velocity.linear = { 10.0f, 20.0f, 30.0f };
+    velocity.angular = { 0.0f, 1.0f, 0.0f };
+
+    const ecs::Transform original = transform;
+    ecs::systems::IntegrateVelocity(transform, velocity, 0.0);
+    ecs::systems::IntegrateVelocity(transform, velocity, -1.0);
+    ecs::systems::IntegrateVelocity(
+        transform, velocity, std::numeric_limits<double>::infinity());
+
+    CHECK(transform.position == original.position);
+    CHECK_APPROX(transform.rotation.x, original.rotation.x);
+    CHECK_APPROX(transform.rotation.y, original.rotation.y);
+    CHECK_APPROX(transform.rotation.z, original.rotation.z);
+    CHECK_APPROX(transform.rotation.w, original.rotation.w);
 }
 
 // -----------------------------------------------------------------------------
