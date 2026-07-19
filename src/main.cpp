@@ -626,10 +626,27 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
         // --- Resize ---
         if (window.WasResized())
         {
-            device.Resize(window.GetWidth(), window.GetHeight());
+            if (!device.Resize(window.GetWidth(), window.GetHeight()))
+            {
+                // Resize() releases the back buffers and depth buffer before it can know
+                // whether it will succeed, so on failure CurrentBackBuffer() is null.
+                // Rendering this frame would build a barrier with pResource == nullptr.
+                // Leave the resize flag SET so the next iteration retries instead of
+                // wedging permanently, and skip the frame.
+                core::Log::Error("Swap chain resize failed; skipping frame and retrying");
+                Sleep(10);
+                continue;
+            }
+
             if (rtAvailable)
             {
-                gameScene.ResizePathTracer(device, device.Width(), device.Height());
+                if (!gameScene.ResizePathTracer(device, device.Width(), device.Height()))
+                {
+                    // Raster still works; drop out of path tracing rather than
+                    // dispatching against textures that no longer exist.
+                    core::Log::Error("Path tracer resize failed; falling back to raster");
+                    usePathTracing = false;
+                }
             }
             window.ClearResizeFlag();
         }

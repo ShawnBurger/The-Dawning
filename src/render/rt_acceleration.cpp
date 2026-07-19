@@ -221,9 +221,26 @@ bool RTAcceleration::BuildTLAS(
         m_tlasInstanceBuffer->SetName(L"TLAS_InstanceBuffer");
 
         D3D12_RANGE readRange = { 0, 0 };
-        m_tlasInstanceBuffer->Map(0, &readRange,
-                                   reinterpret_cast<void**>(&m_tlasInstanceMapped));
+        hr = m_tlasInstanceBuffer->Map(0, &readRange,
+                                       reinterpret_cast<void**>(&m_tlasInstanceMapped));
+        if (FAILED(hr) || !m_tlasInstanceMapped)
+        {
+            // Do NOT commit m_tlasMaxInstances on failure. Doing so would make every
+            // later call skip this grow branch and write straight through the null
+            // pointer below, permanently.
+            core::Log::Errorf("BuildTLAS: failed to map instance buffer: 0x%08X", hr);
+            m_tlasInstanceMapped = nullptr;
+            m_tlasInstanceBuffer.Reset();
+            m_tlasMaxInstances = 0;
+            return false;
+        }
         m_tlasMaxInstances = newMax;
+    }
+
+    if (!m_tlasInstanceMapped)
+    {
+        core::Log::Error("BuildTLAS: instance buffer is not mapped");
+        return false;
     }
 
     // Fill instance descriptors

@@ -53,7 +53,10 @@ static ComPtr<ID3D12Resource> CreateBuffer(
 // =============================================================================
 // Upload data from CPU to GPU via staging buffer
 // =============================================================================
-static void UploadBufferData(
+// Returns false if the staging buffer could not be mapped. On failure NOTHING is
+// recorded: no copy, no transition. The destination is left uninitialised and still
+// in COPY_DEST, so the caller must not build views over it.
+static bool UploadBufferData(
     ID3D12GraphicsCommandList* cmdList,
     ID3D12Resource* dest,
     ID3D12Resource* staging,
@@ -68,7 +71,7 @@ static void UploadBufferData(
     if (FAILED(hr) || !mapped)
     {
         core::Log::Errorf("UploadBufferData: Map() failed (0x%08X)", hr);
-        return;
+        return false;
     }
     memcpy(mapped, data, static_cast<size_t>(dataSize));
     staging->Unmap(0, nullptr);
@@ -84,6 +87,7 @@ static void UploadBufferData(
     barrier.Transition.StateAfter  = afterState;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     cmdList->ResourceBarrier(1, &barrier);
+    return true;
 }
 
 static core::Vec3f SafeNormal(const core::Vec3f& normal, const core::Vec3f& fallback)
@@ -191,10 +195,14 @@ Mesh CreateMesh(
     mesh.indexBuffer = CreateBuffer(device, ibSize,
         D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, L"MeshIndexBuffer");
 
+    // Every failure below returns a DEFAULT-constructed Mesh. Returning the partially
+    // built one would report IsValid() == true (vertexBuffer && indexBuffer &&
+    // indexCount > 0 are all already satisfied) while carrying zeroed buffer views over
+    // uninitialised VRAM still in COPY_DEST — callers gate only on IsValid().
     if (!mesh.vertexBuffer || !mesh.indexBuffer)
     {
         core::Log::Error("Failed to create mesh GPU buffers");
-        return mesh;
+        return Mesh{};
     }
 
     // Create staging buffers on UPLOAD heap
@@ -206,16 +214,24 @@ Mesh CreateMesh(
     if (!outVertexUpload || !outIndexUpload)
     {
         core::Log::Error("Failed to create mesh staging upload buffers");
-        return mesh;
+        return Mesh{};
     }
 
     // Upload vertex data
-    UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
-                     vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
+                          vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER))
+    {
+        core::Log::Error("Failed to upload mesh vertex data");
+        return Mesh{};
+    }
 
     // Upload index data
-    UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
-                     indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
+                          indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER))
+    {
+        core::Log::Error("Failed to upload mesh index data");
+        return Mesh{};
+    }
 
     // Set up buffer views
     mesh.vbView.BufferLocation = mesh.vertexBuffer->GetGPUVirtualAddress();
@@ -258,10 +274,11 @@ Mesh CreateMesh32(
     mesh.indexBuffer = CreateBuffer(device, ibSize,
         D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, L"MeshIndexBuffer32");
 
+    // See CreateMesh: every failure returns an empty Mesh so IsValid() reports false.
     if (!mesh.vertexBuffer || !mesh.indexBuffer)
     {
         core::Log::Error("Failed to create mesh GPU buffers (32-bit)");
-        return mesh;
+        return Mesh{};
     }
 
     outVertexUpload = CreateBuffer(device, vbSize,
@@ -272,13 +289,21 @@ Mesh CreateMesh32(
     if (!outVertexUpload || !outIndexUpload)
     {
         core::Log::Error("Failed to create mesh staging upload buffers (32-bit)");
-        return mesh;
+        return Mesh{};
     }
 
-    UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
-                     vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-    UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
-                     indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
+                          vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER))
+    {
+        core::Log::Error("Failed to upload mesh vertex data (32-bit)");
+        return Mesh{};
+    }
+    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
+                          indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER))
+    {
+        core::Log::Error("Failed to upload mesh index data (32-bit)");
+        return Mesh{};
+    }
 
     mesh.vbView.BufferLocation = mesh.vertexBuffer->GetGPUVirtualAddress();
     mesh.vbView.SizeInBytes    = static_cast<UINT>(vbSize);

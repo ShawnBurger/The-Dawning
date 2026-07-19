@@ -162,10 +162,10 @@ bool Scene::InitPathTracer(render::D3D12Device& device)
     return true;
 }
 
-void Scene::ResizePathTracer(render::D3D12Device& device, uint32_t width, uint32_t height)
+bool Scene::ResizePathTracer(render::D3D12Device& device, uint32_t width, uint32_t height)
 {
-    if (m_rtReady)
-        m_pathTracer.Resize(device.Device5(), width, height);
+    if (!m_rtReady) return true;   // Nothing to resize; not a failure.
+    return m_pathTracer.Resize(device.Device5(), width, height);
 }
 
 // =============================================================================

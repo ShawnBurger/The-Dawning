@@ -293,9 +293,9 @@ uint32_t PathTracer::UpdateTextureDescriptors(
 // =============================================================================
 bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint32_t height)
 {
-    m_outputWidth  = width;
-    m_outputHeight = height;
-
+    // Dimensions are committed at the END, on the success path only. Assigning them
+    // here would make a failed create look like a completed one: Resize()'s early-out
+    // would then treat every retry at these dimensions as a no-op, permanently.
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
@@ -318,6 +318,10 @@ bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint
     if (FAILED(hr))
     {
         core::Log::Errorf("Failed to create RT output texture: 0x%08X", hr);
+        // Leave nothing half-built: Dispatch() guards on these being null.
+        m_outputTexture.Reset();
+        m_displayTexture.Reset();
+        m_outputWidth = m_outputHeight = 0;
         return false;
     }
     m_outputTexture->SetName(L"RT_HDRHistoryTexture");
@@ -331,6 +335,9 @@ bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint
     if (FAILED(hr))
     {
         core::Log::Errorf("Failed to create RT display texture: 0x%08X", hr);
+        m_outputTexture.Reset();
+        m_displayTexture.Reset();
+        m_outputWidth = m_outputHeight = 0;
         return false;
     }
     m_displayTexture->SetName(L"RT_DisplayTexture");
@@ -352,19 +359,35 @@ bool PathTracer::CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint
     device->CreateUnorderedAccessView(
         m_displayTexture.Get(), nullptr, &uavDesc, displayHandle);
 
+    // Both resources and both descriptors exist — only now is this size real.
+    m_outputWidth  = width;
+    m_outputHeight = height;
+
     core::Log::Infof("RT output textures created: %ux%u (HDR history + display)", width, height);
     return true;
 }
 
-void PathTracer::Resize(ID3D12Device5* device, uint32_t width, uint32_t height)
+bool PathTracer::Resize(ID3D12Device5* device, uint32_t width, uint32_t height)
 {
-    if (width == m_outputWidth && height == m_outputHeight) return;
+    if (width == m_outputWidth && height == m_outputHeight) return true;
+
     m_outputTexture.Reset();
     m_displayTexture.Reset();
-    CreateOutputTexture(device, width, height);
+
+    const bool ok = CreateOutputTexture(device, width, height);
+
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
     m_hasPrevQuality = false;
+
+    if (!ok)
+    {
+        // m_outputWidth/Height are now 0, so a later resize to any size retries
+        // rather than early-outing. Dispatch() skips work while the textures are null.
+        core::Log::Errorf("Path tracer resize to %ux%u failed; path tracing is disabled "
+                          "until a later resize succeeds", width, height);
+    }
+    return ok;
 }
 
 // =============================================================================
@@ -399,8 +422,14 @@ bool PathTracer::CreateConstantBuffer(ID3D12Device5* device)
 
         m_constantBuffer[i]->SetName(names[i]);
         D3D12_RANGE readRange = { 0, 0 };
-        m_constantBuffer[i]->Map(0, &readRange,
-                                  reinterpret_cast<void**>(&m_cbMapped[i]));
+        hr = m_constantBuffer[i]->Map(0, &readRange,
+                                      reinterpret_cast<void**>(&m_cbMapped[i]));
+        if (FAILED(hr) || !m_cbMapped[i])
+        {
+            core::Log::Errorf("Failed to map RT constant buffer %d: 0x%08X", i, hr);
+            m_cbMapped[i] = nullptr;
+            return false;
+        }
     }
 
     return true;
@@ -435,7 +464,15 @@ bool PathTracer::CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMateria
 
     m_materialBuffer->SetName(L"RT_MaterialBuffer");
     D3D12_RANGE readRange = { 0, 0 };
-    m_materialBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_materialMapped));
+    hr = m_materialBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_materialMapped));
+    if (FAILED(hr) || !m_materialMapped)
+    {
+        core::Log::Errorf("Failed to map RT material buffer: 0x%08X", hr);
+        m_materialMapped = nullptr;
+        m_materialBuffer.Reset();
+        m_maxMaterials = 0;
+        return false;
+    }
 
     return true;
 }
@@ -539,6 +576,14 @@ void PathTracer::Dispatch(
     RTQualityMode qualityMode)
 {
     if (!m_initialized) return;
+
+    // A failed Resize() leaves us with no output textures while m_initialized stays
+    // true. Without this guard the UAV descriptors in heap slots 0 and 1 still point
+    // at the released resources and DispatchRays would write through them.
+    // Resize() already logged (and latched) the error, so stay silent here rather
+    // than emitting one error per frame for the rest of the run.
+    if (!m_outputTexture || !m_displayTexture) return;
+
     RTQualityInfo quality = GetRTQualityInfo(qualityMode);
 
     if (!m_accel.GetTLASAddress())
@@ -746,9 +791,24 @@ void PathTracer::Dispatch(
 // =============================================================================
 void PathTracer::CopyToBackBuffer(D3D12Device& device)
 {
-    if (!m_displayTexture) return;
-
     auto* cmd = device.CmdList();
+
+    if (!m_displayTexture)
+    {
+        // The caller already transitioned the back buffer PRESENT -> RENDER_TARGET in
+        // anticipation of the copy. Returning without undoing that would leave it in
+        // RENDER_TARGET at Present time (and with the overlay off, nothing else
+        // restores it). Put it back so the frame still presents legally.
+        D3D12_RESOURCE_BARRIER restore   = {};
+        restore.Type                     = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        restore.Transition.pResource     = device.CurrentBackBuffer();
+        restore.Transition.StateBefore   = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        restore.Transition.StateAfter    = D3D12_RESOURCE_STATE_PRESENT;
+        restore.Transition.Subresource   = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        if (restore.Transition.pResource)
+            cmd->ResourceBarrier(1, &restore);
+        return;
+    }
 
     // Transition output: UAV → COPY_SOURCE
     D3D12_RESOURCE_BARRIER barriers[2] = {};

@@ -367,7 +367,14 @@ bool RTPipeline::BuildShaderTable(ID3D12Device5* device, uint32_t instanceCount)
     // Map and fill
     uint8_t* mapped = nullptr;
     D3D12_RANGE readRange = { 0, 0 };
-    m_shaderTable->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
+    hr = m_shaderTable->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("Failed to map shader table: 0x%08X", hr);
+        m_shaderTable.Reset();
+        m_shaderTableSize = 0;
+        return false;
+    }
     memset(mapped, 0, static_cast<size_t>(totalSize));
 
     // Ray generation record

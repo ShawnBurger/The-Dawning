@@ -48,7 +48,10 @@ public:
     void Shutdown();
 
     // Resize the RT output texture (call on window resize)
-    void Resize(ID3D12Device5* device, uint32_t width, uint32_t height);
+    // Returns false if the output textures could not be recreated. On failure the
+    // path tracer holds no textures and Dispatch() becomes a no-op until a later
+    // resize succeeds; callers should fall back to raster.
+    bool Resize(ID3D12Device5* device, uint32_t width, uint32_t height);
 
     // Access to acceleration structures and pipeline for scene to build
     RTAcceleration& GetAcceleration() { return m_accel; }

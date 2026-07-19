@@ -361,8 +361,16 @@ void D3D12Device::ResetCommandList()
 
 void D3D12Device::ExecuteAndPresent(bool vsync)
 {
-    // Close command list
-    m_cmdList->Close();
+    // Close command list. This is the most valuable HRESULT in the frame: a recording
+    // error surfaces here as a loggable failure, whereas submitting a list that failed
+    // to close turns it into an opaque device removal.
+    HRESULT closeHr = m_cmdList->Close();
+    if (FAILED(closeHr))
+    {
+        core::Log::Errorf("Command list Close failed: %s (0x%08X) - skipping submit",
+                          HrToString(closeHr), closeHr);
+        return;
+    }
 
     // Execute
     ID3D12CommandList* lists[] = { m_cmdList.Get() };
@@ -390,18 +398,31 @@ void D3D12Device::ExecuteAndPresent(bool vsync)
                     const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode;
                     while (node)
                     {
+                        // pLastBreadcrumbValue is legitimately null for nodes whose
+                        // breadcrumb buffer was not resident at removal. Dereferencing
+                        // it here would crash inside the post-mortem handler and destroy
+                        // the very diagnostics we came for.
+                        const bool haveCount = (node->pLastBreadcrumbValue != nullptr);
+                        const unsigned completed =
+                            haveCount ? static_cast<unsigned>(*node->pLastBreadcrumbValue) : 0u;
+
+                        char name[128] = "(unnamed)";
                         if (node->pCommandListDebugNameW)
                         {
-                            char name[128];
                             WideCharToMultiByte(CP_UTF8, 0, node->pCommandListDebugNameW, -1,
                                                 name, sizeof(name), nullptr, nullptr);
+                        }
+
+                        if (haveCount)
+                        {
                             core::Log::Errorf("  DRED Breadcrumb: CmdList='%s', completed %u/%u ops",
-                                              name, *node->pLastBreadcrumbValue, node->BreadcrumbCount);
+                                              name, completed, node->BreadcrumbCount);
                         }
                         else
                         {
-                            core::Log::Errorf("  DRED Breadcrumb: CmdList=(unnamed), completed %u/%u ops",
-                                              *node->pLastBreadcrumbValue, node->BreadcrumbCount);
+                            core::Log::Errorf("  DRED Breadcrumb: CmdList='%s', completed ?/%u ops "
+                                              "(breadcrumb buffer not resident)",
+                                              name, node->BreadcrumbCount);
                         }
                         node = node->pNext;
                     }
@@ -463,6 +484,14 @@ void D3D12Device::WaitForGpu()
 bool D3D12Device::Resize(int newWidth, int newHeight)
 {
     if (newWidth <= 0 || newHeight <= 0) return false;
+
+    // Never touch a dead swap chain. Without this, a resize arriving during
+    // device-removed state calls ResizeBuffers on an object that cannot service it.
+    if (m_deviceLost)
+    {
+        core::Log::Warn("Resize ignored: device is lost");
+        return false;
+    }
 
     core::Log::Infof("Resizing swap chain: %dx%d", newWidth, newHeight);
 

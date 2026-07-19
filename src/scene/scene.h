@@ -67,7 +67,9 @@ public:
 
     // --- RT Setup ---
     bool InitPathTracer(render::D3D12Device& device);
-    void ResizePathTracer(render::D3D12Device& device, uint32_t width, uint32_t height);
+    // False if the path tracer's output textures could not be recreated. Caller
+    // should fall back to raster; raster itself is unaffected.
+    bool ResizePathTracer(render::D3D12Device& device, uint32_t width, uint32_t height);
 
     // --- Access ---
     ecs::Registry&      GetRegistry()       { return m_registry; }
