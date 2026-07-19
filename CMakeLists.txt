@@ -12,6 +12,15 @@ set(VCPKG_APPLOCAL_DEPS OFF CACHE BOOL "Disable vcpkg app-local dependency copyi
 # =============================================================================
 # Source files
 # =============================================================================
+set(APP_SOURCES
+    src/main.cpp
+    src/app.cpp
+)
+
+set(APP_HEADERS
+    src/app.h
+)
+
 set(CORE_SOURCES
     src/core/log.cpp
     src/core/input.cpp
@@ -96,7 +105,8 @@ set(TEST_HEADERS
 # Executable
 # =============================================================================
 add_executable(TheDawningV3 WIN32
-    src/main.cpp
+    ${APP_SOURCES}
+    ${APP_HEADERS}
     ${CORE_SOURCES}
     ${CORE_HEADERS}
     ${RENDER_SOURCES}
@@ -152,7 +162,7 @@ source_group("Render"  FILES ${RENDER_SOURCES} ${RENDER_HEADERS})
 source_group("ECS"     FILES ${ECS_HEADERS})
 source_group("Scene"   FILES ${SCENE_SOURCES} ${SCENE_HEADERS})
 source_group("Shaders" FILES ${SHADER_FILES})
-source_group("Main"    FILES src/main.cpp)
+source_group("Application" FILES ${APP_SOURCES} ${APP_HEADERS})
 
 # Mark HLSL files as not compiled by MSVC (we compile them ourselves at runtime)
 set_source_files_properties(${SHADER_FILES} PROPERTIES
