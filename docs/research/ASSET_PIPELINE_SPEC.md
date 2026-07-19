@@ -127,6 +127,37 @@ from a generational allocator with slot 0 the null SRV and slot 1 the shadow map
 One PBR asset consumes albedo, normal, ORM and possibly emissive, so 128 slots is
 roughly 32 materials. Real content exhausts this immediately.
 
+## What real Meshy output actually looks like
+
+Measured from the first generated asset (`corridor_section_05445d3a804f4d42`,
+15 credits). These are the things a hand-written test GLB would not have
+surfaced, and every one is a requirement on the importer:
+
+- **No TANGENT attribute.** Attributes are POSITION, NORMAL, TEXCOORD_0 only.
+  The raster path derives tangents from screen-space derivatives so it copes,
+  but the importer cannot assume tangents exist, and anything needing them must
+  generate them.
+- **32-bit indices** (componentType 5125). `CreateMesh` does have a `uint32_t`
+  overload alongside the `uint16_t` one, so this is supported - but
+  `Mesh::indexFormat` defaults to `R16_UINT`, so the importer has to select the
+  overload and set the format deliberately. glTF also permits 8-bit indices,
+  which nothing here accepts and which must be widened on import.
+- **`doubleSided: true`.** The engine culls back faces with CW winding. A
+  double-sided material rendered under back-face culling loses geometry. The
+  importer must either carry the flag through to a no-cull pipeline state or
+  explicitly decide to ignore it - silently dropping it produces holes that look
+  like a broken asset.
+- **`metallicRoughnessTexture` is a single packed texture**, glTF-standard with
+  roughness in G and metallic in B. That is the engine's ORM layout with only the
+  occlusion channel unused, so it drops in almost directly. Meshy also returns
+  unpacked `metallic_0.png` and `roughness_0.png` separately; the packed one in
+  the GLB is the one to use.
+- **No occlusion and no emissive map.** AO defaults to 1.0. Both engine paths
+  already handle absent maps.
+- **Scale.** 15,562 vertices and 19,193 triangles for one corridor section, with
+  an 8.7 MB GLB and about 12 MB of PNGs. Against the ~340-entity constant-ring
+  ceiling above, content of this density reaches engine limits quickly.
+
 ## Staged plan
 
 Each stage leaves the build green and is independently verifiable.

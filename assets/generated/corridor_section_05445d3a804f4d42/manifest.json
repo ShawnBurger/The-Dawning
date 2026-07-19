@@ -1,0 +1,25 @@
+{
+  "name": "corridor_section",
+  "params": {
+    "prompt": "Modular science fiction spaceship interior corridor section, straight hallway segment with paneled metal walls, recessed lighting strips along the ceiling, floor grating, exposed pipes and cable conduits running along the walls, worn painted metal with scuffs and grime, industrial utilitarian design",
+    "texture_prompt": "worn brushed steel and painted metal panels, subtle scratches, grime in the recesses, muted grey and slate blue palette, photorealistic PBR",
+    "target_polycount": 20000,
+    "enable_pbr": true,
+    "ai_model": "meshy-5",
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 1
+  },
+  "preview_task_id": "019f7c20-d124-7d1f-aeaa-ac586d5138f3",
+  "refine_task_id": "019f7c22-bf19-744f-aec3-10b6589685db",
+  "consumed_credits": 15,
+  "glb": "model.glb",
+  "textures": {
+    "base_color": "base_color_0.png",
+    "metallic": "metallic_0.png",
+    "roughness": "roughness_0.png",
+    "normal": "normal_0.png"
+  },
+  "thumbnail_url": "https://assets.meshy.ai/8ed0c010-147b-45ed-9a40-71f4459980a3/tasks/019f7c22-bf19-744f-aec3-10b6589685db/output/preview.png?Expires=4938019200&Signature=fwI476DgppXV9vbJGOrk8FqRqpRbBtNH-TAMFVYJBjCfuEd-MxORo-JnabOkyZUXozDnf~yWBxWWBj4SuCcIjLVAXw6PRbTC0BagOhQOsaGMrKhb6VO1Wfv7hr6Qu2J-nzlfGvLsE89EKQIbyf83Ye6VKyHo9vaXz-Joawae7KEfPoj2Fhfn80caab9Hw~7I1FogmfHa057C0f3ePjaQQRXAAstee3p8KT41f4qC2LCUA9tcq~vBM9QmfdKlmn9-4Jb487~FLNl5XwEpN69bq3eNTI3w3J22JMp2gUzHydjdFws1zDL39zyCE~vS~akVfMhcF8bbqTXGCV5IZI0cjA__&Key-Pair-Id=K1VGYTHIYLM9UM"
+}
