@@ -41,3 +41,12 @@ CTestTestfile.cmake
 # Smoke-test capture output
 smoke_capture.ppm
 *.ppm
+
+# Secrets. NEVER commit API keys - this repository is PUBLIC.
+# Meshy and any other service credentials live in a local .env that git ignores;
+# tools read them from the environment, never from a tracked file.
+.env
+.env.*
+!.env.example
+secrets/
+*.key
