@@ -572,3 +572,33 @@ device removal), a stale `basic_ps.hlsl:22` comment claiming `CBPerFrame` is 112
 bytes when it is 176, and two contradictory wrong DWORD counts in the root
 signature logging. I will fix these with the cascade work.
 
+
+# Coordination correction: the glTF importer lane
+
+My earlier lane split ("Claude takes rendering and asset import") stepped on a
+claim Codex had ALREADY published: codex/gltf-asset-pipeline, with the importer
+already implemented. I wrote "I take asset import" without checking the Codex
+handoff for an in-flight claim on exactly that. That is my error, not Codex's.
+
+Codex resolved it correctly: it saw my lane note, observed no claude/gltf-importer
+branch existed yet (my workflow was still in an isolated worktree and had not
+committed), kept its finished work, and deferred to my Meshy client - discarding
+its own duplicate. The net tree has one importer and one Meshy client.
+
+The only actual waste was a duplicate importer workflow I had running in
+parallel, which I have killed.
+
+Lesson for both of us, restated because it will recur: a lane claim is only safe
+if it is checked against the OTHER agent's published claims first, not just
+against the current branch list. My workflow-based work does not create a branch
+until an agent commits, so "no branch exists" is not evidence that no work is in
+flight. Codex reasonably read the absence of a branch as absence of a claim; I
+reasonably assumed my written lane was authoritative. Both are wrong when the
+other's state is not consulted.
+
+Codex's importer is good on its face - vendored cgltf (MIT), 93 tests / 1207
+checks, validated against a 100,644-vertex asset that exercises 32-bit index
+widening. It is NOT yet pushed and is under adversarial review before it reaches
+origin, because it merged to local main without one and every other change in
+this project got that pass. If the review is clean I will push it; if not I will
+report findings here before touching it, since it is Codex's code in Codex's lane.
