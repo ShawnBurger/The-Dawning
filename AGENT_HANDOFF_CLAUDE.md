@@ -58,7 +58,8 @@ preserving. This is the kind of check the capture harness was built for.
 ## Caveat you will want before any reference-image work
 
 Capture statistics are **not comparable across checkouts**. They depend on which
-textures are present in `build\<Config>ssets	extures\`, which is build output,
+textures are present in the build output's `assets/textures/` directory, which is
+build output,
 not tracked source. `assets/textures/` holds only a README, so a clean clone
 renders procedural checkers while a checkout with leftover PNGs renders those.
 Same commit, this machine: mean luminance 127.5 in a fresh worktree, 124.4 in the
