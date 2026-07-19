@@ -282,7 +282,7 @@ bool App::InitializeScene()
             m_device.Device(), m_device.CmdList(),
             pixels.data(), 512, 512, groundTexUp, L"GroundAlbedoTexture"));
     }
-    groundTexture.descriptorIndex = m_renderer.RegisterTexture(m_device.Device(), groundTexture);
+    groundTexture.descriptor = m_renderer.RegisterTexture(m_device.Device(), groundTexture);
 
     render::Texture cubeTexture;
     if (FileExists(cubeKTXPath))
@@ -313,7 +313,7 @@ bool App::InitializeScene()
             m_device.Device(), m_device.CmdList(),
             pixels.data(), 256, 256, cubeTexUp, L"BluePanelAlbedoTexture"));
     }
-    cubeTexture.descriptorIndex = m_renderer.RegisterTexture(m_device.Device(), cubeTexture);
+    cubeTexture.descriptor = m_renderer.RegisterTexture(m_device.Device(), cubeTexture);
 
     render::Texture groundNormalTexture;
     if (FileExists(groundNormalKTXPath))
@@ -341,7 +341,7 @@ bool App::InitializeScene()
             m_device.Device(), m_device.CmdList(),
             pixels.data(), 512, 512, groundNormalTexUp, L"GroundNormalTexture"));
     }
-    groundNormalTexture.descriptorIndex =
+    groundNormalTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), groundNormalTexture);
 
     render::Texture cubeNormalTexture;
@@ -370,7 +370,7 @@ bool App::InitializeScene()
             m_device.Device(), m_device.CmdList(),
             pixels.data(), 256, 256, cubeNormalTexUp, L"CubeNormalTexture"));
     }
-    cubeNormalTexture.descriptorIndex =
+    cubeNormalTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), cubeNormalTexture);
 
     const HRESULT closeHr = m_device.CmdList()->Close();
@@ -832,7 +832,7 @@ bool App::ApplySmokeDescriptorStress()
     {
         m_smokeRetiredDescriptor =
             m_renderer.RegisterTexture(m_device.Device(), *texture);
-        if (m_smokeRetiredDescriptor == UINT32_MAX)
+        if (!m_smokeRetiredDescriptor.IsValid())
         {
             core::Log::Error("Smoke descriptor stress could not allocate retirement slot");
             return false;
@@ -841,7 +841,7 @@ bool App::ApplySmokeDescriptorStress()
         m_renderer.ReleaseTextureDescriptor(m_device, m_smokeRetiredDescriptor);
         m_smokeHeldDescriptor =
             m_renderer.RegisterTexture(m_device.Device(), *texture);
-        if (m_smokeHeldDescriptor == UINT32_MAX ||
+        if (!m_smokeHeldDescriptor.IsValid() ||
             m_smokeHeldDescriptor == m_smokeRetiredDescriptor)
         {
             core::Log::Error("Raster descriptor was reused before its fence completed");
@@ -851,19 +851,21 @@ bool App::ApplySmokeDescriptorStress()
     }
     else if (m_frameCount == 12)
     {
-        const uint32_t recycled =
+        const render::DescriptorHandle recycled =
             m_renderer.RegisterTexture(m_device.Device(), *texture);
-        if (recycled != m_smokeRetiredDescriptor)
+        if (!recycled.IsValid() || recycled.index != m_smokeRetiredDescriptor.index ||
+            recycled.generation == m_smokeRetiredDescriptor.generation)
         {
             core::Log::Errorf("Raster descriptor was not recycled after fence completion "
-                              "(expected %u, got %u)",
-                              m_smokeRetiredDescriptor, recycled);
+                              "(expected slot %u with a new generation, got %u gen=%u)",
+                              m_smokeRetiredDescriptor.index,
+                              recycled.index, recycled.generation);
             return false;
         }
 
         m_renderer.ReleaseTextureDescriptor(m_device, m_smokeHeldDescriptor);
         m_renderer.ReleaseTextureDescriptor(m_device, recycled);
-        m_smokeHeldDescriptor = UINT32_MAX;
+        m_smokeHeldDescriptor = {};
         core::Log::Info("[SMOKE] descriptor_reuse_after_fence=reused");
     }
 

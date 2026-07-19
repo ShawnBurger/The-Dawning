@@ -710,11 +710,6 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     m_textureHeap->SetName(L"RasterTextureHeap");
     m_textureDescSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC nullSrv = {};
-    nullSrv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    nullSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    nullSrv.Texture2D.MipLevels = 1;
     // Null-fill the WHOLE table, not just slot 0. The root signature binds all
     // kMaxRasterTextures descriptors as one range, so every slot is nominally
     // part of a bound table even before any texture is registered. Leaving the
@@ -724,12 +719,8 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     // in the shader rather than in this heap. path_tracer.cpp already null-fills
     // its equivalent ranges; the two subsystems disagreed on this, and the
     // raster side was the one depending on someone else being careful.
-    D3D12_CPU_DESCRIPTOR_HANDLE nullHandle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
     for (uint32_t i = 0; i < kMaxRasterTextures; ++i)
-    {
-        device->CreateShaderResourceView(nullptr, &nullSrv, nullHandle);
-        nullHandle.ptr += m_textureDescSize;
-    }
+        WriteNullTextureDescriptor(device, i);
 
     // Slot 0 stays the null-SRV fallback, so allocation starts at 1 and the
     // allocator will never recycle index 0.
@@ -740,40 +731,61 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     return true;
 }
 
-void Renderer::ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptorIndex)
+void Renderer::WriteNullTextureDescriptor(ID3D12Device* device, uint32_t descriptorIndex)
 {
-    if (descriptorIndex == UINT32_MAX) return;
+    if (!device || !m_textureHeap || descriptorIndex >= kMaxRasterTextures)
+        return;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC nullSrv = {};
+    nullSrv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    nullSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    nullSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullSrv.Texture2D.MipLevels = 1;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(descriptorIndex) * m_textureDescSize;
+    device->CreateShaderResourceView(nullptr, &nullSrv, handle);
+}
+
+void Renderer::ReleaseTextureDescriptor(D3D12Device& device, DescriptorHandle descriptor)
+{
+    if (!descriptor.IsValid()) return;
 
     // Parked against the value signalled at the END of this frame, not the last
     // one already signalled: a command list recorded during this frame may still
     // reference the slot, and the GPU reads shader-visible descriptors at
     // execution time for the volatile ranges this engine binds.
-    if (!m_textureAllocator.Release(descriptorIndex, device.PendingFenceValue()))
+    if (!m_textureAllocator.Release(descriptor, device.PendingFenceValue()))
     {
-        core::Log::Warnf("Ignoring release of unowned raster texture descriptor %u",
-                         descriptorIndex);
+        core::Log::Warnf("Ignoring release of unowned raster texture descriptor %u gen=%u",
+                         descriptor.index, descriptor.generation);
     }
 }
 
 void Renderer::ReclaimTextureDescriptors(D3D12Device& device)
 {
-    m_textureAllocator.Reclaim(device.CompletedFenceValue());
+    m_textureAllocator.Reclaim(
+        device.CompletedFenceValue(),
+        [this, d3dDevice = device.Device()](DescriptorHandle descriptor)
+        {
+            WriteNullTextureDescriptor(d3dDevice, descriptor.index);
+        });
 }
 
-uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
+DescriptorHandle Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
 {
     if (!device || !m_textureHeap || !texture.IsValid())
-        return UINT32_MAX;
+        return {};
 
-    const uint32_t descriptorIndex = m_textureAllocator.Allocate();
-    if (descriptorIndex == DescriptorAllocator::kInvalid)
+    const DescriptorHandle descriptor = m_textureAllocator.Allocate();
+    if (!descriptor.IsValid())
     {
         core::Log::Errorf("Raster texture heap is full (%u in use, %u capacity)",
                           m_textureAllocator.InUse(), m_textureAllocator.Capacity());
-        return UINT32_MAX;
+        return {};
     }
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += static_cast<SIZE_T>(descriptorIndex) * m_textureDescSize;
+    handle.ptr += static_cast<SIZE_T>(descriptor.index) * m_textureDescSize;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = texture.format;
@@ -783,8 +795,8 @@ uint32_t Renderer::RegisterTexture(ID3D12Device* device, const Texture& texture)
     device->CreateShaderResourceView(texture.resource.Get(), &srvDesc, handle);
 
     core::Log::Infof("Raster texture registered: descriptor=%u (%ux%u, mips=%u)",
-                     descriptorIndex, texture.width, texture.height, texture.mipCount);
-    return descriptorIndex;
+                     descriptor.index, texture.width, texture.height, texture.mipCount);
+    return descriptor;
 }
 
 // =============================================================================
@@ -904,12 +916,10 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     auto* cmd = device.CmdList();
     bool useAlbedoTexture = albedoTexture &&
         albedoTexture->IsValid() &&
-        albedoTexture->descriptorIndex != UINT32_MAX &&
-        albedoTexture->descriptorIndex < m_textureAllocator.HighWater();
+        m_textureAllocator.IsInUse(albedoTexture->descriptor);
     bool useNormalTexture = normalTexture &&
         normalTexture->IsValid() &&
-        normalTexture->descriptorIndex != UINT32_MAX &&
-        normalTexture->descriptorIndex < m_textureAllocator.HighWater();
+        m_textureAllocator.IsInUse(normalTexture->descriptor);
 
     // Compute world-view-projection
     core::Mat4x4 wvp = worldMatrix * m_viewProj;
@@ -937,8 +947,8 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.metallic  = metallic;
     material.useAlbedoTexture = useAlbedoTexture ? 1u : 0u;
     material.useNormalTexture = useNormalTexture ? 1u : 0u;
-    material.albedoTextureIndex = useAlbedoTexture ? albedoTexture->descriptorIndex : 0u;
-    material.normalTextureIndex = useNormalTexture ? normalTexture->descriptorIndex : 0u;
+    material.albedoTextureIndex = useAlbedoTexture ? albedoTexture->descriptor.index : 0u;
+    material.normalTextureIndex = useNormalTexture ? normalTexture->descriptor.index : 0u;
 
     auto materialAddr = UploadCB(&material, sizeof(material));
     cmd->SetGraphicsRootConstantBufferView(2, materialAddr);

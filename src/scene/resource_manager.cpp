@@ -247,7 +247,7 @@ void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& d
     // time, so a recycled slot would silently point a recorded draw at a
     // different texture.
     device.DeferredRelease(slot.texture.resource);
-    renderer.ReleaseTextureDescriptor(device, slot.texture.descriptorIndex);
+    renderer.ReleaseTextureDescriptor(device, slot.texture.descriptor);
     slot.texture.ResetAfterRetirement();
 
     m_textureFreeList.push_back(idx);

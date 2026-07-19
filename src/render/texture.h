@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "../core/types.h"
+#include "descriptor_allocator.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -38,7 +39,7 @@ struct Texture
     {
         if (this == &other)
             return true;
-        if (resource || descriptorIndex != UINT32_MAX)
+        if (resource || descriptor.IsValid())
             return false;
 
         MoveFrom(other);
@@ -54,7 +55,7 @@ struct Texture
         height = 0;
         mipCount = 1;
         format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        descriptorIndex = UINT32_MAX;
+        descriptor = {};
     }
 
     ComPtr<ID3D12Resource> resource;
@@ -62,7 +63,7 @@ struct Texture
     uint32_t height = 0;
     uint32_t mipCount = 1;
     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    uint32_t descriptorIndex = UINT32_MAX;
+    DescriptorHandle descriptor;
 
     bool IsValid() const { return resource && width > 0 && height > 0; }
 
@@ -74,13 +75,13 @@ private:
         height = other.height;
         mipCount = other.mipCount;
         format = other.format;
-        descriptorIndex = other.descriptorIndex;
+        descriptor = other.descriptor;
 
         other.width = 0;
         other.height = 0;
         other.mipCount = 1;
         other.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        other.descriptorIndex = UINT32_MAX;
+        other.descriptor = {};
     }
 };
 

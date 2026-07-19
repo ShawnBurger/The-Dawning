@@ -75,8 +75,8 @@ private:
     bool m_captureThisFrame = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
-    uint32_t m_smokeRetiredDescriptor = UINT32_MAX;
-    uint32_t m_smokeHeldDescriptor = UINT32_MAX;
+    render::DescriptorHandle m_smokeRetiredDescriptor;
+    render::DescriptorHandle m_smokeHeldDescriptor;
     uint64_t m_frameCount = 0;
     float m_titleTimer = 0.0f;
 

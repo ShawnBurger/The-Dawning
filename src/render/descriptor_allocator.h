@@ -31,6 +31,21 @@
 namespace render
 {
 
+struct DescriptorHandle
+{
+    uint32_t index = UINT32_MAX;
+    uint32_t generation = 0;
+
+    bool IsValid() const { return index != UINT32_MAX && generation != 0; }
+
+    bool operator==(const DescriptorHandle& other) const
+    {
+        return index == other.index && generation == other.generation;
+    }
+
+    bool operator!=(const DescriptorHandle& other) const { return !(*this == other); }
+};
+
 class DescriptorAllocator
 {
 public:
@@ -47,44 +62,52 @@ public:
         m_free.clear();
         m_pending.clear();
         m_states.assign(capacity, SlotState::NeverAllocated);
+        m_generations.assign(capacity, 0);
         for (uint32_t i = 0; i < m_firstIndex; ++i)
             m_states[i] = SlotState::Reserved;
     }
 
     // Prefers recycled slots over fresh ones so the high-water mark stays low
-    // and heap occupancy is legible when debugging. Returns kInvalid when full.
-    uint32_t Allocate()
+    // and heap occupancy is legible when debugging. Returns an invalid handle
+    // when full. A generation changes on every handout so a stale owner cannot
+    // become valid merely because its numeric slot was recycled.
+    DescriptorHandle Allocate()
     {
+        uint32_t index = kInvalid;
         if (!m_free.empty())
         {
-            const uint32_t index = m_free.back();
+            index = m_free.back();
             m_free.pop_back();
-            m_states[index] = SlotState::InUse;
-            ++m_inUse;
-            return index;
         }
-        if (m_highWater < m_capacity)
+        else if (m_highWater < m_capacity)
         {
-            const uint32_t index = m_highWater++;
-            m_states[index] = SlotState::InUse;
-            ++m_inUse;
-            return index;
+            index = m_highWater++;
         }
-        return kInvalid;
+
+        if (index == kInvalid)
+            return {};
+
+        uint32_t& generation = m_generations[index];
+        if (++generation == 0)
+            ++generation;
+        m_states[index] = SlotState::InUse;
+        ++m_inUse;
+        return { index, generation };
     }
 
     // Park `index` until the GPU passes `fenceValue`. Not returned to the free
     // list here — see the header comment.
-    bool Release(uint32_t index, uint64_t fenceValue)
+    bool Release(DescriptorHandle handle, uint64_t fenceValue)
     {
-        if (index == kInvalid || index < m_firstIndex || index >= m_capacity)
+        if (!handle.IsValid() || handle.index < m_firstIndex || handle.index >= m_capacity)
             return false;
-        if (m_states[index] != SlotState::InUse)
+        if (m_states[handle.index] != SlotState::InUse ||
+            m_generations[handle.index] != handle.generation)
             return false;
 
-        m_states[index] = SlotState::Pending;
+        m_states[handle.index] = SlotState::Pending;
         --m_inUse;
-        m_pending.push_back(Pending{ fenceValue, index });
+        m_pending.push_back(Pending{ fenceValue, handle });
         return true;
     }
 
@@ -94,17 +117,27 @@ public:
     // Release delays a slot rather than releasing it early.
     size_t Reclaim(uint64_t completedFenceValue)
     {
+        return Reclaim(completedFenceValue, [](DescriptorHandle) {});
+    }
+
+    template <typename ReclaimFn>
+    size_t Reclaim(uint64_t completedFenceValue, ReclaimFn&& onReclaim)
+    {
         size_t reclaimed = 0;
         size_t keep = 0;
         for (size_t i = 0; i < m_pending.size(); ++i)
         {
             if (m_pending[i].fenceValue <= completedFenceValue)
             {
-                const uint32_t index = m_pending[i].index;
-                if (m_states[index] == SlotState::Pending)
+                const DescriptorHandle handle = m_pending[i].handle;
+                if (m_states[handle.index] == SlotState::Pending &&
+                    m_generations[handle.index] == handle.generation)
                 {
-                    m_states[index] = SlotState::Free;
-                    m_free.push_back(index);
+                    // The owner can scrub external state while the slot is
+                    // still unavailable; only expose it to Allocate afterward.
+                    onReclaim(handle);
+                    m_states[handle.index] = SlotState::Free;
+                    m_free.push_back(handle.index);
                     ++reclaimed;
                 }
             }
@@ -123,10 +156,11 @@ public:
     {
         for (const auto& p : m_pending)
         {
-            if (m_states[p.index] == SlotState::Pending)
+            if (m_states[p.handle.index] == SlotState::Pending &&
+                m_generations[p.handle.index] == p.handle.generation)
             {
-                m_states[p.index] = SlotState::Free;
-                m_free.push_back(p.index);
+                m_states[p.handle.index] = SlotState::Free;
+                m_free.push_back(p.handle.index);
             }
         }
         m_pending.clear();
@@ -139,6 +173,13 @@ public:
     size_t   PendingCount()  const { return m_pending.size(); }
 
     uint32_t InUse() const { return m_inUse; }
+
+    bool IsInUse(DescriptorHandle handle) const
+    {
+        return handle.IsValid() && handle.index < m_states.size() &&
+               m_states[handle.index] == SlotState::InUse &&
+               m_generations[handle.index] == handle.generation;
+    }
 
 private:
     enum class SlotState : uint8_t
@@ -153,7 +194,7 @@ private:
     struct Pending
     {
         uint64_t fenceValue = 0;
-        uint32_t index      = 0;
+        DescriptorHandle handle;
     };
 
     uint32_t m_capacity   = 0;
@@ -163,6 +204,7 @@ private:
     std::vector<uint32_t> m_free;
     std::vector<Pending>  m_pending;
     std::vector<SlotState> m_states;
+    std::vector<uint32_t> m_generations;
 };
 
 } // namespace render

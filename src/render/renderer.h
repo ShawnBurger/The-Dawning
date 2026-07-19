@@ -103,14 +103,14 @@ public:
                   const Texture* normalTexture = nullptr);
 
     // Register a texture SRV for raster material sampling.
-    uint32_t RegisterTexture(ID3D12Device* device, const Texture& texture);
+    DescriptorHandle RegisterTexture(ID3D12Device* device, const Texture& texture);
 
     // Return a descriptor slot handed out by RegisterTexture. The slot is parked
     // against the current frame's fence and only becomes reusable once the GPU
     // has retired every command list that could reference it - see
     // render/descriptor_allocator.h. Without this every removed texture consumed
     // one of 127 usable slots permanently.
-    void ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptorIndex);
+    void ReleaseTextureDescriptor(D3D12Device& device, DescriptorHandle descriptor);
     void ReclaimTextureDescriptors(D3D12Device& device);
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
@@ -150,6 +150,7 @@ private:
     bool CreateSkyPSO(ID3D12Device* device);
     bool CreateConstantBuffers(ID3D12Device* device);
     bool CreateTextureHeap(ID3D12Device* device);
+    void WriteNullTextureDescriptor(ID3D12Device* device, uint32_t descriptorIndex);
     bool CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t height);
     bool CreateTonemapPipeline(ID3D12Device* device);
 
