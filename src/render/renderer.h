@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "d3d12_device.h"
+#include "descriptor_allocator.h"
 #include "mesh.h"
 #include "camera.h"
 #include "texture.h"
@@ -104,6 +105,17 @@ public:
     // Register a texture SRV for raster material sampling.
     uint32_t RegisterTexture(ID3D12Device* device, const Texture& texture);
 
+    // Return a descriptor slot handed out by RegisterTexture. The slot is parked
+    // against the current frame's fence and only becomes reusable once the GPU
+    // has retired every command list that could reference it - see
+    // render/descriptor_allocator.h. Without this every removed texture consumed
+    // one of 127 usable slots permanently.
+    void ReleaseTextureDescriptor(D3D12Device& device, uint32_t descriptorIndex);
+
+    // Diagnostics for the smoke harness and for anyone debugging heap pressure.
+    uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
+    uint32_t TextureDescriptorHighWater() const { return m_textureAllocator.HighWater(); }
+
     // -------------------------------------------------------------------------
     // HDR scene target and tone-map resolve
     // -------------------------------------------------------------------------
@@ -169,7 +181,9 @@ private:
     static constexpr uint32_t kMaxRasterTextures = 128;
     ComPtr<ID3D12DescriptorHeap> m_textureHeap;
     uint32_t m_textureDescSize = 0;
-    uint32_t m_nextTextureDescriptor = 1;
+    // Replaces a bare monotonic counter. Slot 0 is reserved as the permanent
+    // null-SRV fallback, so the allocator starts handing out at 1.
+    DescriptorAllocator m_textureAllocator;
 
     // Per-frame upload buffers for constants (one per frame in flight)
     static constexpr uint32_t kCBRingSize = 256 * 1024; // 256KB per frame

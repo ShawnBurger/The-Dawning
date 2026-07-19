@@ -213,7 +213,8 @@ bool ResourceManager::IsValidTexture(TextureHandle handle) const
     return m_textureSlots[idx].alive && m_textureSlots[idx].generation == handle.Generation();
 }
 
-void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& device)
+void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& device,
+                                    render::Renderer& renderer)
 {
     if (!IsValidTexture(handle)) return;
     uint32_t idx = handle.Index();
@@ -222,12 +223,15 @@ void ResourceManager::RemoveTexture(TextureHandle handle, render::D3D12Device& d
     slot.alive = false;
     slot.generation++;
 
-    // Same hazard as RemoveMesh. Note this still leaks the texture's
-    // shader-visible descriptor slot: Renderer::RegisterTexture allocates from a
-    // monotonic counter with no free list, so the descriptor cannot be reclaimed
-    // until that allocator gains one. Deferred release fixes the lifetime bug,
-    // not the descriptor leak.
+    // Two separate lifetimes, both fence-guarded. The RESOURCE goes to the
+    // device's deferred queue; the DESCRIPTOR that names it goes back to the
+    // renderer's allocator. Releasing either one eagerly is a use-after-free
+    // while frames are still in flight - the descriptor case is the subtler of
+    // the two, because the GPU reads shader-visible descriptors at execution
+    // time, so a recycled slot would silently point a recorded draw at a
+    // different texture.
     device.DeferredRelease(slot.texture.resource);
+    renderer.ReleaseTextureDescriptor(device, slot.texture.descriptorIndex);
     slot.texture = render::Texture{};
 
     m_textureFreeList.push_back(idx);
