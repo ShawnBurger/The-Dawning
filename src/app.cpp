@@ -703,8 +703,6 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
 
 void App::RenderFrame(const core::TimeStep& timeStep)
 {
-    static constexpr float clearColor[4] = { 0.50f, 0.55f, 0.62f, 1.0f };
-
     m_device.WaitForCurrentFrame();
     m_device.ResetCommandList();
     auto* commandList = m_device.CmdList();
@@ -745,7 +743,7 @@ void App::RenderFrame(const core::TimeStep& timeStep)
         // Scene renders into the linear HDR target, not the back buffer. The
         // back buffer is not touched until ResolveToBackBuffer tone-maps into it,
         // which is also what transitions it out of PRESENT.
-        m_renderer.BeginScenePass(m_device, clearColor);
+        m_renderer.BeginScenePass(m_device);
 
         D3D12_VIEWPORT viewport = {
             0.0f, 0.0f,
