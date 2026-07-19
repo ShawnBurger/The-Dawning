@@ -1192,6 +1192,49 @@ std::vector<uint32_t> GenerateCheckerORMTextureRGBA8(
     return pixels;
 }
 
+std::vector<uint32_t> GeneratePanelEmissiveTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    uint32_t cellSize,
+    float panelFraction)
+{
+    std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
+    if (cellSize == 0) cellSize = 1;
+    if (panelFraction < 0.05f) panelFraction = 0.05f;
+    if (panelFraction > 1.0f)  panelFraction = 1.0f;
+
+    // Half-width of the lit panel inside each cell, in texels.
+    const uint32_t half = static_cast<uint32_t>(
+        (static_cast<float>(cellSize) * panelFraction) * 0.5f);
+    const uint32_t centre = cellSize / 2;
+
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            const uint32_t cellX = x % cellSize;
+            const uint32_t cellY = y % cellSize;
+            const uint32_t dx = cellX > centre ? cellX - centre : centre - cellX;
+            const uint32_t dy = cellY > centre ? cellY - centre : centre - cellY;
+
+            float intensity = 0.0f;
+            if (dx <= half && dy <= half)
+            {
+                // Dim the outermost ring of the panel so the shape reads as a
+                // lit element rather than a hard-edged rectangle.
+                const uint32_t d = dx > dy ? dx : dy;
+                intensity = (half > 0 && d + 1 >= half) ? 0.45f : 1.0f;
+            }
+
+            const uint32_t v = static_cast<uint32_t>(intensity * 255.0f + 0.5f);
+            pixels[static_cast<size_t>(y) * width + x] =
+                v | (v << 8) | (v << 16) | (0xFFu << 24);
+        }
+    }
+
+    return pixels;
+}
+
 std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
     uint32_t width,
     uint32_t height,

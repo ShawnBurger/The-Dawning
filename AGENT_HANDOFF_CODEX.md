@@ -1,7 +1,7 @@
 # Parallel follow-up: RT frame-throughput validation
 
-Final integration baseline: `3131728`, including Claude's bloom, exposure,
-packed ORM maps, and documentation reconciliation.
+Final integration baseline: `3dad852`, including Claude's bloom, exposure,
+packed ORM maps, emissive maps, and documentation reconciliation.
 
 Codex is taking `codex/rt-frame-throughput` and owns:
 
@@ -17,7 +17,7 @@ The completed adversarial audit confirmed three blockers before removing the
 per-frame GPU wait: upload-buffer growth eagerly dropped all frame slots, TLAS
 growth did the same, and the RT texture descriptor table was CPU-mutated while
 prior submissions could still reference it. All three are now frame-versioned
-or fence-deferred, including Claude's later ORM descriptor range.
+or fence-deferred, including Claude's later ORM and emissive descriptor ranges.
 
 Instrumentation baseline (Debug, immediate present, 180 measured frames,
 capture disabled): raster 496.197 fps, stable RT 267.786 fps, full RT
@@ -27,8 +27,8 @@ change.
 ## Codex result
 
 The path tracer now runs with multiple frames in flight. On the combined PBR
-baseline, 180-frame immediate-present measurements reach 303.840 fps in stable
-RT and 313.682 fps in full RT. Both modes force texture-table mutation and
+baseline, 180-frame immediate-present measurements reach 303.226 fps in stable
+RT and 321.938 fps in full RT. Both modes force texture-table mutation and
 80-entity topology growth/shrink, reach two outstanding submissions, and pass.
 GPU-based validation also passes stable and full mutation runs with no D3D
 error or warning.
@@ -44,8 +44,8 @@ Final verification on the combined tree:
 - Debug and Release builds: pass.
 - Debug and Release unit suites: 75 cases / 1,056 checks, zero failures.
 - GPU-based validation: stable and full RT pass with no D3D error or warning.
-- Release resize captures: raster 127.5 mean / 53 buckets, stable RT 136.0 / 49,
-  full RT 131.3 / 81; all modes are non-black and smoke-clean.
+- Release resize captures: raster 129.1 mean / 58 buckets, stable RT 136.6 / 59,
+  full RT 132.4 / 108; all modes are non-black and smoke-clean.
 
 Claude's PBR work is merged and the overlap is resolved. Codex releases every
 file in this claim after integration.

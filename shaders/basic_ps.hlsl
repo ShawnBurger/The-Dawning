@@ -39,6 +39,11 @@ cbuffer CBMaterial : register(b2)
     uint   normalTextureIndex;
     uint   useOrmTexture;
     uint   ormTextureIndex;
+    float3 emissive;
+    float  emissiveStrength;
+    uint   useEmissiveTexture;
+    uint   emissiveTextureIndex;
+    uint2  cbMaterialPad;
 };
 
 // Size comes from Renderer::kMaxRasterTextures, passed as a define at compile
@@ -156,8 +161,16 @@ float4 main(PSInput input) : SV_TARGET
     float3 ambientSpecular = DawningFresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
                              lerp(0.2, 0.8, 1.0 - materialRoughness) * ambientOcclusion;
 
+    // Emission is added last and is unaffected by lighting, occlusion or the
+    // Fresnel split: it is radiance the surface produces, not radiance it
+    // reflects. It is also NOT a light source - nothing else in the scene is
+    // brightened by it.
+    float3 emission = emissive * emissiveStrength;
+    if (useEmissiveTexture != 0)
+        emission *= materialTextures[emissiveTextureIndex].Sample(linearSampler, input.uv).rgb;
+
     // Combine
-    float3 finalColor = direct + ambientDiffuse + ambientSpecular;
+    float3 finalColor = direct + ambientDiffuse + ambientSpecular + emission;
 
     // Linear HDR out. Tone mapping happens once, in tonemap_ps.hlsl, so that
     // the scene exists as linear radiance in a buffer that bloom/exposure/TAA

@@ -27,7 +27,7 @@ Layer 3 provides ECS architecture; the RT extension adds full DXR path tracing:
     output UAV table (u0-u1), per-frame CB (b0), material StructuredBuffer (t1),
     triangle normals (t2), instance metadata (t3), triangle UVs (t4), triangle
     positions (t5), and an SRV table for albedo (t0/space4), normal (t0/space5)
-    and ORM (t0/space6) textures
+    ORM (t0/space6) and emissive (t0/space7) textures
   - Per-instance material lookup: global material StructuredBuffer indexed by
     InstanceID(). This is a root SRV, not SM 6.6 bindless — no
     ResourceDescriptorHeap anywhere in the project
@@ -98,14 +98,17 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            raster shading, indexed shader-visible texture tables in both the
            raster and DXR paths, packed occlusion/roughness/metallic (ORM) maps
            in the glTF channel convention modulating the material scalars in
-           both paths, bloom with a parameterised exposure, and a linear
+           both paths, emissive maps in both paths, bloom with a parameterised
+           exposure, and a linear
            R16G16B16A16_FLOAT scene target resolved to the back buffer by a
            dedicated tone-map pass
            (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
            material shader; post-process passes insert between
            Scene::RenderEntities and Renderer::ResolveToBackBuffer
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC),
-           emissive maps, shadow maps, and any real mesh file loading.
+           shadow maps, and any real mesh file loading. Emissive surfaces shade
+           themselves but are NOT light sources - nothing samples them, so a
+           bright panel does not illuminate anything around it.
            `assets/textures/` ships only a README, so a clean clone always takes
            the procedural fallback path
 Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relative
@@ -115,7 +118,12 @@ Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relat
 Phase 1 (current): Path tracing with NEE, VNDF specular sampling, and a
          progressive running-mean accumulator that resets on camera motion.
          Not yet done in this phase: reprojection, so accumulation restarts
-         whenever the view changes rather than reusing history
+         whenever the view changes rather than reusing history. Accumulation
+         also does not reset on OBJECT motion, only camera motion, so animated
+         geometry ghosts across the history buffer. That is deliberate - the
+         demo spins continuously, and resetting per object would disable
+         accumulation outright - but it is why moving objects look smeared in
+         path tracing. Reprojection is the actual fix
 Phase 2: NVIDIA RTXDI (ReSTIR DI) for efficient direct light sampling
 Phase 3: ReSTIR GI for indirect illumination resampling
 Phase 4: SER (Shader Execution Reordering) via NvHitObject/NvReorderThread

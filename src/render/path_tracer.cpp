@@ -16,6 +16,7 @@ static constexpr uint32_t kRTUavDescriptorCount = 2;
 static constexpr uint32_t kRTAlbedoDescriptorBase = kRTUavDescriptorCount;
 static constexpr uint32_t kRTNormalDescriptorBase = kRTAlbedoDescriptorBase + kMaxRTAlbedoTextures;
 static constexpr uint32_t kRTOrmDescriptorBase    = kRTNormalDescriptorBase + kMaxRTNormalTextures;
+static constexpr uint32_t kRTEmissiveDescriptorBase = kRTOrmDescriptorBase + kMaxRTOrmTextures;
 
 static bool CreateMappedUploadBuffer(
     ID3D12Device5* device,
@@ -138,6 +139,8 @@ void PathTracer::Shutdown()
         m_boundNormalTextureResources[i].fill(nullptr);
         m_boundOrmTextureCount[i] = 0;
         m_boundOrmTextureResources[i].fill(nullptr);
+        m_boundEmissiveTextureCount[i] = 0;
+        m_boundEmissiveTextureResources[i].fill(nullptr);
     }
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
@@ -153,7 +156,7 @@ void PathTracer::Shutdown()
 bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = kRTOrmDescriptorBase + kMaxRTOrmTextures;
+    heapDesc.NumDescriptors = kRTEmissiveDescriptorBase + kMaxRTEmissiveTextures;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -205,12 +208,15 @@ void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
         clearRange(m_srvUavHeap[i].Get(), kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures);
         clearRange(m_srvUavHeap[i].Get(), kRTNormalDescriptorBase, kMaxRTNormalTextures);
         clearRange(m_srvUavHeap[i].Get(), kRTOrmDescriptorBase, kMaxRTOrmTextures);
+        clearRange(m_srvUavHeap[i].Get(), kRTEmissiveDescriptorBase, kMaxRTEmissiveTextures);
         m_boundAlbedoTextureCount[i] = 0;
         m_boundAlbedoTextureResources[i].fill(nullptr);
         m_boundNormalTextureCount[i] = 0;
         m_boundNormalTextureResources[i].fill(nullptr);
         m_boundOrmTextureCount[i] = 0;
         m_boundOrmTextureResources[i].fill(nullptr);
+        m_boundEmissiveTextureCount[i] = 0;
+        m_boundEmissiveTextureResources[i].fill(nullptr);
     }
 }
 
@@ -513,6 +519,8 @@ void PathTracer::Dispatch(
     uint32_t normalTextureCount,
     const Texture* const* ormTextures,
     uint32_t ormTextureCount,
+    const Texture* const* emissiveTextures,
+    uint32_t emissiveTextureCount,
     uint32_t instanceCount,
     uint64_t sceneSignature,
     RTQualityMode qualityMode)
@@ -681,6 +689,10 @@ void PathTracer::Dispatch(
                              kRTOrmDescriptorBase, kMaxRTOrmTextures,
                              m_boundOrmTextureCount[m_frameIndex],
                              m_boundOrmTextureResources[m_frameIndex].data());
+    UpdateTextureDescriptors(device.Device5(), emissiveTextures, emissiveTextureCount,
+                             kRTEmissiveDescriptorBase, kMaxRTEmissiveTextures,
+                             m_boundEmissiveTextureCount[m_frameIndex],
+                             m_boundEmissiveTextureResources[m_frameIndex].data());
 
     // --- Set up for DispatchRays ---
     cmd->SetComputeRootSignature(m_pipeline.GetGlobalRootSig());

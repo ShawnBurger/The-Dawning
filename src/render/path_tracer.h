@@ -79,6 +79,8 @@ public:
                   uint32_t normalTextureCount,
                   const Texture* const* ormTextures,
                   uint32_t ormTextureCount,
+                  const Texture* const* emissiveTextures,
+                  uint32_t emissiveTextureCount,
                   uint32_t instanceCount,
                   uint64_t sceneSignature,
                   RTQualityMode qualityMode);
@@ -169,6 +171,9 @@ private:
     uint32_t m_boundOrmTextureCount[kFrameCount] = {};
     std::array<ID3D12Resource*, kMaxRTOrmTextures>
         m_boundOrmTextureResources[kFrameCount] = {};
+    uint32_t m_boundEmissiveTextureCount[kFrameCount] = {};
+    std::array<ID3D12Resource*, kMaxRTEmissiveTextures>
+        m_boundEmissiveTextureResources[kFrameCount] = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight

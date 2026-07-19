@@ -72,8 +72,14 @@ struct CBMaterial
     uint32_t normalTextureIndex;
     uint32_t useOrmTexture;
     uint32_t ormTextureIndex;
+    float emissive[3];
+    float emissiveStrength;
+    uint32_t useEmissiveTexture;
+    uint32_t emissiveTextureIndex;
+    uint32_t cbMaterialPad0;
+    uint32_t cbMaterialPad1;
 };
-static_assert(sizeof(CBMaterial) == 48,
+static_assert(sizeof(CBMaterial) == 80,
               "CBMaterial must match cbuffer CBMaterial (b2) in basic_ps.hlsl");
 
 // Align size to 256 bytes for CBV placement
@@ -105,7 +111,10 @@ public:
                   float metallic = 0.0f,
                   const Texture* albedoTexture = nullptr,
                   const Texture* normalTexture = nullptr,
-                  const Texture* ormTexture = nullptr);
+                  const Texture* ormTexture = nullptr,
+                  const Texture* emissiveTexture = nullptr,
+                  const core::Color& emissive = core::Color{ 0.0f, 0.0f, 0.0f, 1.0f },
+                  float emissiveStrength = 0.0f);
 
     // Register a texture SRV for raster material sampling.
     DescriptorHandle RegisterTexture(ID3D12Device* device, const Texture& texture);

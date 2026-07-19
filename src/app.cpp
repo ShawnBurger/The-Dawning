@@ -351,6 +351,7 @@ bool App::InitializeScene()
 
     ComPtr<ID3D12Resource> groundOrmTexUp;
     ComPtr<ID3D12Resource> cubeOrmTexUp;
+    ComPtr<ID3D12Resource> cubeEmissiveTexUp;
 
     render::Texture cubeNormalTexture;
     if (FileExists(cubeNormalKTXPath))
@@ -411,6 +412,20 @@ bool App::InitializeScene()
     cubeOrmTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), cubeOrmTexture);
 
+    // Emissive mask for the cube, generated for the same reason as the ORM maps.
+    // Only one material in the demo is emissive: emission is added on top of
+    // everything else, so making it universal would just raise the floor of the
+    // whole image and prove nothing.
+    render::Texture cubeEmissiveTexture;
+    {
+        auto pixels = render::GeneratePanelEmissiveTextureRGBA8(256, 256, 64, 0.5f);
+        cubeEmissiveTexture.Adopt(render::CreateTexture2DFromRGBA8(
+            m_device.Device(), m_device.CmdList(),
+            pixels.data(), 256, 256, cubeEmissiveTexUp, L"CubeEmissiveTexture"));
+    }
+    cubeEmissiveTexture.descriptor =
+        m_renderer.RegisterTexture(m_device.Device(), cubeEmissiveTexture);
+
     const HRESULT closeHr = m_device.CmdList()->Close();
     if (FAILED(closeHr))
     {
@@ -436,6 +451,8 @@ bool App::InitializeScene()
         std::move(groundOrmTexture), "GroundCheckerORM");
     const auto cubeOrm = resources.AddTexture(
         std::move(cubeOrmTexture), "CubeCheckerORM");
+    const auto cubeEmissive = resources.AddTexture(
+        std::move(cubeEmissiveTexture), "CubePanelEmissive");
     m_smokeDescriptorTexture = groundAlbedo;
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
@@ -445,6 +462,7 @@ bool App::InitializeScene()
                      groundNormal.Index(), cubeNormal.Index());
     core::Log::Infof("[SMOKE] orm_textures=ok ground=%u cube=%u",
                      groundOrm.Index(), cubeOrm.Index());
+    core::Log::Infof("[SMOKE] emissive_textures=ok cube=%u", cubeEmissive.Index());
 
     m_scene.CreateRenderable(
         "GroundPlane", plane,
@@ -455,7 +473,9 @@ bool App::InitializeScene()
     m_smokeGrowthMesh = cube;
     m_smokeGrowthMaterial =
         ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f,
-                       cubeAlbedo.value, cubeNormal.value, cubeOrm.value };
+                       cubeAlbedo.value, cubeNormal.value, cubeOrm.value,
+                       core::Color{ 0.25f, 0.85f, 1.0f, 1.0f }, 2.5f,
+                       cubeEmissive.value };
     m_smokeTextureEntity = m_scene.CreateSpinner(
         "BlueCube", cube,
         m_smokeGrowthMaterial,
@@ -974,9 +994,11 @@ bool App::ApplySmokeRTMutationStress()
         m_smokeSavedAlbedoTexture = material.albedoTextureHandle;
         m_smokeSavedNormalTexture = material.normalTextureHandle;
         m_smokeSavedOrmTexture = material.ormTextureHandle;
+        m_smokeSavedEmissiveTexture = material.emissiveTextureHandle;
         material.albedoTextureHandle = UINT32_MAX;
         material.normalTextureHandle = UINT32_MAX;
         material.ormTextureHandle = UINT32_MAX;
+        material.emissiveTextureHandle = UINT32_MAX;
     }
     else if (m_frameCount == 7)
     {
@@ -984,6 +1006,7 @@ bool App::ApplySmokeRTMutationStress()
         material.albedoTextureHandle = m_smokeSavedAlbedoTexture;
         material.normalTextureHandle = m_smokeSavedNormalTexture;
         material.ormTextureHandle = m_smokeSavedOrmTexture;
+        material.emissiveTextureHandle = m_smokeSavedEmissiveTexture;
         core::Log::Info("[SMOKE] rt_texture_churn=passed");
     }
     else if (m_frameCount == 8)
