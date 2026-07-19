@@ -3,10 +3,8 @@
 // core/types.h — The Dawning Engine Foundation Types
 // =============================================================================
 // Every math type the engine uses. Designed for:
-//   - Vec3d (double) for world-space positions (interstellar precision).
-//     NOTE: aspirational only. Vec3d currently has zero references outside this
-//     file — Transform::position and Camera::m_position are both Vec3f.
-//   - Vec3f (float) for GPU-bound data and local calculations
+//   - Vec3d (double) for world-space positions (interstellar precision)
+//   - Vec3f (float) for camera-relative GPU data and local calculations
 //   - Mat4x4 (float) for GPU constant buffers — see the layout warning below
 //   - Quatf (float) for rotations
 //   - Color (float RGBA) for materials and lighting

@@ -107,7 +107,9 @@ void Scene::SystemRotation(float dt)
 // Iterates all entities with Transform + MeshInstance + Material and issues
 // draw calls through the renderer. Checks mesh handle validity and visibility.
 // =============================================================================
-void Scene::RenderEntities(render::D3D12Device& device, render::Renderer& renderer)
+void Scene::RenderEntities(render::D3D12Device& device,
+                           render::Renderer& renderer,
+                           const core::Vec3d& cameraPosition)
 {
     auto* meshPool = m_registry.GetPool<ecs::MeshInstance>();
     if (!meshPool) return;
@@ -139,8 +141,8 @@ void Scene::RenderEntities(render::D3D12Device& device, render::Renderer& render
         if (material.normalTextureHandle != UINT32_MAX)
             normalTexture = m_resources.GetTexture(TextureHandle(material.normalTextureHandle));
 
-        // Compute world matrix from transform
-        core::Mat4x4 worldMatrix = transform.ToMatrix();
+        const core::Mat4x4 worldMatrix =
+            transform.ToCameraRelativeMatrix(cameraPosition);
 
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,
@@ -207,7 +209,8 @@ void Scene::EnsureBLAS(render::D3D12Device& device)
 // =============================================================================
 // Build Acceleration Structures (called once per frame before path tracing)
 // =============================================================================
-void Scene::BuildAccelerationStructures(render::D3D12Device& device)
+void Scene::BuildAccelerationStructures(render::D3D12Device& device,
+                                         const core::Vec3d& cameraPosition)
 {
     if (!m_rtReady) return;
 
@@ -248,7 +251,8 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device)
         const auto& blas = m_pathTracer.GetAcceleration().GetBLAS(blasIdx);
 
         const auto& transform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
-        core::Mat4x4 worldMat = transform.ToMatrix();
+        const core::Mat4x4 worldMat =
+            transform.ToCameraRelativeMatrix(cameraPosition);
 
         render::TLASInstance inst = {};
         // Convert the engine's row-vector matrix to DXR's 3x4 instance
@@ -292,6 +296,8 @@ void Scene::PathTraceEntities(
     render::RTQualityMode qualityMode)
 {
     if (!m_rtReady) return;
+
+    const core::Vec3d& cameraPosition = camera.Position();
 
     // Collect materials in instance order (matching TLAS instance IDs)
     auto* meshPool = m_registry.GetPool<ecs::MeshInstance>();
@@ -388,7 +394,8 @@ void Scene::PathTraceEntities(
         // identically under non-uniform scale.
         {
             const auto& instTransform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
-            const core::Mat4x4 instWorld = instTransform.ToMatrix();
+            const core::Mat4x4 instWorld =
+                instTransform.ToCameraRelativeMatrix(cameraPosition);
             const core::Mat4x4 normalMat = core::Mat4x4::InverseTranspose3x3(instWorld);
             for (int row = 0; row < 3; ++row)
             {

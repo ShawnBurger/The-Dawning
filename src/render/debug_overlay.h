@@ -23,7 +23,7 @@ struct DebugOverlayState
     double frameMs = 0.0;
     uint32_t entityCount = 0;
     RTQualityInfo rtQuality = {};
-    core::Vec3f cameraPosition = {};
+    core::Vec3d cameraPosition = {};
 };
 
 class DebugOverlay

@@ -63,6 +63,13 @@ static bool HasVectorChanged(const core::Vec3f& a, const core::Vec3f& b, float e
     return (a - b).LengthSq() > epsilon * epsilon;
 }
 
+static bool HasPositionChanged(const core::Vec3d& a,
+                               const core::Vec3d& b,
+                               double epsilon = 1e-5)
+{
+    return (a - b).LengthSq() > epsilon * epsilon;
+}
+
 RTQualityInfo GetRTQualityInfo(RTQualityMode mode)
 {
     if (mode == RTQualityMode::FullPathTrace)
@@ -672,13 +679,14 @@ void PathTracer::Dispatch(
     // Note: this is actually viewProj, not the inverse — the shader will handle reconstruction
     // via camera position + screen-space ray direction calculation
 
-    core::Vec3f camPos = camera.Position();
+    const core::Vec3d& cameraWorldPos = camera.Position();
+    const core::Vec3f camPos = {};
     core::Vec3f camRight = camera.Right();
     core::Vec3f camForward = camera.Forward();
     core::Vec3f camUp = camForward.Cross(camRight).Normalized();
 
     bool cameraChanged = !m_hasPrevCamera ||
-        HasVectorChanged(camPos, m_prevCameraPos) ||
+        HasPositionChanged(cameraWorldPos, m_prevCameraPos) ||
         HasVectorChanged(camRight, m_prevCameraRight) ||
         HasVectorChanged(camUp, m_prevCameraUp) ||
         HasVectorChanged(camForward, m_prevCameraForward);
@@ -697,7 +705,7 @@ void PathTracer::Dispatch(
         m_accumFrameIndex++;
     }
 
-    m_prevCameraPos = camPos;
+    m_prevCameraPos = cameraWorldPos;
     m_prevCameraRight = camRight;
     m_prevCameraUp = camUp;
     m_prevCameraForward = camForward;

@@ -298,20 +298,20 @@ TEST_CASE(Quatf_FromAxisAngle_IsCorrect)
 }
 
 // =============================================================================
-// Transform::ToMatrix composition order
+// Transform::ToCameraRelativeMatrix composition order
 // =============================================================================
 
 // Row-vector convention means `s * r * t` applies scale first, then rotation,
 // then translation: v * (S*R*T) == ((v*S)*R)*T. Getting this backwards is the
 // classic transform bug — it scales and rotates the translation as well.
-TEST_CASE(Transform_ToMatrix_ScaleThenRotateThenTranslate)
+TEST_CASE(Transform_ToCameraRelativeMatrix_ScaleThenRotateThenTranslate)
 {
     ecs::Transform t;
     t.position = { 10.0f, 0.0f, 0.0f };
     t.rotation = core::Quatf::FromAxisAngle({ 0.0f, 1.0f, 0.0f }, core::HALF_PI);
     t.scale    = { 2.0f, 2.0f, 2.0f };
 
-    const core::Mat4x4 m = t.ToMatrix();
+    const core::Mat4x4 m = t.ToCameraRelativeMatrix({});
 
     // (1,0,0) --scale 2--> (2,0,0) --yaw 90 (LH)--> (0,0,-2) --translate--> (10,0,-2)
     const core::Vec3f p = m.TransformPoint({ 1.0f, 0.0f, 0.0f });
@@ -327,14 +327,14 @@ TEST_CASE(Transform_ToMatrix_ScaleThenRotateThenTranslate)
 // Because translation is applied last, the translation row must be the raw
 // position: neither scaled nor rotated. This is the cheapest single assertion
 // that pins the composition order.
-TEST_CASE(Transform_ToMatrix_TranslationRowIsUnmodified)
+TEST_CASE(Transform_ToCameraRelativeMatrix_TranslationRowIsUnmodified)
 {
     ecs::Transform t;
     t.position = { 3.0f, -7.0f, 11.0f };
     t.rotation = core::Quatf::FromAxisAngle({ 0.3f, 0.5f, 0.81f }, 1.1f);
     t.scale    = { 5.0f, 0.25f, 2.0f };
 
-    const core::Mat4x4 m = t.ToMatrix();
+    const core::Mat4x4 m = t.ToCameraRelativeMatrix({});
 
     CHECK_APPROX(m.m[3][0], 3.0f);
     CHECK_APPROX(m.m[3][1], -7.0f);
@@ -348,20 +348,33 @@ TEST_CASE(Transform_ToMatrix_TranslationRowIsUnmodified)
     CHECK_APPROX(origin.z, 11.0f);
 }
 
-TEST_CASE(Transform_ToMatrix_IdentityTransformIsIdentity)
+TEST_CASE(Transform_ToCameraRelativeMatrix_PreservesPlanetaryOffset)
+{
+    ecs::Transform t;
+    t.position = { 1.0e7 + 0.25, -2.0e7 + 0.5, 3.0e7 - 0.75 };
+    const core::Vec3d cameraPosition = { 1.0e7, -2.0e7, 3.0e7 };
+
+    const core::Mat4x4 m = t.ToCameraRelativeMatrix(cameraPosition);
+
+    CHECK_APPROX_EPS(m.m[3][0], 0.25f, 1e-6f);
+    CHECK_APPROX_EPS(m.m[3][1], 0.5f, 1e-6f);
+    CHECK_APPROX_EPS(m.m[3][2], -0.75f, 1e-6f);
+}
+
+TEST_CASE(Transform_ToCameraRelativeMatrix_IdentityTransformIsIdentity)
 {
     const ecs::Transform t;
-    CHECK(MatApproxEq(t.ToMatrix(), core::Mat4x4{}));
+    CHECK(MatApproxEq(t.ToCameraRelativeMatrix({}), core::Mat4x4{}));
 }
 
 // Scale must be recoverable from the basis row lengths, independent of rotation.
-TEST_CASE(Transform_ToMatrix_NonUniformScaleGoesToBasisRows)
+TEST_CASE(Transform_ToCameraRelativeMatrix_NonUniformScaleGoesToBasisRows)
 {
     ecs::Transform t;
     t.rotation = core::Quatf::FromAxisAngle({ 0.0f, 0.0f, 1.0f }, 0.9f);
     t.scale    = { 2.0f, 3.0f, 4.0f };
 
-    const core::Mat4x4 m = t.ToMatrix();
+    const core::Mat4x4 m = t.ToCameraRelativeMatrix({});
 
     CHECK_APPROX(core::Vec3f(m.m[0][0], m.m[0][1], m.m[0][2]).Length(), 2.0f);
     CHECK_APPROX(core::Vec3f(m.m[1][0], m.m[1][1], m.m[1][2]).Length(), 3.0f);
