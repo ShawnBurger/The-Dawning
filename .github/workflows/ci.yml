@@ -13,15 +13,43 @@ on:
 
 jobs:
   windows-debug:
-    name: Windows / MSVC 2022 / Debug
+    name: Windows / MSVC / Debug
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Printed before anything can fail, so a future breakage is legible from
+      # the log alone rather than needing a local repro.
+      - name: Toolchain versions
+        run: |
+          cmake --version
+          Write-Host "--- Visual Studio installations ---"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -all -products * -format value -property displayName
+            & $vswhere -all -products * -format value -property installationVersion
+          } else {
+            Write-Host "vswhere not found"
+          }
+        shell: pwsh
+
+      # No -G and no -A. The generator was previously pinned to
+      # "Visual Studio 17 2022", which fails outright on a runner image shipping
+      # any other Visual Studio version — every run since this workflow was added
+      # died here in about 20 seconds, before building anything. Letting CMake
+      # select keeps this working across runner image upgrades; for VS 2019 and
+      # newer generators the default platform is already the x64 host, so the
+      # dropped -A x64 changes nothing.
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build
+
+      - name: Report selected generator
+        run: |
+          Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_GENERATOR(_PLATFORM)?:' |
+            ForEach-Object { $_.Line }
+        shell: pwsh
 
       # Builds both TheDawningV3.exe and TheDawningTests.exe.
       - name: Build (Debug)
