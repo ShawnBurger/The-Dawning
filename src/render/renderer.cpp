@@ -1282,7 +1282,10 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         float roughness, float metallic,
                         const Texture* albedoTexture,
                         const Texture* normalTexture,
-                        const Texture* ormTexture)
+                        const Texture* ormTexture,
+                        const Texture* emissiveTexture,
+                        const core::Color& emissive,
+                        float emissiveStrength)
 {
     if (!mesh.IsValid()) return;
 
@@ -1298,6 +1301,9 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     bool useNormalTexture = normalTexture &&
         normalTexture->IsValid() &&
         m_textureAllocator.IsInUse(normalTexture->descriptor);
+    bool useEmissiveTexture = emissiveTexture &&
+        emissiveTexture->IsValid() &&
+        m_textureAllocator.IsInUse(emissiveTexture->descriptor);
 
     // Compute world-view-projection
     core::Mat4x4 wvp = worldMatrix * m_viewProj;
@@ -1329,6 +1335,13 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.normalTextureIndex = useNormalTexture ? normalTexture->descriptor.index : 0u;
     material.useOrmTexture = useOrmTexture ? 1u : 0u;
     material.ormTextureIndex = useOrmTexture ? ormTexture->descriptor.index : 0u;
+    material.emissive[0] = emissive.r;
+    material.emissive[1] = emissive.g;
+    material.emissive[2] = emissive.b;
+    material.emissiveStrength = emissiveStrength;
+    material.useEmissiveTexture = useEmissiveTexture ? 1u : 0u;
+    material.emissiveTextureIndex =
+        useEmissiveTexture ? emissiveTexture->descriptor.index : 0u;
 
     auto materialAddr = UploadCB(&material, sizeof(material));
     cmd->SetGraphicsRootConstantBufferView(2, materialAddr);

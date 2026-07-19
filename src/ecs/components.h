@@ -68,6 +68,19 @@ struct Material
     // replacing them, which is also what glTF specifies - the scalars stay
     // meaningful as per-instance tints.
     uint32_t    ormTextureHandle = UINT32_MAX;
+
+    // Emissive radiance the surface adds regardless of incident light. The
+    // texture tints it per-texel; the colour and strength below scale it, so a
+    // single greyscale mask can drive many differently coloured emitters.
+    //
+    // NOTE: this is emission for SHADING only. Neither path treats emissive
+    // surfaces as light sources - the path tracer will see them when a ray
+    // happens to land on one, but there is no NEE sampling of emitters, so a
+    // bright panel will not illuminate the room. That needs light sampling,
+    // which is a separate piece of work.
+    core::Color emissive             = core::Color{ 0.0f, 0.0f, 0.0f, 1.0f };
+    float       emissiveStrength     = 0.0f;
+    uint32_t    emissiveTextureHandle = UINT32_MAX;
 };
 
 // =============================================================================

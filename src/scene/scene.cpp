@@ -155,13 +155,19 @@ void Scene::RenderEntities(render::D3D12Device& device,
         if (material.ormTextureHandle != UINT32_MAX)
             ormTexture = m_resources.GetTexture(TextureHandle(material.ormTextureHandle));
 
+        const render::Texture* emissiveTexture = nullptr;
+        if (material.emissiveTextureHandle != UINT32_MAX)
+            emissiveTexture =
+                m_resources.GetTexture(TextureHandle(material.emissiveTextureHandle));
+
         const core::Mat4x4 worldMatrix =
             transform.ToCameraRelativeMatrix(cameraPosition);
 
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,
                           material.albedo, material.roughness, material.metallic,
-                          albedoTexture, normalTexture, ormTexture);
+                          albedoTexture, normalTexture, ormTexture, emissiveTexture,
+                          material.emissive, material.emissiveStrength);
     }
 }
 
@@ -323,6 +329,7 @@ void Scene::PathTraceEntities(
     std::vector<const render::Texture*> albedoTextures;
     std::vector<const render::Texture*> normalTextures;
     std::vector<const render::Texture*> ormTextures;
+    std::vector<const render::Texture*> emissiveTextures;
     materials.reserve(meshPool->Count());
     instanceData.reserve(meshPool->Count());
 
@@ -383,6 +390,9 @@ void Scene::PathTraceEntities(
         const uint32_t normalTextureIndex =
             resolveTextureIndex(mat.normalTextureHandle, normalTextures,
                                 render::kMaxRTNormalTextures, "normal");
+        const uint32_t emissiveTextureIndex =
+            resolveTextureIndex(mat.emissiveTextureHandle, emissiveTextures,
+                                render::kMaxRTEmissiveTextures, "emissive");
 
         render::RTMaterialData rtMat = {};
         rtMat.albedo[0]  = mat.albedo.r;
@@ -397,6 +407,13 @@ void Scene::PathTraceEntities(
         rtMat.useNormalTexture = normalTextureIndex == UINT32_MAX ? 0u : 1u;
         rtMat.ormTextureIndex = ormTextureIndex == UINT32_MAX ? 0u : ormTextureIndex;
         rtMat.useOrmTexture = ormTextureIndex == UINT32_MAX ? 0u : 1u;
+        rtMat.emissive[0] = mat.emissive.r;
+        rtMat.emissive[1] = mat.emissive.g;
+        rtMat.emissive[2] = mat.emissive.b;
+        rtMat.emissiveStrength = mat.emissiveStrength;
+        rtMat.emissiveTextureIndex =
+            emissiveTextureIndex == UINT32_MAX ? 0u : emissiveTextureIndex;
+        rtMat.useEmissiveTexture = emissiveTextureIndex == UINT32_MAX ? 0u : 1u;
         materials.push_back(rtMat);
 
         render::RTInstanceData rtInstance = {};
@@ -444,6 +461,8 @@ void Scene::PathTraceEntities(
                           albedoTextures.data(), static_cast<uint32_t>(albedoTextures.size()),
                           normalTextures.data(), static_cast<uint32_t>(normalTextures.size()),
                           ormTextures.data(), static_cast<uint32_t>(ormTextures.size()),
+                          emissiveTextures.data(),
+                          static_cast<uint32_t>(emissiveTextures.size()),
                           static_cast<uint32_t>(materials.size()),
                           qualityMode);
 }

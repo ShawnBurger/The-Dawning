@@ -155,4 +155,17 @@ std::vector<uint32_t> GenerateCheckerORMTextureRGBA8(
     float baseMetallic,
     float altMetallic);
 
+// Emissive mask: bright rectangular panels on a black field, with a dim border
+// inside each panel so the mask has structure rather than being a flat fill.
+//
+// Greyscale by construction - the colour comes from ecs::Material::emissive, so
+// one generated mask can drive differently coloured emitters. Black elsewhere,
+// which matters: emission is added unconditionally, so a mask that is nonzero
+// everywhere would wash the whole surface out.
+std::vector<uint32_t> GeneratePanelEmissiveTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    uint32_t cellSize,
+    float panelFraction);
+
 } // namespace render

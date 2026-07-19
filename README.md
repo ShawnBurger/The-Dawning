@@ -13,8 +13,8 @@ Do not merge old snapshots directly into this source tree.
 - Layer 4 material work is partially landed: albedo/normal textures,
   Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
   linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
-  SM 6.6 bindless and emissive maps do not. See "Material System Status"
-  below and `CLAUDE.md`.
+  emissive maps; SM 6.6 bindless does not. See "Material System Status" below
+  and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -151,8 +151,7 @@ Microsoft.Direct3D.DXC NuGet package.
 ## Material System Status
 
 Layer 4 is partially implemented. What exists is described below; SM 6.6
-bindless and emissive maps do not exist yet. See `CLAUDE.md` for the full
-done/not-done split.
+bindless does not exist yet. See `CLAUDE.md` for the full done/not-done split.
 
 Packed ORM maps (occlusion in R, roughness in G, metallic in B - the glTF
 convention) are sampled by both the raster and DXR paths and MODULATE the
@@ -160,6 +159,17 @@ material scalars rather than replacing them, so those stay usable as
 per-instance tints. Occlusion is applied to ambient and environment terms only,
 never to direct light, because occluding next-event estimation would
 double-count the shadow ray.
+
+Emissive maps are sampled by both paths. The texture is a greyscale mask; the
+colour and strength come from the material, so one mask can drive many
+differently coloured emitters. Emission is added after lighting and is
+unaffected by occlusion or the Fresnel split, because it is radiance the surface
+produces rather than radiance it reflects.
+
+**Emissive surfaces are not light sources.** Neither path samples them. The path
+tracer sees emission when a ray happens to land on an emitter, but there is no
+next-event estimation of emitters, so a bright panel lights only itself. Making
+emitters illuminate the scene needs light sampling, which is separate work.
 
 Raster geometry and sky render into a linear `R16G16B16A16_FLOAT` scene target,
 and a fullscreen pass tone-maps that into the back buffer at the end of the
