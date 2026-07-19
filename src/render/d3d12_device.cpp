@@ -33,6 +33,12 @@ static const char* HrToString(HRESULT hr)
     }
 }
 
+static bool IsDeviceRemovalError(HRESULT hr)
+{
+    return hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET ||
+           hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
+}
+
 #define CHECK_HR(hr, msg) \
     if (FAILED(hr)) { core::Log::Errorf("%s: %s (0x%08X)", msg, HrToString(hr), hr); return false; }
 
@@ -192,7 +198,8 @@ bool D3D12Device::CreateCommandObjects()
     }
 
     // Close immediately — we'll reset it at the start of each frame
-    m_cmdList->Close();
+    hr = m_cmdList->Close();
+    CHECK_HR(hr, "Close initial command list");
 
     // Fence for CPU/GPU synchronization
     hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
@@ -345,25 +352,100 @@ bool D3D12Device::CreateDepthBuffer()
 // Frame Lifecycle
 // =============================================================================
 
-void D3D12Device::WaitForCurrentFrame()
+bool D3D12Device::WaitForFenceValue(uint64_t fenceValue, const char* context)
 {
-    // Wait until the GPU has finished processing this frame index's commands
-    uint64_t fenceValue = m_fenceValues[m_frameIndex];
-    if (m_fence->GetCompletedValue() < fenceValue)
+    if (m_deviceLost || !m_fence || !m_fenceEvent)
+        return false;
+
+    uint64_t completedValue = m_fence->GetCompletedValue();
+    if (completedValue == UINT64_MAX)
     {
-        m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent);
-        WaitForSingleObject(m_fenceEvent, INFINITE);
+        core::Log::Errorf("Fence reported device removal while waiting for %s", context);
+        m_deviceLost = true;
+        return false;
+    }
+
+    if (completedValue >= fenceValue)
+        return true;
+
+    const HRESULT eventHr = m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent);
+    if (FAILED(eventHr))
+    {
+        core::Log::Errorf("SetEventOnCompletion (%s) failed: %s (0x%08X)",
+                          context, HrToString(eventHr), eventHr);
+        if (IsDeviceRemovalError(eventHr))
+            m_deviceLost = true;
+        return false;
+    }
+
+    // Do not disappear into an infinite OS wait. A device can be removed after
+    // event registration; polling lets us observe D3D12's UINT64_MAX sentinel
+    // and leave shutdown/recovery paths instead of waiting on an event that may
+    // never be signaled.
+    for (;;)
+    {
+        const DWORD waitResult = WaitForSingleObject(m_fenceEvent, 1000);
+        if (waitResult == WAIT_OBJECT_0)
+            return true;
+
+        if (waitResult != WAIT_TIMEOUT)
+        {
+            core::Log::Errorf("Fence wait (%s) failed: result=0x%08X error=%lu",
+                              context, waitResult, GetLastError());
+            return false;
+        }
+
+        completedValue = m_fence->GetCompletedValue();
+        if (completedValue == UINT64_MAX)
+        {
+            core::Log::Errorf("Device removed while waiting for %s", context);
+            m_deviceLost = true;
+            return false;
+        }
+        if (completedValue >= fenceValue)
+            return true;
     }
 }
 
-void D3D12Device::ResetCommandList()
+bool D3D12Device::WaitForCurrentFrame()
 {
-    m_cmdAllocators[m_frameIndex]->Reset();
-    m_cmdList->Reset(m_cmdAllocators[m_frameIndex].Get(), nullptr);
+    // Wait until the GPU has finished processing this frame index's commands.
+    return WaitForFenceValue(m_fenceValues[m_frameIndex], "the current frame");
 }
 
-void D3D12Device::ExecuteAndPresent(bool vsync)
+bool D3D12Device::ResetCommandList()
 {
+    if (m_deviceLost || !m_cmdAllocators[m_frameIndex] || !m_cmdList)
+        return false;
+
+    HRESULT hr = m_cmdAllocators[m_frameIndex]->Reset();
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Command allocator Reset failed: %s (0x%08X)",
+                          HrToString(hr), hr);
+        if (IsDeviceRemovalError(hr))
+            m_deviceLost = true;
+        return false;
+    }
+
+    hr = m_cmdList->Reset(m_cmdAllocators[m_frameIndex].Get(), nullptr);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Command list Reset failed: %s (0x%08X)",
+                          HrToString(hr), hr);
+        if (IsDeviceRemovalError(hr))
+            m_deviceLost = true;
+        return false;
+    }
+
+    return true;
+}
+
+bool D3D12Device::ExecuteAndPresent(bool vsync)
+{
+    if (m_deviceLost || !m_cmdList || !m_cmdQueue || !m_swapChain)
+        return false;
+
     // Close command list. This is the most valuable HRESULT in the frame: a recording
     // error surfaces here as a loggable failure, whereas submitting a list that failed
     // to close turns it into an opaque device removal.
@@ -372,7 +454,9 @@ void D3D12Device::ExecuteAndPresent(bool vsync)
     {
         core::Log::Errorf("Command list Close failed: %s (0x%08X) - skipping submit",
                           HrToString(closeHr), closeHr);
-        return;
+        if (IsDeviceRemovalError(closeHr))
+            m_deviceLost = true;
+        return false;
     }
 
     // Execute
@@ -383,10 +467,11 @@ void D3D12Device::ExecuteAndPresent(bool vsync)
     UINT syncInterval = vsync ? 1 : 0;
     UINT presentFlags = (!vsync && m_caps.tearingSupported) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     HRESULT hr = m_swapChain->Present(syncInterval, presentFlags);
-    if (FAILED(hr))
+    const bool presentSucceeded = SUCCEEDED(hr);
+    if (!presentSucceeded)
     {
         core::Log::Errorf("Present failed: %s (0x%08X)", HrToString(hr), hr);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED)
+        if (IsDeviceRemovalError(hr))
         {
             HRESULT reason = m_device->GetDeviceRemovedReason();
             core::Log::Errorf("Device removed reason: 0x%08X", reason);
@@ -442,15 +527,18 @@ void D3D12Device::ExecuteAndPresent(bool vsync)
     }
 
     // Only advance frame if device is still healthy
-    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
+    if (IsDeviceRemovalError(hr))
     {
         m_deviceLost = true;
         core::Log::Error("Device lost — frame advancement halted");
-        return;
+        return false;
     }
 
     // Signal fence and move to next frame
-    MoveToNextFrame();
+    if (!MoveToNextFrame())
+        return false;
+
+    return presentSucceeded;
 }
 
 // =============================================================================
@@ -484,41 +572,98 @@ void D3D12Device::ProcessDeferredReleases()
     m_deferredReleases.Process(m_fence ? m_fence->GetCompletedValue() : 0);
 }
 
-void D3D12Device::MoveToNextFrame()
+bool D3D12Device::MoveToNextFrame()
 {
+    if (m_deviceLost || !m_cmdQueue || !m_fence || !m_swapChain)
+        return false;
+
     // Signal the fence for the current frame
     m_globalFenceValue++;
     m_fenceValues[m_frameIndex] = m_globalFenceValue;
-    m_cmdQueue->Signal(m_fence.Get(), m_globalFenceValue);
+    const HRESULT signalHr = m_cmdQueue->Signal(m_fence.Get(), m_globalFenceValue);
+    if (FAILED(signalHr))
+    {
+        core::Log::Errorf("Frame fence Signal failed: %s (0x%08X)",
+                          HrToString(signalHr), signalHr);
+        if (IsDeviceRemovalError(signalHr))
+            m_deviceLost = true;
+        return false;
+    }
 
     // Advance to next frame
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
     // Wait for the next frame's previous work to complete
-    WaitForCurrentFrame();
+    if (!WaitForCurrentFrame())
+        return false;
 
     // Once per frame, after the wait, so the fence has advanced as far as it is
     // going to this frame. Callers never have to remember to do this.
     ProcessDeferredReleases();
+    return true;
 }
 
-void D3D12Device::WaitForGpu()
+bool D3D12Device::WaitForGpu()
 {
+    // A removed device will never advance this fence. Waiting here during
+    // shutdown used to hang the process indefinitely after a device-loss exit.
+    if (m_deviceLost || !m_cmdQueue || !m_fence || !m_fenceEvent)
+        return false;
+
     // Signal and wait for all frames
     m_globalFenceValue++;
-    m_cmdQueue->Signal(m_fence.Get(), m_globalFenceValue);
+    const HRESULT signalHr = m_cmdQueue->Signal(m_fence.Get(), m_globalFenceValue);
+    if (FAILED(signalHr))
+    {
+        core::Log::Errorf("GPU fence Signal failed: %s (0x%08X)",
+                          HrToString(signalHr), signalHr);
+        if (IsDeviceRemovalError(signalHr))
+            m_deviceLost = true;
+        return false;
+    }
 
-    m_fence->SetEventOnCompletion(m_globalFenceValue, m_fenceEvent);
-    WaitForSingleObject(m_fenceEvent, INFINITE);
+    if (!WaitForFenceValue(m_globalFenceValue, "GPU idle"))
+        return false;
 
     // Update all fence values
     for (uint32_t i = 0; i < kFrameCount; i++)
         m_fenceValues[i] = m_globalFenceValue;
+
+    ProcessDeferredReleases();
+    return true;
 }
 
 // =============================================================================
 // Resize
 // =============================================================================
+bool D3D12Device::HasValidFrameTargets() const
+{
+    if (!m_depthBuffer)
+        return false;
+
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        if (!m_renderTargets[i])
+            return false;
+    }
+
+    return true;
+}
+
+bool D3D12Device::RebuildFrameTargets()
+{
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+        m_renderTargets[i].Reset();
+    m_depthBuffer.Reset();
+
+    if (!CreateRTVs())
+        return false;
+    if (!CreateDepthBuffer())
+        return false;
+
+    return true;
+}
+
 bool D3D12Device::Resize(int newWidth, int newHeight)
 {
     if (newWidth <= 0 || newHeight <= 0) return false;
@@ -531,10 +676,25 @@ bool D3D12Device::Resize(int newWidth, int newHeight)
         return false;
     }
 
+    if (newWidth == m_width && newHeight == m_height)
+    {
+        if (HasValidFrameTargets())
+            return true;
+
+        core::Log::Warn("Frame targets are incomplete; rebuilding without resizing the swap chain");
+        if (!WaitForGpu())
+            return false;
+        return RebuildFrameTargets();
+    }
+
     core::Log::Infof("Resizing swap chain: %dx%d", newWidth, newHeight);
 
     // Wait for all frames to complete
-    WaitForGpu();
+    if (!WaitForGpu())
+        return false;
+
+    const int oldWidth = m_width;
+    const int oldHeight = m_height;
 
     // Release back buffer references
     for (uint32_t i = 0; i < kFrameCount; i++)
@@ -546,15 +706,39 @@ bool D3D12Device::Resize(int newWidth, int newHeight)
         static_cast<UINT>(newWidth), static_cast<UINT>(newHeight),
         DXGI_FORMAT_R8G8B8A8_UNORM,
         m_caps.tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
-    CHECK_HR(hr, "ResizeBuffers");
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("ResizeBuffers: %s (0x%08X)", HrToString(hr), hr);
+        if (IsDeviceRemovalError(hr))
+        {
+            m_deviceLost = true;
+            return false;
+        }
+
+        // The back-buffer ComPtrs had to be released before ResizeBuffers. Try to
+        // reacquire the previous buffers and recreate their depth target. Rendering
+        // remains skipped unless that repair succeeds, and the window keeps the
+        // resize request pending for another attempt.
+        m_width = oldWidth;
+        m_height = oldHeight;
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+        if (RebuildFrameTargets())
+            core::Log::Warn("Restored previous frame targets after resize failure");
+        else
+            core::Log::Error("Failed to restore previous frame targets after resize failure");
+        return false;
+    }
 
     m_width = newWidth;
     m_height = newHeight;
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
-    // Recreate RTVs and depth buffer
-    if (!CreateRTVs())       return false;
-    if (!CreateDepthBuffer()) return false;
+    // Recreate RTVs and depth buffer. If either allocation fails, m_width and
+    // m_height intentionally remain at the new swap-chain size. The next retry
+    // enters the same-size repair path above instead of calling ResizeBuffers a
+    // second time against partially rebuilt resources.
+    if (!RebuildFrameTargets())
+        return false;
 
     // Reset fence values
     for (uint32_t i = 0; i < kFrameCount; i++)
@@ -697,7 +881,11 @@ bool D3D12Device::WriteBackBufferCapture(const char* path)
 
     // The copy was recorded in the frame that has since been submitted; make sure
     // it has actually retired before touching the mapped bytes.
-    WaitForGpu();
+    if (!WaitForGpu())
+    {
+        core::Log::Error("Back-buffer capture: GPU did not retire the readback copy");
+        return false;
+    }
 
     const uint64_t readBytes = m_captureRowPitch * static_cast<uint64_t>(m_captureHeight);
 
@@ -951,13 +1139,13 @@ void D3D12Device::ProbeCapabilities()
 // =============================================================================
 void D3D12Device::Shutdown()
 {
-    WaitForGpu();
+    const bool gpuIdle = WaitForGpu();
+    if (!gpuIdle && !m_deviceLost && m_cmdQueue && m_fence)
+        core::Log::Warn("D3D12 shutdown continuing after GPU idle wait failed");
 
-    // WaitForGpu has retired every frame, so nothing queued can still be in use.
-    // Clear unconditionally rather than via ProcessDeferredReleases: if the
-    // device was lost the fence never advanced, and these must not leak to
-    // process exit. This must also happen BEFORE the fence and event are torn
-    // down, since ProcessDeferredReleases reads the fence.
+    // Clear unconditionally before the fence and event are torn down. The normal
+    // path is GPU-idle; after device loss, no command stream can make progress and
+    // fence-based processing would otherwise retain the queue until destruction.
     if (!m_deferredReleases.Empty())
     {
         core::Log::Infof("Releasing %zu deferred GPU resource(s) at shutdown",

@@ -2,6 +2,7 @@ param(
     [double]$Seconds = 4.0,
     [switch]$RasterOnly,
     [switch]$FullQuality,
+    [switch]$ResizeStress,
     [int]$TimeoutSeconds = 15,
     [string]$Config = "Debug",
     [switch]$NoCapture
@@ -56,6 +57,7 @@ if (Test-Path -LiteralPath $capture) { Remove-Item -LiteralPath $capture -Force 
 $arguments = @("--smoke", "--smoke-seconds=$Seconds")
 if (!$RasterOnly)  { $arguments += "--smoke-rt" }
 if ($FullQuality)  { $arguments += "--smoke-full" }
+if ($ResizeStress) { $arguments += "--smoke-resize" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
 
 $process = Start-Process -FilePath $exe `
@@ -120,6 +122,7 @@ if ($logText -notmatch "Smoke mode complete") {
 
 Assert-Marker "overlay" "ok"
 Assert-Marker "timeline" "fixed"
+if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
 if ($markers["fixed_hz"] -ne "60") {
     throw "Smoke timeline frequency was '$($markers['fixed_hz'])', expected '60'."

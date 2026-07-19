@@ -20,6 +20,7 @@ struct AppOptions
     bool smokeRT = false;
     bool smokeFullQuality = false;
     bool smokeCapture = false;
+    bool smokeResize = false;
     bool showOverlay = true;
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
@@ -32,7 +33,7 @@ public:
 
 private:
     bool Initialize();
-    void InitializeScene();
+    bool InitializeScene();
     void InitializePathTracingState();
     int RunMainLoop();
     void Shutdown();
@@ -40,9 +41,10 @@ private:
     bool EnsurePathTracing();
     void TogglePathTracing();
     bool HandleResize();
+    bool ApplySmokeResizeStep();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
     void UpdateCamera(const core::TimeStep& timeStep);
-    void RenderFrame(const core::TimeStep& timeStep);
+    bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
 
     AppOptions m_options;
@@ -70,6 +72,7 @@ private:
     bool m_rtInitAttempted = false;
     bool m_smokeRTStarted = false;
     bool m_captureThisFrame = false;
+    uint32_t m_smokeResizeRequests = 0;
     uint64_t m_frameCount = 0;
     float m_titleTimer = 0.0f;
 

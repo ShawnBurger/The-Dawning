@@ -74,9 +74,9 @@ public:
     void Shutdown();
 
     // Frame lifecycle
-    void WaitForCurrentFrame();
-    void ResetCommandList();
-    void ExecuteAndPresent(bool vsync = true);
+    bool WaitForCurrentFrame();
+    bool ResetCommandList();
+    bool ExecuteAndPresent(bool vsync = true);
 
     // Resize swap chain (call when window resizes)
     bool Resize(int newWidth, int newHeight);
@@ -145,7 +145,7 @@ public:
     const GpuCapabilities& Caps() const { return m_caps; }
 
     // Wait for all GPU work to complete (used during shutdown/resize)
-    void WaitForGpu();
+    bool WaitForGpu();
 
 private:
     bool CreateDevice(bool enableDebugLayer);
@@ -153,9 +153,12 @@ private:
     bool CreateSwapChain(HWND hwnd);
     bool CreateRTVs();
     bool CreateDepthBuffer();
+    bool WaitForFenceValue(uint64_t fenceValue, const char* context);
     void ProbeCapabilities();
     void SetupDRED();
-    void MoveToNextFrame();
+    bool MoveToNextFrame();
+    bool HasValidFrameTargets() const;
+    bool RebuildFrameTargets();
 
     // DXGI
     ComPtr<IDXGIFactory6>    m_factory;

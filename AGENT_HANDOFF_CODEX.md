@@ -13,6 +13,7 @@ Codex is taking a disjoint failure-recovery lane on
 - `src/render/d3d12_device.cpp`
 - `src/app.h`
 - `src/app.cpp`
+- `tools/smoke_test.ps1`
 - this handoff entry
 
 The goal is to make command-list reset/submission and fence failures explicit,
