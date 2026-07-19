@@ -14,6 +14,7 @@ namespace render
 static constexpr uint32_t kRTUavDescriptorCount = 2;
 static constexpr uint32_t kRTAlbedoDescriptorBase = kRTUavDescriptorCount;
 static constexpr uint32_t kRTNormalDescriptorBase = kRTAlbedoDescriptorBase + kMaxRTAlbedoTextures;
+static constexpr uint32_t kRTOrmDescriptorBase    = kRTNormalDescriptorBase + kMaxRTNormalTextures;
 
 static bool CreateMappedUploadBuffer(
     ID3D12Device5* device,
@@ -145,7 +146,7 @@ void PathTracer::Shutdown()
 bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = kRTNormalDescriptorBase + kMaxRTNormalTextures;
+    heapDesc.NumDescriptors = kRTOrmDescriptorBase + kMaxRTOrmTextures;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -185,11 +186,14 @@ void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
 
     clearRange(kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures);
     clearRange(kRTNormalDescriptorBase, kMaxRTNormalTextures);
+    clearRange(kRTOrmDescriptorBase, kMaxRTOrmTextures);
 
     m_boundAlbedoTextureCount = 0;
     m_boundAlbedoTextureResources.fill(nullptr);
     m_boundNormalTextureCount = 0;
     m_boundNormalTextureResources.fill(nullptr);
+    m_boundOrmTextureCount = 0;
+    m_boundOrmTextureResources.fill(nullptr);
 }
 
 uint32_t PathTracer::UpdateTextureDescriptors(
@@ -475,6 +479,8 @@ void PathTracer::Dispatch(
     uint32_t albedoTextureCount,
     const Texture* const* normalTextures,
     uint32_t normalTextureCount,
+    const Texture* const* ormTextures,
+    uint32_t ormTextureCount,
     uint32_t instanceCount,
     RTQualityMode qualityMode)
 {
@@ -632,6 +638,9 @@ void PathTracer::Dispatch(
     UpdateTextureDescriptors(device.Device5(), normalTextures, normalTextureCount,
                              kRTNormalDescriptorBase, kMaxRTNormalTextures,
                              m_boundNormalTextureCount, m_boundNormalTextureResources.data());
+    UpdateTextureDescriptors(device.Device5(), ormTextures, ormTextureCount,
+                             kRTOrmDescriptorBase, kMaxRTOrmTextures,
+                             m_boundOrmTextureCount, m_boundOrmTextureResources.data());
 
     // --- Set up for DispatchRays ---
     cmd->SetComputeRootSignature(m_pipeline.GetGlobalRootSig());
@@ -665,7 +674,9 @@ void PathTracer::Dispatch(
     // [7] Triangle position buffer
     cmd->SetComputeRootShaderResourceView(7,
         m_trianglePositionBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
-    // [8] Material texture descriptor table (albedo, then normal)
+    // [8] Material texture descriptor table (albedo, then normal, then ORM).
+    // The table base is the albedo base; the ranges declared in the root
+    // signature carry the offsets, so this stays a single bind.
     D3D12_GPU_DESCRIPTOR_HANDLE textureTable = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
     textureTable.ptr += static_cast<UINT64>(kRTAlbedoDescriptorBase) * m_srvUavDescSize;
     cmd->SetComputeRootDescriptorTable(8, textureTable);

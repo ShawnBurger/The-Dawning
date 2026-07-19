@@ -70,7 +70,11 @@ struct CBMaterial
     uint32_t useNormalTexture;
     uint32_t albedoTextureIndex;
     uint32_t normalTextureIndex;
+    uint32_t useOrmTexture;
+    uint32_t ormTextureIndex;
 };
+static_assert(sizeof(CBMaterial) == 48,
+              "CBMaterial must match cbuffer CBMaterial (b2) in basic_ps.hlsl");
 
 // Align size to 256 bytes for CBV placement
 constexpr uint32_t AlignCBSize(uint32_t size)
@@ -100,7 +104,8 @@ public:
                   float roughness = 0.5f,
                   float metallic = 0.0f,
                   const Texture* albedoTexture = nullptr,
-                  const Texture* normalTexture = nullptr);
+                  const Texture* normalTexture = nullptr,
+                  const Texture* ormTexture = nullptr);
 
     // Register a texture SRV for raster material sampling.
     DescriptorHandle RegisterTexture(ID3D12Device* device, const Texture& texture);

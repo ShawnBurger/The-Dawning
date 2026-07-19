@@ -24,6 +24,7 @@ namespace render
 
 constexpr uint32_t kMaxRTAlbedoTextures = 64;
 constexpr uint32_t kMaxRTNormalTextures = 64;
+constexpr uint32_t kMaxRTOrmTextures    = 64;
 
 // =============================================================================
 // Per-frame constants for the path tracer (uploaded each frame)
@@ -65,7 +66,15 @@ struct RTMaterialData
     uint32_t useAlbedoTexture;
     uint32_t normalTextureIndex;
     uint32_t useNormalTexture;
+    uint32_t ormTextureIndex;
+    uint32_t useOrmTexture;
 };
+
+// Must stay byte-identical to struct MaterialData in shaders/path_trace.hlsl.
+// StructuredBuffer elements pack tightly, so every member being 4 bytes means
+// the C++ and HLSL layouts agree only as long as both lists match exactly.
+static_assert(sizeof(RTMaterialData) == 48,
+              "RTMaterialData layout changed - update MaterialData in path_trace.hlsl");
 
 // =============================================================================
 // RTPipeline

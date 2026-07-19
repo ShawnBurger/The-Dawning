@@ -1281,7 +1281,8 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         const core::Color& albedo,
                         float roughness, float metallic,
                         const Texture* albedoTexture,
-                        const Texture* normalTexture)
+                        const Texture* normalTexture,
+                        const Texture* ormTexture)
 {
     if (!mesh.IsValid()) return;
 
@@ -1289,6 +1290,11 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     bool useAlbedoTexture = albedoTexture &&
         albedoTexture->IsValid() &&
         m_textureAllocator.IsInUse(albedoTexture->descriptor);
+    // Same liveness predicate the other two use: a generational descriptor
+    // handle, not a bare index, so a recycled slot cannot pass.
+    bool useOrmTexture = ormTexture &&
+        ormTexture->IsValid() &&
+        m_textureAllocator.IsInUse(ormTexture->descriptor);
     bool useNormalTexture = normalTexture &&
         normalTexture->IsValid() &&
         m_textureAllocator.IsInUse(normalTexture->descriptor);
@@ -1321,6 +1327,8 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.useNormalTexture = useNormalTexture ? 1u : 0u;
     material.albedoTextureIndex = useAlbedoTexture ? albedoTexture->descriptor.index : 0u;
     material.normalTextureIndex = useNormalTexture ? normalTexture->descriptor.index : 0u;
+    material.useOrmTexture = useOrmTexture ? 1u : 0u;
+    material.ormTextureIndex = useOrmTexture ? ormTexture->descriptor.index : 0u;
 
     auto materialAddr = UploadCB(&material, sizeof(material));
     cmd->SetGraphicsRootConstantBufferView(2, materialAddr);

@@ -77,6 +77,8 @@ public:
                   uint32_t albedoTextureCount,
                   const Texture* const* normalTextures,
                   uint32_t normalTextureCount,
+                  const Texture* const* ormTextures,
+                  uint32_t ormTextureCount,
                   uint32_t instanceCount,
                   RTQualityMode qualityMode);
 
@@ -160,6 +162,8 @@ private:
     std::array<ID3D12Resource*, kMaxRTAlbedoTextures> m_boundAlbedoTextureResources = {};
     uint32_t m_boundNormalTextureCount = 0;
     std::array<ID3D12Resource*, kMaxRTNormalTextures> m_boundNormalTextureResources = {};
+    uint32_t m_boundOrmTextureCount = 0;
+    std::array<ID3D12Resource*, kMaxRTOrmTextures> m_boundOrmTextureResources = {};
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
