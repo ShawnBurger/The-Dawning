@@ -17,6 +17,15 @@ cbuffer CBPerFrame : register(b1)
     float  pad2;
     float3 eyePos;         // Camera world position
     float  pad3;
+    // Camera basis; used by sky_ps.hlsl. Declared here too because both shaders
+    // bind the same b1 and the layouts must agree. Keep in sync with
+    // struct CBPerFrame in src/render/renderer.h (static_assert'd at 112 bytes).
+    float3 camRight;
+    float  tanHalfFovY;
+    float3 camUp;
+    float  aspect;
+    float3 camForward;
+    float  pad4;
 };
 
 cbuffer CBMaterial : register(b2)
@@ -59,7 +68,13 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
     float det = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
     if (abs(det) >= 1e-6)
     {
-        float3 derivedT = dpdx * duvdy.y - dpdy * duvdx.y;
+        // Divide by det, do not merely test it. The tangent is
+        // (dpdx*duvdy.y - dpdy*duvdx.y) / det; using the numerator alone discards
+        // sign(det), and normalize() below cannot recover it - so T came out
+        // negated wherever the UV parameterisation is mirrored. Both normal-mapped
+        // objects in the demo scene have det < 0, and the DXR path computes this
+        // correctly, so the two render paths disagreed on the same geometry.
+        float3 derivedT = (dpdx * duvdy.y - dpdy * duvdx.y) / det;
         if (dot(derivedT, derivedT) > 1e-8)
         {
             T = normalize(derivedT - N * dot(N, derivedT));

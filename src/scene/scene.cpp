@@ -381,6 +381,24 @@ void Scene::PathTraceEntities(
         rtInstance.triangleNormalOffset = static_cast<uint32_t>(triangleNormals.size());
         rtInstance.triangleUVOffset = static_cast<uint32_t>(triangleUVs.size());
         rtInstance.trianglePositionOffset = static_cast<uint32_t>(trianglePositions.size());
+
+        // Normal matrix for this instance, stored transposed so the closest-hit
+        // shader can evaluate component i as dot(row[i].xyz, objectNormal). Uses the
+        // same InverseTranspose3x3 the raster path uses, so both paths now shade
+        // identically under non-uniform scale.
+        {
+            const auto& instTransform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
+            const core::Mat4x4 instWorld = instTransform.ToMatrix();
+            const core::Mat4x4 normalMat = core::Mat4x4::InverseTranspose3x3(instWorld);
+            for (int row = 0; row < 3; ++row)
+            {
+                rtInstance.normalMatrix[row * 4 + 0] = normalMat.m[0][row];
+                rtInstance.normalMatrix[row * 4 + 1] = normalMat.m[1][row];
+                rtInstance.normalMatrix[row * 4 + 2] = normalMat.m[2][row];
+                rtInstance.normalMatrix[row * 4 + 3] = 0.0f;
+            }
+        }
+
         instanceData.push_back(rtInstance);
 
         triangleNormals.insert(triangleNormals.end(),

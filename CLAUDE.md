@@ -43,14 +43,20 @@ Layer 3 provides ECS architecture; the RT extension adds full DXR path tracing:
   - Russian roulette path termination. Note the estimator is not unbiased:
     throughput is hard-clamped to 4.0 (path_trace.hlsl:502) and radiance is
     firefly-clamped against the previous frame
-  - PCG hash RNG seeded per pixel and per frame index. The frame index supplied
-    is the accumulation index (path_tracer.cpp:674), which resets to 0 on any
-    camera or quality change — so while the camera is moving, every frame draws
-    the identical random sequence
-  - NO temporal accumulation. `accumulatedRadiance` (path_trace.hlsl:525) is a
-    pass-through alias for the current frame's radiance. The HDR history texture
-    is read only as the firefly-clamp reference; it is never blended
-  - Firefly clamping (references the previous frame's already-clamped output)
+  - PCG hash RNG, each dimension hashed in sequence. Seeded from a wall-clock
+    dispatch counter (`seedIndex`), NOT the accumulation index — the two are
+    separate fields precisely because the accumulation index resets on camera
+    motion and would otherwise pin every moving frame to one random sequence
+  - Temporal accumulation: progressive running mean weighted 1/(n+1) over the
+    accumulation index, which the CPU resets to 0 on any camera or quality
+    change. Equal weight per frame, so variance falls as 1/n while the view is
+    still. No reprojection — a moving camera restarts accumulation
+  - Firefly clamping against a fixed per-sample luminance ceiling, applied before
+    the sample enters the mean. NaN/Inf samples are dropped rather than
+    propagated into the history buffer
+  - Indirect specular uses GGX VNDF importance sampling; with a separable Smith
+    G the Monte Carlo weight reduces to F * G1(NdotL). Rays sampled below the
+    horizon terminate the path
 - DXC shader compiler integration (dxcompiler.dll loaded on-demand for lib_6_3+)
 - Dual render mode: F1 toggles between rasterization and path tracing
 - RT output copied to back buffer (future: DLSS Ray Reconstruction)
@@ -104,10 +110,10 @@ Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relat
 
 ## RT UPGRADE PATH (future)
 
-Phase 1 (current): Basic path tracing with NEE. Temporal accumulation is NOT
-         implemented — the CPU-side apparatus (accumulation index, camera-change
-         detection, HDR history texture) exists but the shader never blends.
-         Implementing it is the first item in this phase, not a finished one
+Phase 1 (current): Path tracing with NEE, VNDF specular sampling, and a
+         progressive running-mean accumulator that resets on camera motion.
+         Not yet done in this phase: reprojection, so accumulation restarts
+         whenever the view changes rather than reusing history
 Phase 2: NVIDIA RTXDI (ReSTIR DI) for efficient direct light sampling
 Phase 3: ReSTIR GI for indirect illumination resampling
 Phase 4: SER (Shader Execution Reordering) via NvHitObject/NvReorderThread

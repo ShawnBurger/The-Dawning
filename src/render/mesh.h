@@ -65,7 +65,24 @@ struct RTInstanceData
     uint32_t triangleUVOffset = 0;
     uint32_t trianglePositionOffset = 0;
     uint32_t pad = 0;
+
+    // Object-to-world normal matrix, i.e. InverseTranspose3x3 of the world matrix,
+    // stored TRANSPOSED as three float4 rows so the shader can produce component i
+    // with a plain dot(row[i].xyz, objectNormal). Normals are covectors: the
+    // closest-hit shader previously used ObjectToWorld3x4() directly, which skews
+    // them under non-uniform scale while the raster path (renderer.cpp ->
+    // basic_vs.hlsl) transforms them correctly, so the two paths disagreed.
+    //
+    // Explicit float4 rows rather than a matrix type: StructuredBuffer elements do
+    // not get the column-major reinterpretation that cbuffer matrices do, and
+    // spelling out the rows keeps the layout unambiguous on both sides.
+    // Identity by default.
+    float normalMatrix[12] = { 1.0f, 0.0f, 0.0f, 0.0f,
+                               0.0f, 1.0f, 0.0f, 0.0f,
+                               0.0f, 0.0f, 1.0f, 0.0f };
 };
+static_assert(sizeof(RTInstanceData) == 64,
+              "RTInstanceData must match struct InstanceData in shaders/path_trace.hlsl");
 
 // Input layout description matching the Vertex struct
 const D3D12_INPUT_ELEMENT_DESC kVertexLayout[] =

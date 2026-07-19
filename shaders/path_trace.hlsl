@@ -64,10 +64,14 @@ StructuredBuffer<TriangleNormalData> g_TriangleNormals : register(t2, space0);
 
 struct InstanceData
 {
-    uint  triangleNormalOffset;
-    uint  triangleUVOffset;
-    uint  trianglePositionOffset;
-    uint  pad;
+    uint   triangleNormalOffset;
+    uint   triangleUVOffset;
+    uint   trianglePositionOffset;
+    uint   pad;
+    // Transposed object-to-world normal matrix; see RTInstanceData in mesh.h.
+    float4 normalMatrix0;
+    float4 normalMatrix1;
+    float4 normalMatrix2;
 };
 StructuredBuffer<InstanceData> g_InstanceData : register(t3, space0);
 
@@ -168,6 +172,50 @@ float3 SampleCosineHemisphere(float2 u, float3 N)
     return normalize(T * localDir.x + N * localDir.y + B * localDir.z);
 }
 
+// Build an orthonormal basis around N (Duff et al. 2017, branchless and stable).
+void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
+{
+    float sign = N.z >= 0.0f ? 1.0f : -1.0f;
+    float a = -1.0f / (sign + N.z);
+    float b = N.x * N.y * a;
+    T = float3(1.0f + sign * N.x * N.x * a, sign * b, -sign * N.x);
+    B = float3(b, sign + N.y * N.y * a, -N.y);
+}
+
+// Sample the GGX distribution of VISIBLE normals (Heitz 2018, "Sampling the GGX
+// Distribution of Visible Normals"). Ve is the view direction in tangent space
+// with the shading normal along +Z; the returned half-vector is in the same space.
+//
+// Importance-sampling the visible normals rather than perturbing a mirror
+// direction is what makes the Monte Carlo weight tractable: with a separable
+// Smith G, f*cos/pdf collapses to exactly F * G1(NdotL), with no explicit PDF
+// division and no D or G evaluation needed at the sample point.
+float3 SampleGGXVNDF(float3 Ve, float alpha, float2 u)
+{
+    // Warp to the hemisphere configuration.
+    float3 Vh = normalize(float3(alpha * Ve.x, alpha * Ve.y, Ve.z));
+
+    // Orthonormal basis around Vh.
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    float3 T1 = lensq > 0.0f ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq)
+                             : float3(1.0f, 0.0f, 0.0f);
+    float3 T2 = cross(Vh, T1);
+
+    // Uniform point on the projected disk, warped for the hemisphere.
+    float r   = sqrt(u.x);
+    float phi = 2.0f * PI * u.y;
+    float t1  = r * cos(phi);
+    float t2  = r * sin(phi);
+    float s   = 0.5f * (1.0f + Vh.z);
+    t2 = (1.0f - s) * sqrt(saturate(1.0f - t1 * t1)) + s * t2;
+
+    // Reproject onto the hemisphere.
+    float3 Nh = t1 * T1 + t2 * T2 + sqrt(saturate(1.0f - t1 * t1 - t2 * t2)) * Vh;
+
+    // Unwarp back to the ellipsoid configuration.
+    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0f, Nh.z)));
+}
+
 // Schlick Fresnel
 float3 FresnelSchlick(float cosTheta, float3 F0)
 {
@@ -204,24 +252,32 @@ float Luminance(float3 color)
     return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
 }
 
-float3 ClampFireflySample(float3 sampleRadiance, float3 previousRadiance, uint frameIndex)
+// Bound outlier samples before they enter the running mean.
+//
+// This deliberately does NOT reference the previous frame's radiance. The old
+// version clamped against `previousLum * 3 + 0.25`, i.e. against its own already
+// clamped output, which is a multiplicative ratchet rather than a filter: a bright
+// region could only grow 3x per frame from whatever it had previously been bounded
+// to, biasing the estimator by an amount determined by frame history instead of
+// sample statistics. Because the accumulation index resets on any camera motion,
+// the hard branch also ran on every frame while the user was moving.
+float3 ClampFireflySample(float3 sampleRadiance)
 {
+    // Scrub NaN/Inf first. The old code computed maxLum/sampleLum with an infinite
+    // sampleLum, evaluating Inf * 0 = NaN, and wrote that straight to g_Output
+    // where it would poison the accumulation buffer permanently.
+    if (any(isnan(sampleRadiance)) || any(isinf(sampleRadiance)))
+        return float3(0.0f, 0.0f, 0.0f);
+
     float sampleLum = Luminance(sampleRadiance);
     if (sampleLum <= 0.0001f)
         return sampleRadiance;
 
-    if (frameIndex == 0)
-    {
-        const float firstFrameLimit = 8.0f;
-        if (sampleLum > firstFrameLimit)
-            sampleRadiance *= firstFrameLimit / sampleLum;
-        return sampleRadiance;
-    }
-
-    float previousLum = Luminance(previousRadiance);
-    float maxLum = max(1.5f, previousLum * 3.0f + 0.25f);
-    if (sampleLum > maxLum)
-        sampleRadiance *= maxLum / sampleLum;
+    // Fixed energy ceiling per sample. Still biased - any firefly clamp is - but
+    // biased by a constant rather than by a history-dependent ratchet.
+    const float kMaxSampleLuminance = 24.0f;
+    if (sampleLum > kMaxSampleLuminance)
+        sampleRadiance *= kMaxSampleLuminance / sampleLum;
 
     return sampleRadiance;
 }
@@ -452,11 +508,14 @@ void RayGen()
             float3 envSpecular = envReflection * envF * envGloss;
             radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
         }
-        else
-        {
-            float3 ambient = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic);
-            radiance += throughput * ambient * (bounce == 0 ? 0.3f : 0.1f);
-        }
+        // Full path tracing adds no ad-hoc ambient. BSDF rays that escape the scene
+        // already collect environment radiance from the sky miss shader, so adding
+        // an ambient term at every path vertex double-counted it - with magic
+        // constants corresponding to no physical quantity. Worse, it defeated the
+        // bounce loop: the error was added per bounce rather than reduced per
+        // bounce, so no bounce count converged to ground truth. The stable-preview
+        // branch above keeps its fill deliberately, because it traces no secondary
+        // bounce and needs an approximation to stand in for one.
 
         if (bounce + 1 >= g_MaxBounces)
             break;
@@ -485,16 +544,39 @@ void RayGen()
         }
         else
         {
-            // Specular bounce (reflect with roughness perturbation)
-            float3 reflected = reflect(-V, N);
-            newDir = SampleCosineHemisphere(u, reflected);
+            // Specular bounce, GGX VNDF importance sampling.
+            //
+            // The previous version sampled a cosine lobe about the mirror direction,
+            // warped it by a non-invertible lerp, and multiplied throughput by F
+            // alone: no D, no G, no cos factor, and no PDF division - it computed no
+            // PDF at all. That is only the correct weight in the roughness == 0
+            // delta-mirror limit, so rough metals were systematically over-bright and
+            // indirect specular never converged to anything in particular. It also
+            // had no lower-hemisphere guard, firing a large share of rays at grazing
+            // angles straight into the surface.
+            float3 T, B;
+            BuildOrthonormalBasis(N, T, B);
 
-            // Lerp toward perfect reflection based on roughness
-            newDir = normalize(lerp(reflected, newDir, mat.roughness * mat.roughness));
+            // Clamp alpha away from zero so the VNDF stays well-defined; a true
+            // delta mirror would need a separate specular-path branch.
+            float alpha = max(mat.roughness * mat.roughness, 1e-3f);
+
+            float3 Ve = float3(dot(V, T), dot(V, B), dot(V, N));
+            float3 Hl = SampleGGXVNDF(Ve, alpha, u);
+            float3 H  = normalize(Hl.x * T + Hl.y * B + Hl.z * N);
+
+            newDir = reflect(-V, H);
+
+            float NdotL = dot(N, newDir);
+            if (NdotL <= 0.0f)
+                break;   // Sampled below the horizon; this path carries no energy.
 
             float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
-            float3 F = FresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
-            throughput *= F;
+            float3 F  = FresnelSchlick(saturate(dot(V, H)), F0);
+
+            // f * cos / pdf for VNDF sampling with separable Smith G reduces to
+            // F * G1(NdotL). See SampleGGXVNDF.
+            throughput *= F * GeometrySmithG1(saturate(NdotL), mat.roughness);
         }
 
         // Correct for sampling probability
@@ -521,8 +603,32 @@ void RayGen()
     float3 radiance = frameRadiance / float(samplesPerPixel);
 
     // Accumulate linear HDR radiance; tone mapping happens only for display.
-    float3 filteredRadiance = ClampFireflySample(radiance, g_Output[launchIndex].rgb, g_FrameIndex);
-    float3 accumulatedRadiance = filteredRadiance;
+    float3 filteredRadiance = ClampFireflySample(radiance);
+
+    // Progressive running mean over g_FrameIndex, which the CPU resets to 0 on any
+    // camera or quality change (path_tracer.cpp). Weighting by 1/(n+1) gives every
+    // frame's estimate equal weight, so variance falls as 1/n while the view is
+    // still - as opposed to an exponential blend, which would converge to a moving
+    // average and never actually resolve.
+    //
+    // This previously did not exist: `accumulatedRadiance` was a pass-through alias
+    // for the current frame, and the HDR history texture was read only as the
+    // firefly clamp's reference. The whole CPU-side apparatus - accumulation index,
+    // camera-change detection, the dedicated R16G16B16A16_FLOAT history texture -
+    // drove nothing.
+    float3 accumulatedRadiance;
+    if (g_FrameIndex == 0)
+    {
+        accumulatedRadiance = filteredRadiance;
+    }
+    else
+    {
+        float3 history = g_Output[launchIndex].rgb;
+        // Guard against a poisoned history buffer resurrecting itself forever.
+        if (any(isnan(history)) || any(isinf(history)))
+            history = filteredRadiance;
+        accumulatedRadiance = lerp(history, filteredRadiance, 1.0f / float(g_FrameIndex + 1));
+    }
 
     g_Output[launchIndex] = float4(accumulatedRadiance, 1.0f);
     g_DisplayOutput[launchIndex] = float4(DawningToneMapForDisplay(accumulatedRadiance), 1.0f);
@@ -550,11 +656,15 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     float3 objectNormal = normalize(tri.n0.xyz * bary.x + tri.n1.xyz * bary.y + tri.n2.xyz * bary.z);
     float2 surfaceUV = triUV.uv0.xy * bary.x + triUV.uv1.xy * bary.y + triUV.uv2.xy * bary.z;
 
-    float3x4 objToWorld = ObjectToWorld3x4();
+    // Normals are covectors: transform by the inverse transpose, not by the world
+    // matrix. Using ObjectToWorld3x4() here skewed them under non-uniform scale
+    // (a 10:1 anisotropy tilts normals by tens of degrees) and diverged from the
+    // raster path, which has always done this correctly. The matrix arrives
+    // pre-transposed in the instance metadata so this stays three dot products.
     float3 worldNormal = normalize(float3(
-        dot(objToWorld[0].xyz, objectNormal),
-        dot(objToWorld[1].xyz, objectNormal),
-        dot(objToWorld[2].xyz, objectNormal)
+        dot(instanceData.normalMatrix0.xyz, objectNormal),
+        dot(instanceData.normalMatrix1.xyz, objectNormal),
+        dot(instanceData.normalMatrix2.xyz, objectNormal)
     ));
 
     // If the normal faces away from the ray, flip it

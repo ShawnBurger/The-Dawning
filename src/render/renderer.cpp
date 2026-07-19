@@ -511,6 +511,25 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     perFrame.eyePos[1] = m_eyePos.y;
     perFrame.eyePos[2] = m_eyePos.z;
 
+    // Camera basis for world-space sky reconstruction in the pixel shader.
+    // Derived the same way the path tracer does it (path_tracer.cpp) so the two
+    // render paths agree on where the horizon is.
+    const core::Vec3f camRight   = camera.Right();
+    const core::Vec3f camForward = camera.Forward();
+    const core::Vec3f camUp      = camForward.Cross(camRight).Normalized();
+    perFrame.camRight[0]   = camRight.x;
+    perFrame.camRight[1]   = camRight.y;
+    perFrame.camRight[2]   = camRight.z;
+    perFrame.camUp[0]      = camUp.x;
+    perFrame.camUp[1]      = camUp.y;
+    perFrame.camUp[2]      = camUp.z;
+    perFrame.camForward[0] = camForward.x;
+    perFrame.camForward[1] = camForward.y;
+    perFrame.camForward[2] = camForward.z;
+    const float fovYRad    = camera.GetFOV() * (3.14159265358979323846f / 180.0f);
+    perFrame.tanHalfFovY   = std::tan(fovYRad * 0.5f);
+    perFrame.aspect        = aspect;
+
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
 

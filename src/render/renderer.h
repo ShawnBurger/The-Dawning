@@ -44,7 +44,21 @@ struct CBPerFrame
     float pad2;
     float eyePos[3];
     float pad3;
+
+    // Camera basis + projection extents, so the raster sky can reconstruct a
+    // world-space view direction per pixel and evaluate the same elevation-based
+    // sky function DXR uses. Without these the raster sky was a screen-space
+    // gradient nailed to the framebuffer: it did not rotate, respond to pitch, or
+    // respond to FOV, so the horizon jumped when toggling F1.
+    float camRight[3];
+    float tanHalfFovY;
+    float camUp[3];
+    float aspect;
+    float camForward[3];
+    float pad4;
 };
+static_assert(sizeof(CBPerFrame) == 112,
+              "CBPerFrame must match cbuffer CBPerFrame (b1) in the raster shaders");
 
 struct CBMaterial
 {
