@@ -22,6 +22,10 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateSkyPSO(device.Device()))        return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     if (!CreateTextureHeap(device.Device())) return false;
+    if (!CreateHDRTarget(device.Device(),
+                         static_cast<uint32_t>(device.Width()),
+                         static_cast<uint32_t>(device.Height()))) return false;
+    if (!CreateTonemapPipeline(device.Device())) return false;
 
     core::Log::Info("Renderer initialized");
     return true;
@@ -38,6 +42,14 @@ void Renderer::Shutdown()
             m_cbMappedPtrs[i] = nullptr;
         }
     }
+    m_tonemapPSO.Reset();
+    m_tonemapRootSig.Reset();
+    m_hdrSrvHeap.Reset();
+    m_hdrRtvHeap.Reset();
+    m_hdrTarget.Reset();
+    m_hdrWidth = 0;
+    m_hdrHeight = 0;
+    m_hdrIsRenderTarget = false;
     m_textureHeap.Reset();
     m_skyPSO.Reset();
     m_pso.Reset();
@@ -45,6 +57,283 @@ void Renderer::Shutdown()
     m_textureDescSize = 0;
     m_nextTextureDescriptor = 1;
     core::Log::Info("Renderer shut down");
+}
+
+// =============================================================================
+// HDR scene target
+// =============================================================================
+bool Renderer::CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t height)
+{
+    if (width == 0 || height == 0)
+    {
+        core::Log::Error("HDR target requires non-zero dimensions");
+        return false;
+    }
+
+    m_hdrTarget.Reset();
+    m_hdrIsRenderTarget = false;
+
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width            = width;
+    desc.Height           = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = kHDRFormat;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    // Must match the ClearRenderTargetView colour below, or the driver loses its
+    // fast-clear path and the debug layer warns on every clear.
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format   = kHDRFormat;
+    clearValue.Color[0] = 0.05f;
+    clearValue.Color[1] = 0.06f;
+    clearValue.Color[2] = 0.09f;
+    clearValue.Color[3] = 1.0f;
+
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clearValue,
+        IID_PPV_ARGS(&m_hdrTarget));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Failed to create HDR scene target %ux%u: 0x%08X", width, height, hr);
+        m_hdrWidth = 0;
+        m_hdrHeight = 0;
+        return false;
+    }
+    m_hdrTarget->SetName(L"HDRSceneTarget");
+
+    if (!m_hdrRtvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC rtvDesc = {};
+        rtvDesc.NumDescriptors = 1;
+        rtvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        hr = device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&m_hdrRtvHeap));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Failed to create HDR RTV heap: 0x%08X", hr);
+            m_hdrTarget.Reset();
+            m_hdrWidth = 0;
+            m_hdrHeight = 0;
+            return false;
+        }
+        m_hdrRtvHeap->SetName(L"HDRSceneRTVHeap");
+    }
+
+    if (!m_hdrSrvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC srvDesc = {};
+        srvDesc.NumDescriptors = 1;
+        srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        hr = device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_hdrSrvHeap));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Failed to create HDR SRV heap: 0x%08X", hr);
+            m_hdrTarget.Reset();
+            m_hdrWidth = 0;
+            m_hdrHeight = 0;
+            return false;
+        }
+        m_hdrSrvHeap->SetName(L"HDRSceneSRVHeap");
+    }
+
+    // Views name the resource, so they are recreated on every resize.
+    device->CreateRenderTargetView(m_hdrTarget.Get(), nullptr,
+                                   m_hdrRtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Format                  = kHDRFormat;
+    srv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels     = 1;
+    device->CreateShaderResourceView(m_hdrTarget.Get(), &srv,
+                                     m_hdrSrvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    m_hdrWidth  = width;
+    m_hdrHeight = height;
+    core::Log::Infof("HDR scene target created: %ux%u (R16G16B16A16_FLOAT)", width, height);
+    return true;
+}
+
+bool Renderer::ResizeHDRTarget(D3D12Device& device, uint32_t width, uint32_t height)
+{
+    if (width == m_hdrWidth && height == m_hdrHeight && m_hdrTarget) return true;
+
+    // The outgoing target may still be referenced by frames in flight, so it goes
+    // through the fence-guarded queue rather than being dropped here.
+    if (m_hdrTarget)
+        device.DeferredRelease(m_hdrTarget);
+
+    return CreateHDRTarget(device.Device(), width, height);
+}
+
+// =============================================================================
+// Tone-map resolve pipeline
+// =============================================================================
+bool Renderer::CreateTonemapPipeline(ID3D12Device* device)
+{
+    auto vsBytecode = CompileShaderFromFile(L"shaders/tonemap_vs.hlsl", "main", "vs_5_1");
+    auto psBytecode = CompileShaderFromFile(L"shaders/tonemap_ps.hlsl", "main", "ps_5_1");
+    if (!vsBytecode || !psBytecode)
+    {
+        core::Log::Error("Failed to compile tone-map shaders");
+        return false;
+    }
+
+    // Its own minimal root signature: one SRV table plus a point sampler.
+    // Reusing the material root signature would drag along three constant
+    // buffers this pass has no use for.
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors                    = 1;
+    srvRange.BaseShaderRegister                = 0;
+    srvRange.RegisterSpace                     = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER rootParam = {};
+    rootParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParam.DescriptorTable.NumDescriptorRanges = 1;
+    rootParam.DescriptorTable.pDescriptorRanges   = &srvRange;
+    rootParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    sampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+    sampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    sampler.MaxLOD           = D3D12_FLOAT32_MAX;
+    sampler.ShaderRegister   = 0;
+    sampler.RegisterSpace    = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
+    rsDesc.NumParameters     = 1;
+    rsDesc.pParameters       = &rootParam;
+    rsDesc.NumStaticSamplers = 1;
+    rsDesc.pStaticSamplers   = &sampler;
+    rsDesc.Flags =
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+    ComPtr<ID3DBlob> sigBlob;
+    ComPtr<ID3DBlob> errorBlob;
+    HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                             &sigBlob, &errorBlob);
+    if (FAILED(hr))
+    {
+        if (errorBlob)
+            core::Log::Errorf("Tone-map root signature error: %s",
+                              static_cast<const char*>(errorBlob->GetBufferPointer()));
+        return false;
+    }
+
+    hr = device->CreateRootSignature(0, sigBlob->GetBufferPointer(),
+                                     sigBlob->GetBufferSize(),
+                                     IID_PPV_ARGS(&m_tonemapRootSig));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Tone-map CreateRootSignature failed: 0x%08X", hr);
+        return false;
+    }
+    m_tonemapRootSig->SetName(L"TonemapRootSignature");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature        = m_tonemapRootSig.Get();
+    psoDesc.VS.pShaderBytecode    = vsBytecode->GetBufferPointer();
+    psoDesc.VS.BytecodeLength     = vsBytecode->GetBufferSize();
+    psoDesc.PS.pShaderBytecode    = psBytecode->GetBufferPointer();
+    psoDesc.PS.BytecodeLength     = psBytecode->GetBufferSize();
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode        = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable = TRUE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.DepthStencilState.DepthEnable   = FALSE;
+    psoDesc.DepthStencilState.StencilEnable = FALSE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0]    = DXGI_FORMAT_R8G8B8A8_UNORM;   // the back buffer
+    psoDesc.SampleDesc       = { 1, 0 };
+    psoDesc.SampleMask       = UINT_MAX;
+
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_tonemapPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Tone-map CreateGraphicsPipelineState failed: 0x%08X", hr);
+        return false;
+    }
+    m_tonemapPSO->SetName(L"TonemapPSO");
+    core::Log::Info("[SMOKE] tonemap_pso=ok");
+    core::Log::Info("Tone-map resolve pipeline created");
+    return true;
+}
+
+// =============================================================================
+// Scene pass / resolve
+// =============================================================================
+void Renderer::BeginScenePass(D3D12Device& device, const float clearColor[4])
+{
+    if (!m_hdrTarget) return;
+    auto* cmd = device.CmdList();
+
+    if (!m_hdrIsRenderTarget)
+    {
+        device.TransitionResource(m_hdrTarget.Get(),
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_hdrIsRenderTarget = true;
+    }
+
+    auto rtv = m_hdrRtvHeap->GetCPUDescriptorHandleForHeapStart();
+    auto dsv = device.DSV();
+    cmd->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
+    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    cmd->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+}
+
+void Renderer::ResolveToBackBuffer(D3D12Device& device)
+{
+    if (!m_hdrTarget || !m_tonemapPSO) return;
+    auto* cmd = device.CmdList();
+
+    if (m_hdrIsRenderTarget)
+    {
+        device.TransitionResource(m_hdrTarget.Get(),
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_hdrIsRenderTarget = false;
+    }
+
+    // The back buffer becomes a render target only now, for the resolve itself.
+    device.TransitionResource(device.CurrentBackBuffer(),
+                              D3D12_RESOURCE_STATE_PRESENT,
+                              D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    auto rtv = device.CurrentRTV();
+    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);   // no depth: full overwrite
+
+    ID3D12DescriptorHeap* heaps[] = { m_hdrSrvHeap.Get() };
+    cmd->SetDescriptorHeaps(1, heaps);
+    cmd->SetGraphicsRootSignature(m_tonemapRootSig.Get());
+    cmd->SetGraphicsRootDescriptorTable(0, m_hdrSrvHeap->GetGPUDescriptorHandleForHeapStart());
+    cmd->SetPipelineState(m_tonemapPSO.Get());
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->IASetVertexBuffers(0, 0, nullptr);
+    cmd->IASetIndexBuffer(nullptr);
+    cmd->DrawInstanced(3, 1, 0, 0);
+
+    // Left in RENDER_TARGET so the overlay can draw over it.
 }
 
 // =============================================================================
@@ -266,7 +555,7 @@ bool Renderer::CreatePSO(ID3D12Device* device)
     // Output
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
-    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[0]         = kHDRFormat;   // linear scene target, not the back buffer
     psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc            = { 1, 0 };
     psoDesc.SampleMask            = UINT_MAX;
@@ -321,7 +610,7 @@ bool Renderer::CreateSkyPSO(ID3D12Device* device)
 
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
-    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[0]         = kHDRFormat;   // linear scene target, not the back buffer
     psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc            = { 1, 0 };
     psoDesc.SampleMask            = UINT_MAX;

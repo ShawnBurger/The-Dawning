@@ -104,6 +104,27 @@ public:
     // Register a texture SRV for raster material sampling.
     uint32_t RegisterTexture(ID3D12Device* device, const Texture& texture);
 
+    // -------------------------------------------------------------------------
+    // HDR scene target and tone-map resolve
+    // -------------------------------------------------------------------------
+    // Raster geometry renders into a linear R16G16B16A16_FLOAT target rather than
+    // straight into the 8-bit back buffer, and a fullscreen pass tone-maps it at
+    // the end of the frame. Previously each pixel shader tone-mapped its own
+    // output, which meant the frame was never available in linear HDR anywhere -
+    // bloom, exposure and TAA all need that intermediate, so they were blocked.
+    //
+    // BeginScenePass  — HDR target to RENDER_TARGET, cleared, bound with depth.
+    // ResolveToBackBuffer — HDR to PIXEL_SHADER_RESOURCE, back buffer to
+    //                       RENDER_TARGET and bound, fullscreen tone-map drawn.
+    //                       Leaves the back buffer in RENDER_TARGET so the
+    //                       overlay can draw over it.
+    void BeginScenePass(D3D12Device& device, const float clearColor[4]);
+    void ResolveToBackBuffer(D3D12Device& device);
+
+    // Recreate the HDR target at a new size. Returns false if allocation failed,
+    // in which case the target is released and the caller must not render.
+    bool ResizeHDRTarget(D3D12Device& device, uint32_t width, uint32_t height);
+
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
                              const core::Vec3f& color,
@@ -115,6 +136,8 @@ private:
     bool CreateSkyPSO(ID3D12Device* device);
     bool CreateConstantBuffers(ID3D12Device* device);
     bool CreateTextureHeap(ID3D12Device* device);
+    bool CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t height);
+    bool CreateTonemapPipeline(ID3D12Device* device);
 
     // Upload a constant buffer and return its GPU virtual address
     D3D12_GPU_VIRTUAL_ADDRESS UploadCB(const void* data, uint32_t dataSize);
@@ -123,6 +146,23 @@ private:
     ComPtr<ID3D12RootSignature> m_rootSig;
     ComPtr<ID3D12PipelineState> m_pso;
     ComPtr<ID3D12PipelineState> m_skyPSO;
+
+    // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
+    // slots in the texture table, so the tone-map pass stays independent of
+    // material descriptor allocation.
+    static constexpr DXGI_FORMAT kHDRFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ComPtr<ID3D12Resource>       m_hdrTarget;
+    ComPtr<ID3D12DescriptorHeap> m_hdrRtvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_hdrSrvHeap;
+    uint32_t                     m_hdrWidth = 0;
+    uint32_t                     m_hdrHeight = 0;
+    // Tracks whether the target is currently a render target or a shader
+    // resource, so the pass helpers can emit the right transition without the
+    // caller having to know.
+    bool                         m_hdrIsRenderTarget = false;
+
+    ComPtr<ID3D12RootSignature> m_tonemapRootSig;
+    ComPtr<ID3D12PipelineState> m_tonemapPSO;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback.
     static constexpr uint32_t kMaxRasterTextures = 128;

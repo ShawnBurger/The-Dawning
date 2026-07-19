@@ -92,7 +92,31 @@ The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any
 legitimate lighting change. Pass `-NoCapture` to skip this section.
 
-**Capture statistics are not comparable across checkouts.** They depend on which
+**Captures are not byte-reproducible, and raster is far worse than RT.** The
+scene animates on wall-clock `dt` (`Scene::SystemRotation`), so the final
+captured frame lands at a rotation angle that depends on exact elapsed time.
+Measured on this machine, same build, two consecutive runs:
+
+| mode | channels differing | max delta |
+|---|---|---|
+| raster | 0.55% | **109** |
+| rt-stable | 0.21% | **1** |
+
+Raster captures an instantaneous frame, so a fractional-degree rotation shifts
+high-contrast silhouettes by a whole pixel. Path tracing accumulates over many
+frames, which averages that away almost entirely.
+
+The practical consequences:
+
+- The aggregate thresholds above are unaffected — mean luminance and bucket
+  counts are stable to 0.1 across runs.
+- **A byte-level or reference-image comparison is not valid for the raster path
+  as things stand.** A max delta of 109 is the noise floor, not a regression.
+  Any such test needs the animation driven by a fixed synthetic timestep under
+  `--smoke` rather than wall clock, so the captured frame is reproducible.
+  That, plus pinning the texture set below, are the two prerequisites.
+
+**Capture statistics are also not comparable across checkouts.** They depend on which
 textures happen to be present in `build\<Config>\assets\textures\`, which is
 build output rather than tracked source. `assets/textures/` in the repository
 contains only a README, so a clean clone falls through to procedurally generated
