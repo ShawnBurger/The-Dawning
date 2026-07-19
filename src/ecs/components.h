@@ -60,6 +60,14 @@ struct Material
     float       metallic            = 0.0f;
     uint32_t    albedoTextureHandle = UINT32_MAX;
     uint32_t    normalTextureHandle = UINT32_MAX;
+
+    // Packed occlusion / roughness / metallic, glTF convention: AO in R,
+    // roughness in G, metallic in B. One fetch instead of three, and it matches
+    // what real asset pipelines already export, so imported materials will not
+    // need repacking. When present it MODULATES the scalars above rather than
+    // replacing them, which is also what glTF specifies - the scalars stay
+    // meaningful as per-instance tints.
+    uint32_t    ormTextureHandle = UINT32_MAX;
 };
 
 // =============================================================================

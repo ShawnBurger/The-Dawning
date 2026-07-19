@@ -349,6 +349,9 @@ bool App::InitializeScene()
     groundNormalTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), groundNormalTexture);
 
+    ComPtr<ID3D12Resource> groundOrmTexUp;
+    ComPtr<ID3D12Resource> cubeOrmTexUp;
+
     render::Texture cubeNormalTexture;
     if (FileExists(cubeNormalKTXPath))
     {
@@ -378,6 +381,36 @@ bool App::InitializeScene()
     cubeNormalTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), cubeNormalTexture);
 
+    // Packed occlusion/roughness/metallic (glTF: AO=R, rough=G, metal=B).
+    // Generated rather than loaded because assets/textures/ ships only a README,
+    // so a file-based path would leave this feature unexercised on a clean clone
+    // - and an unexercised material path is untested code.
+    render::Texture groundOrmTexture;
+    {
+        auto pixels = render::GenerateCheckerORMTextureRGBA8(512, 512, 64,
+                                                             0.85f, 0.35f,   // rough: matte vs polished
+                                                             0.0f,  0.0f);   // ground stays dielectric
+        groundOrmTexture.Adopt(render::CreateTexture2DFromRGBA8(
+            m_device.Device(), m_device.CmdList(),
+            pixels.data(), 512, 512, groundOrmTexUp, L"GroundORMTexture"));
+    }
+    groundOrmTexture.descriptor =
+        m_renderer.RegisterTexture(m_device.Device(), groundOrmTexture);
+
+    render::Texture cubeOrmTexture;
+    {
+        // Alternating dielectric and metal cells, so the metallic channel is
+        // visibly doing something rather than just riding the material scalar.
+        auto pixels = render::GenerateCheckerORMTextureRGBA8(256, 256, 32,
+                                                             0.55f, 0.15f,
+                                                             0.0f,  1.0f);
+        cubeOrmTexture.Adopt(render::CreateTexture2DFromRGBA8(
+            m_device.Device(), m_device.CmdList(),
+            pixels.data(), 256, 256, cubeOrmTexUp, L"CubeORMTexture"));
+    }
+    cubeOrmTexture.descriptor =
+        m_renderer.RegisterTexture(m_device.Device(), cubeOrmTexture);
+
     const HRESULT closeHr = m_device.CmdList()->Close();
     if (FAILED(closeHr))
     {
@@ -399,6 +432,10 @@ bool App::InitializeScene()
         std::move(groundNormalTexture), "GroundWaveNormal");
     const auto cubeNormal = resources.AddTexture(
         std::move(cubeNormalTexture), "CubeWaveNormal");
+    const auto groundOrm = resources.AddTexture(
+        std::move(groundOrmTexture), "GroundCheckerORM");
+    const auto cubeOrm = resources.AddTexture(
+        std::move(cubeOrmTexture), "CubeCheckerORM");
     m_smokeDescriptorTexture = groundAlbedo;
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
@@ -406,17 +443,19 @@ bool App::InitializeScene()
     core::Log::Infof("Textures registered: ground=%u cube=%u groundNormal=%u cubeNormal=%u",
                      groundAlbedo.Index(), cubeAlbedo.Index(),
                      groundNormal.Index(), cubeNormal.Index());
+    core::Log::Infof("[SMOKE] orm_textures=ok ground=%u cube=%u",
+                     groundOrm.Index(), cubeOrm.Index());
 
     m_scene.CreateRenderable(
         "GroundPlane", plane,
         ecs::Material{ { 0.54f, 0.57f, 0.62f, 1.0f }, 0.9f, 0.0f,
-                       groundAlbedo.value, groundNormal.value },
+                       groundAlbedo.value, groundNormal.value, groundOrm.value },
         ecs::Transform{ { 0, 0, 0 }, core::Quatf::Identity(), { 1, 1, 1 } });
 
     m_smokeGrowthMesh = cube;
     m_smokeGrowthMaterial =
         ecs::Material{ { 0.6f, 0.8f, 1.0f, 1.0f }, 0.3f, 0.9f,
-                       cubeAlbedo.value, cubeNormal.value };
+                       cubeAlbedo.value, cubeNormal.value, cubeOrm.value };
     m_smokeTextureEntity = m_scene.CreateSpinner(
         "BlueCube", cube,
         m_smokeGrowthMaterial,
@@ -651,6 +690,11 @@ int App::RunMainLoop()
                                  m_rtQualityMode == render::RTQualityMode::FullPathTrace
                                      ? "full"
                                      : "stable");
+                if (m_usePathTracing && m_rtAvailable)
+                {
+                    core::Log::Infof("[SMOKE] rt_accumulation_frame=%u",
+                                     m_scene.GetPathTracer()->AccumulationFrameIndex());
+                }
                 core::Log::Infof("[SMOKE] overlay=%s",
                                  m_debugOverlayReady ? "ok" : "unavailable");
                 core::Log::Infof("[SMOKE] frames=%llu",
@@ -929,14 +973,17 @@ bool App::ApplySmokeRTMutationStress()
         auto& material = registry.Get<ecs::Material>(m_smokeTextureEntity);
         m_smokeSavedAlbedoTexture = material.albedoTextureHandle;
         m_smokeSavedNormalTexture = material.normalTextureHandle;
+        m_smokeSavedOrmTexture = material.ormTextureHandle;
         material.albedoTextureHandle = UINT32_MAX;
         material.normalTextureHandle = UINT32_MAX;
+        material.ormTextureHandle = UINT32_MAX;
     }
     else if (m_frameCount == 7)
     {
         auto& material = registry.Get<ecs::Material>(m_smokeTextureEntity);
         material.albedoTextureHandle = m_smokeSavedAlbedoTexture;
         material.normalTextureHandle = m_smokeSavedNormalTexture;
+        material.ormTextureHandle = m_smokeSavedOrmTexture;
         core::Log::Info("[SMOKE] rt_texture_churn=passed");
     }
     else if (m_frameCount == 8)

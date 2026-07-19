@@ -136,4 +136,23 @@ std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
     float frequency,
     float strength);
 
+// Packed occlusion / roughness / metallic in the glTF channel convention:
+// AO in R, roughness in G, metallic in B. Alpha is unused and written opaque.
+//
+// The generated pattern varies roughness and metallic across a checker so the
+// ORM path is actually exercised by the demo scene - a material feature that no
+// shipped asset uses is untested code, and this project has already been bitten
+// by treating "it compiles" as "it works".
+//
+// baseRoughness/baseMetallic are the values in the darker checker cells;
+// altRoughness/altMetallic the lighter ones. AO darkens the cell borders.
+std::vector<uint32_t> GenerateCheckerORMTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    uint32_t checkerSize,
+    float baseRoughness,
+    float altRoughness,
+    float baseMetallic,
+    float altMetallic);
+
 } // namespace render

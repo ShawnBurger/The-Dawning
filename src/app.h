@@ -84,6 +84,7 @@ private:
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
     uint32_t m_smokeSavedNormalTexture = UINT32_MAX;
+    uint32_t m_smokeSavedOrmTexture = UINT32_MAX;
     std::vector<ecs::Entity> m_smokeGrowthEntities;
     render::DescriptorHandle m_smokeRetiredDescriptor;
     render::DescriptorHandle m_smokeHeldDescriptor;

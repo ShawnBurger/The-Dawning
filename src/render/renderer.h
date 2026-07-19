@@ -70,7 +70,11 @@ struct CBMaterial
     uint32_t useNormalTexture;
     uint32_t albedoTextureIndex;
     uint32_t normalTextureIndex;
+    uint32_t useOrmTexture;
+    uint32_t ormTextureIndex;
 };
+static_assert(sizeof(CBMaterial) == 48,
+              "CBMaterial must match cbuffer CBMaterial (b2) in basic_ps.hlsl");
 
 // Align size to 256 bytes for CBV placement
 constexpr uint32_t AlignCBSize(uint32_t size)
@@ -100,7 +104,8 @@ public:
                   float roughness = 0.5f,
                   float metallic = 0.0f,
                   const Texture* albedoTexture = nullptr,
-                  const Texture* normalTexture = nullptr);
+                  const Texture* normalTexture = nullptr,
+                  const Texture* ormTexture = nullptr);
 
     // Register a texture SRV for raster material sampling.
     DescriptorHandle RegisterTexture(ID3D12Device* device, const Texture& texture);
@@ -133,7 +138,25 @@ public:
     //                       Leaves the back buffer in RENDER_TARGET so the
     //                       overlay can draw over it.
     void BeginScenePass(D3D12Device& device);
+
+    // Bloom + tone-map resolve. Bloom runs at half resolution between the scene
+    // pass and the resolve, and is composited in LINEAR space before the curve -
+    // it is scattered light, so it adds to radiance. Compositing after tone
+    // mapping would brighten pixels that are already display-saturated.
     void ResolveToBackBuffer(D3D12Device& device);
+
+    // Post-process tuning. Exposure was a constant baked into
+    // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
+    // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
+    void SetExposure(float exposure) { m_exposure = exposure; }
+    void SetBloom(float intensity, float threshold, float softKnee)
+    {
+        m_bloomIntensity = intensity;
+        m_bloomThreshold = threshold;
+        m_bloomSoftKnee  = softKnee;
+    }
+    float Exposure() const { return m_exposure; }
+    float BloomIntensity() const { return m_bloomIntensity; }
 
     // Recreate the HDR target at a new size. Returns false if allocation failed,
     // in which case the target is released and the caller must not render.
@@ -153,6 +176,8 @@ private:
     void WriteNullTextureDescriptor(ID3D12Device* device, uint32_t descriptorIndex);
     bool CreateHDRTarget(ID3D12Device* device, uint32_t width, uint32_t height);
     bool CreateTonemapPipeline(ID3D12Device* device);
+    bool CreateBloomPipeline(ID3D12Device* device);
+    void RenderBloom(D3D12Device& device);
 
     // Upload a constant buffer and return its GPU virtual address
     D3D12_GPU_VIRTUAL_ADDRESS UploadCB(const void* data, uint32_t dataSize);
@@ -169,7 +194,7 @@ private:
     static constexpr float kSceneClearColor[4] = { 0.50f, 0.55f, 0.62f, 1.0f };
     ComPtr<ID3D12Resource>       m_hdrTarget;
     ComPtr<ID3D12DescriptorHeap> m_hdrRtvHeap;
-    ComPtr<ID3D12DescriptorHeap> m_hdrSrvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_hdrSrvHeap;   // 3: scene, bloom A, bloom B
     uint32_t                     m_hdrWidth = 0;
     uint32_t                     m_hdrHeight = 0;
     // Tracks whether the target is currently a render target or a shader
@@ -179,6 +204,32 @@ private:
 
     ComPtr<ID3D12RootSignature> m_tonemapRootSig;
     ComPtr<ID3D12PipelineState> m_tonemapPSO;
+
+    // Bloom ping-pong pair at half resolution, plus the pipelines that drive
+    // them. Half res because bloom is a low-frequency effect: full resolution
+    // costs 4x the bandwidth for detail the blur immediately destroys.
+    //
+    // SRV heap layout, which the pass order depends on:
+    //   0 = scene HDR   1 = bloom A   2 = bloom B
+    // prefilter writes A, horizontal blur reads A writes B, vertical blur reads
+    // B writes A. The result therefore lands in A, at descriptor 1, so the
+    // tone-map pass can bind the table at descriptor 0 and get t0 = scene,
+    // t1 = bloom with no extra copy.
+    static constexpr uint32_t kBloomTargetCount = 2;
+    ComPtr<ID3D12Resource>       m_bloomTarget[kBloomTargetCount];
+    ComPtr<ID3D12DescriptorHeap> m_bloomRtvHeap;   // 2 RTVs
+    uint32_t                     m_bloomWidth = 0;
+    uint32_t                     m_bloomHeight = 0;
+    bool                         m_bloomIsRenderTarget[kBloomTargetCount] = {};
+
+    ComPtr<ID3D12RootSignature> m_bloomRootSig;
+    ComPtr<ID3D12PipelineState> m_bloomPrefilterPSO;
+    ComPtr<ID3D12PipelineState> m_bloomBlurPSO;
+
+    float m_exposure       = 1.25f;   // matches the old baked-in constant
+    float m_bloomIntensity = 1.2f;
+    float m_bloomThreshold = 1.0f;
+    float m_bloomSoftKnee  = 0.5f;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback.
     static constexpr uint32_t kMaxRasterTextures = 128;

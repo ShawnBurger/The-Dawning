@@ -1,7 +1,7 @@
 # Parallel follow-up: RT frame-throughput validation
 
-Integration baseline: `c7c60d3`, including Claude's per-frame RT upload,
-TLAS, and shader-table resources plus the generational BLAS cache.
+Final integration baseline: `3131728`, including Claude's bloom, exposure,
+packed ORM maps, and documentation reconciliation.
 
 Codex is taking `codex/rt-frame-throughput` and owns:
 
@@ -13,38 +13,42 @@ Codex is taking `codex/rt-frame-throughput` and owns:
 - `src/scene/scene.cpp` updated TLAS build call only
 - this handoff entry
 
-The path-traced branch still calls `WaitForGpu()` after every present, forcing
-the renderer down to one frame in flight. This lane first adds a deterministic,
-unlocked smoke benchmark and structured frame-sync markers. An independent
-adversarial audit is tracing all RT resource lifetimes before the wait is
-removed. The wait will only be changed if that audit finds no unresolved shared
-resource hazard and Debug/Release GPU smoke tests pass without it.
-
-The completed adversarial audit confirmed three blockers: upload-buffer growth
-eagerly drops all frame slots, TLAS growth does the same, and the RT texture
-descriptor table is CPU-mutated while prior submissions may still reference it.
-This lane now owns those exact lifetime fixes plus smoke churn that forces each
-path. Claude's renderer, shader, pipeline, and documentation files remain free.
+The completed adversarial audit confirmed three blockers before removing the
+per-frame GPU wait: upload-buffer growth eagerly dropped all frame slots, TLAS
+growth did the same, and the RT texture descriptor table was CPU-mutated while
+prior submissions could still reference it. All three are now frame-versioned
+or fence-deferred, including Claude's later ORM descriptor range.
 
 Instrumentation baseline (Debug, immediate present, 180 measured frames,
 capture disabled): raster 496.197 fps, stable RT 267.786 fps, full RT
 283.300 fps. Both RT modes report `rt_frame_sync=gpu_idle` before the proposed
 change.
 
-## Codex progress and live overlap notice
+## Codex result
 
-The lifetime implementation is complete in this worktree. Stable RT now reaches
-327.695 fps and full RT 294.264 fps under the same 180-frame immediate-present
-measurement. Both modes force texture-table mutation and 80-entity topology
-growth/shrink, reach two outstanding submissions, and pass. GPU-based validation
-also passes stable and full mutation runs with no D3D error or warning.
+The path tracer now runs with multiple frames in flight. On the combined PBR
+baseline, 180-frame immediate-present measurements reach 303.840 fps in stable
+RT and 313.682 fps in full RT. Both modes force texture-table mutation and
+80-entity topology growth/shrink, reach two outstanding submissions, and pass.
+GPU-based validation also passes stable and full mutation runs with no D3D
+error or warning.
 
-While those tests ran, Claude started `claude/pbr-maps` from the newer `84809a4`
-main and now has uncommitted changes in `path_tracer.*` and `rt_pipeline.*`.
-Codex has stopped editing the overlapping files. Do not merge either lane over
-the other: finish and commit PBR first, then Codex will merge that commit into
-this branch and resolve the material-table additions alongside the per-frame
-heap versioning.
+Animated transforms, materials, texture bindings, topology, and lighting are
+now included in a render-scene signature. Any change resets temporal
+accumulation before dispatch, eliminating the rotating center cube's history
+smear. Smoke tests assert that the animated test scene remains at accumulation
+frame zero, and fresh stable/full captures show a geometrically sharp cube.
+
+Final verification on the combined tree:
+
+- Debug and Release builds: pass.
+- Debug and Release unit suites: 75 cases / 1,056 checks, zero failures.
+- GPU-based validation: stable and full RT pass with no D3D error or warning.
+- Release resize captures: raster 127.5 mean / 53 buckets, stable RT 136.0 / 49,
+  full RT 131.3 / 81; all modes are non-black and smoke-clean.
+
+Claude's PBR work is merged and the overlap is resolved. Codex releases every
+file in this claim after integration.
 
 ---
 

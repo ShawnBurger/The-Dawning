@@ -51,6 +51,8 @@ struct MaterialData
     uint   useAlbedoTexture;
     uint   normalTextureIndex;
     uint   useNormalTexture;
+    uint   ormTextureIndex;
+    uint   useOrmTexture;
 };
 StructuredBuffer<MaterialData> g_Materials : register(t1, space0);
 
@@ -93,6 +95,7 @@ StructuredBuffer<TrianglePositionData> g_TrianglePositions : register(t5, space0
 
 Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
 Texture2D<float4> g_NormalTextures[64] : register(t0, space5);
+Texture2D<float4> g_OrmTextures[64]    : register(t0, space6);
 SamplerState g_TextureSampler : register(s0, space0);
 
 // =============================================================================
@@ -371,6 +374,27 @@ void RayGen()
         // Get material for this instance
         MaterialData mat = g_Materials[payload.instanceID];
         float3 albedo = ResolveAlbedo(mat, payload.uv);
+
+        // Packed occlusion / roughness / metallic (glTF: AO=R, rough=G, metal=B).
+        // Modulating the local copy here means every downstream use - NEE, the
+        // env approximation, the lobe choice, VNDF alpha - picks it up without
+        // each site having to remember. Keep this identical in spirit to
+        // basic_ps.hlsl; the two paths diverging on material interpretation is
+        // exactly the class of bug this codebase has already paid for once.
+        float ambientOcclusion = 1.0f;
+        if (mat.useOrmTexture != 0 && mat.ormTextureIndex < 64)
+        {
+            uint ormIndex = NonUniformResourceIndex(mat.ormTextureIndex);
+            float3 orm = g_OrmTextures[ormIndex].SampleLevel(g_TextureSampler, payload.uv, 0.0f).rgb;
+            ambientOcclusion = orm.r;
+            mat.roughness *= orm.g;
+            mat.metallic  *= orm.b;
+        }
+        // Clamped after modulation, matching the raster path: a near-zero green
+        // channel would otherwise drive roughness below what the GGX denominator
+        // and the VNDF alpha floor are conditioned for.
+        mat.roughness = clamp(mat.roughness, 0.04f, 1.0f);
+        mat.metallic  = saturate(mat.metallic);
         float3 hitPos = currentOrigin + currentDir * payload.hitT;
         float3 N = normalize(payload.normal);
         float3 V = -currentDir;
@@ -427,12 +451,12 @@ void RayGen()
         {
             // Stable preview fill: approximate missing diffuse GI and sky reflection
             // without tracing another noisy secondary bounce.
-            float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
+            float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f * ambientOcclusion;
             float3 envReflection = DawningSkyRadiance(reflect(-V, N));
             float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, mat.metallic);
             float3 envF = DawningFresnelSchlick(saturate(dot(N, V)), envF0);
             float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
-            float3 envSpecular = envReflection * envF * envGloss;
+            float3 envSpecular = envReflection * envF * envGloss * ambientOcclusion;
             radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
         }
         // Full path tracing adds no ad-hoc ambient. BSDF rays that escape the scene

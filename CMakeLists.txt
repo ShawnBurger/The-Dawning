@@ -71,6 +71,10 @@ set(SHADER_FILES
     shaders/sky_ps.hlsl
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
+    shaders/bloom_vs.hlsl
+    shaders/bloom_prefilter_ps.hlsl
+    shaders/bloom_blur_ps.hlsl
+    shaders/bloom_common.hlsli
     shaders/tonemap_vs.hlsl
     shaders/tonemap_ps.hlsl
     shaders/path_trace.hlsl

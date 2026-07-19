@@ -26,8 +26,8 @@ Layer 3 provides ECS architecture; the RT extension adds full DXR path tracing:
   - Global root signature, 9 parameters (rt_pipeline.cpp:55-131): TLAS SRV (t0),
     output UAV table (u0-u1), per-frame CB (b0), material StructuredBuffer (t1),
     triangle normals (t2), instance metadata (t3), triangle UVs (t4), triangle
-    positions (t5), and an SRV table for albedo (t0/space4) + normal (t0/space5)
-    textures
+    positions (t5), and an SRV table for albedo (t0/space4), normal (t0/space5)
+    and ORM (t0/space6) textures
   - Per-instance material lookup: global material StructuredBuffer indexed by
     InstanceID(). This is a root SRV, not SM 6.6 bindless — no
     ResourceDescriptorHeap anywhere in the project
@@ -96,15 +96,18 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
   Done:    KTX v1 / PNG (WIC) / DDS loaders with procedural fallbacks, CPU mip
            generation for RGBA sources, albedo + normal maps, Cook-Torrance GGX
            raster shading, indexed shader-visible texture tables in both the
-           raster and DXR paths, and a linear R16G16B16A16_FLOAT scene target
-           resolved to the back buffer by a dedicated tone-map pass
+           raster and DXR paths, packed occlusion/roughness/metallic (ORM) maps
+           in the glTF channel convention modulating the material scalars in
+           both paths, bloom with a parameterised exposure, and a linear
+           R16G16B16A16_FLOAT scene target resolved to the back buffer by a
+           dedicated tone-map pass
            (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
            material shader; post-process passes insert between
            Scene::RenderEntities and Renderer::ResolveToBackBuffer
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC),
-           metallic/roughness/AO/emissive maps, shadow maps, and any real mesh
-           file loading. `assets/textures/` ships only a README, so a clean
-           clone always takes the procedural fallback path
+           emissive maps, shadow maps, and any real mesh file loading.
+           `assets/textures/` ships only a README, so a clean clone always takes
+           the procedural fallback path
 Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relative
 
 ## RT UPGRADE PATH (future)

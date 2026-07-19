@@ -166,6 +166,7 @@ if ($RasterOnly) {
     Assert-Marker "rt_available" "yes"
     Assert-Marker "rt_active"    "yes"
     Assert-Marker "rt_quality"   $(if ($FullQuality) { "full" } else { "stable" })
+    Assert-Marker "rt_accumulation_frame" "0"
     Assert-Marker "rt_texture_churn" "passed"
     Assert-Marker "rt_topology_churn" "passed"
     # GPU-based validation may intentionally drain/serialize command execution.

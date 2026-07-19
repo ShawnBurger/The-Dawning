@@ -11,9 +11,10 @@ Do not merge old snapshots directly into this source tree.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
 - Layer 4 material work is partially landed: albedo/normal textures,
-  Cook-Torrance GGX shading, a linear HDR scene target and a separate tone-map
-  resolve pass exist; SM 6.6 bindless and metallic/roughness/AO/emissive maps do
-  not. See "Material System Status" below and `CLAUDE.md`.
+  Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
+  linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
+  SM 6.6 bindless and emissive maps do not. See "Material System Status"
+  below and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -150,8 +151,15 @@ Microsoft.Direct3D.DXC NuGet package.
 ## Material System Status
 
 Layer 4 is partially implemented. What exists is described below; SM 6.6
-bindless and metallic/roughness/AO/emissive maps do not exist yet. See
-`CLAUDE.md` for the full done/not-done split.
+bindless and emissive maps do not exist yet. See `CLAUDE.md` for the full
+done/not-done split.
+
+Packed ORM maps (occlusion in R, roughness in G, metallic in B - the glTF
+convention) are sampled by both the raster and DXR paths and MODULATE the
+material scalars rather than replacing them, so those stay usable as
+per-instance tints. Occlusion is applied to ambient and environment terms only,
+never to direct light, because occluding next-event estimation would
+double-count the shadow ray.
 
 Raster geometry and sky render into a linear `R16G16B16A16_FLOAT` scene target,
 and a fullscreen pass tone-maps that into the back buffer at the end of the

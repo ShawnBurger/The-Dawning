@@ -37,6 +37,8 @@ cbuffer CBMaterial : register(b2)
     uint   useNormalTexture;
     uint   albedoTextureIndex;
     uint   normalTextureIndex;
+    uint   useOrmTexture;
+    uint   ormTextureIndex;
 };
 
 // Size comes from Renderer::kMaxRasterTextures, passed as a define at compile
@@ -117,24 +119,42 @@ float4 main(PSInput input) : SV_TARGET
     if (useAlbedoTexture != 0)
         baseColor *= materialTextures[albedoTextureIndex].Sample(linearSampler, input.uv).rgb;
 
-    float materialRoughness = clamp(roughness, 0.04, 1.0);
+    // Packed occlusion / roughness / metallic (glTF: AO=R, rough=G, metal=B).
+    // MODULATES the material scalars rather than replacing them, so those stay
+    // usable as per-instance tints - which is what glTF specifies.
+    float materialRoughness = roughness;
+    float materialMetallic  = metallic;
+    float ambientOcclusion  = 1.0;
+    if (useOrmTexture != 0)
+    {
+        float3 orm = materialTextures[ormTextureIndex].Sample(linearSampler, input.uv).rgb;
+        ambientOcclusion  = orm.r;
+        materialRoughness *= orm.g;
+        materialMetallic  *= orm.b;
+    }
+
+    // Clamped AFTER modulation: an ORM map with near-zero green would otherwise
+    // drive roughness below the value the GGX denominator is conditioned for.
+    materialRoughness = clamp(materialRoughness, 0.04, 1.0);
+    materialMetallic  = saturate(materialMetallic);
 
     // Cook-Torrance direct lighting
-    float3 F0 = DawningF0(baseColor, metallic);
+    float3 F0 = DawningF0(baseColor, materialMetallic);
     
     float3 F = DawningFresnelSchlick(VdotH, F0);
     float3 specular = DawningCookTorranceSpecular(NdotV, NdotL, NdotH, VdotH,
                                                   materialRoughness, F0);
-    float3 kD = DawningDiffuseWeight(F, metallic);
+    float3 kD = DawningDiffuseWeight(F, materialMetallic);
     float3 diffuse = kD * baseColor / PI;
     float3 direct = (diffuse + specular) * lightColor * NdotL;
 
     // Ambient (hemisphere approximation — ground color darker)
     float hemisphereBlend = N.y * 0.5 + 0.5;
     float3 groundColor = ambientColor * 0.3;
-    float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend) * (1.0 - metallic);
+    float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend)
+                          * (1.0 - materialMetallic) * ambientOcclusion;
     float3 ambientSpecular = DawningFresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
-                             lerp(0.2, 0.8, 1.0 - materialRoughness);
+                             lerp(0.2, 0.8, 1.0 - materialRoughness) * ambientOcclusion;
 
     // Combine
     float3 finalColor = direct + ambientDiffuse + ambientSpecular;
