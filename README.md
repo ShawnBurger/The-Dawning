@@ -147,4 +147,6 @@ build after each meaningful edit, then move to the next layer.
 
 Codex and Claude Code should work from separate Git worktrees instead of the
 same physical checkout. See `AGENT_COORDINATION.md` and the `tools\agent_*.ps1`
-scripts for the shared branch, build, smoke-test, and merge workflow.
+scripts for the shared branch, build, smoke-test, and merge workflow. Use
+`tools\claude.cmd` to launch Claude Code even when the desktop app's bundled
+CLI is not on the current shell's `PATH`.
