@@ -768,6 +768,17 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE, LPSTR commandLine, int)
     device.Shutdown();
     window.Shutdown();
 
+    // Any error logged during the run fails the process, even if the frame loop
+    // completed. Several paths (e.g. PathTracer::Dispatch) log an error and skip
+    // their work while the loop carries on to a clean exit — without this latch a
+    // path tracer that rendered nothing would still exit 0 and pass the smoke test.
+    if (exitCode == 0 && core::Log::ErrorCount() > 0)
+    {
+        core::Log::Errorf("Run logged %u error(s); failing with exit code 4",
+                          core::Log::ErrorCount());
+        exitCode = 4;
+    }
+
     core::Log::Info("=== The Dawning V3 Engine stopped ===");
     core::Log::Shutdown();
 

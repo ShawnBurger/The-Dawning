@@ -54,7 +54,9 @@ if (!(Test-Path -LiteralPath $log)) {
 
 $logText = Get-Content -LiteralPath $log -Raw
 
-$errors = Select-String -LiteralPath $log -Pattern "\[ERROR\]"
+# core::Log emits a four-character column-aligned prefix "[ERR ]", never "[ERROR]".
+# The previous pattern could not match any line this engine writes.
+$errors = Select-String -LiteralPath $log -Pattern "\[ERR\s*\]"
 if ($errors) {
     $errors | ForEach-Object { $_.Line }
     throw "Smoke test log contains errors."

@@ -14,6 +14,7 @@ static LARGE_INTEGER s_startTime;
 static LARGE_INTEGER s_frequency;
 static bool s_initialized = false;
 static FILE* s_file = nullptr;
+static uint32_t s_errorCount = 0;
 
 static void BuildLogPath(char* outPath, size_t outPathSize)
 {
@@ -78,7 +79,7 @@ static void Output(LogLevel level, const char* msg)
 
     const char* prefix = "[INFO]";
     if (level == LogLevel::Warn)  prefix = "[WARN]";
-    if (level == LogLevel::Error) prefix = "[ERR ]";
+    if (level == LogLevel::Error) { prefix = "[ERR ]"; ++s_errorCount; }
 
     char buffer[640];
     snprintf(buffer, sizeof(buffer), "[%8.3f] %s %s\n", elapsed, prefix, msg);
@@ -99,6 +100,8 @@ static void Output(LogLevel level, const char* msg)
 void Info(const char* msg)  { Output(LogLevel::Info, msg); }
 void Warn(const char* msg)  { Output(LogLevel::Warn, msg); }
 void Error(const char* msg) { Output(LogLevel::Error, msg); }
+
+uint32_t ErrorCount() { return s_errorCount; }
 
 void Infof(const char* fmt, ...)
 {

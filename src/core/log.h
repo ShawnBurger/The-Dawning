@@ -33,6 +33,10 @@ namespace Log
     void Warnf(const char* fmt, ...);
     void Errorf(const char* fmt, ...);
 
+    // Number of Error-level messages logged since process start. Lets the smoke
+    // harness fail a run whose frame loop logged errors but still exited cleanly.
+    uint32_t ErrorCount();
+
 } // namespace Log
 
 } // namespace core
