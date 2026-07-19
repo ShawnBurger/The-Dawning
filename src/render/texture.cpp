@@ -1142,6 +1142,56 @@ std::vector<uint32_t> GenerateCheckerTextureRGBA8(
     return pixels;
 }
 
+std::vector<uint32_t> GenerateCheckerORMTextureRGBA8(
+    uint32_t width,
+    uint32_t height,
+    uint32_t checkerSize,
+    float baseRoughness,
+    float altRoughness,
+    float baseMetallic,
+    float altMetallic)
+{
+    std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
+    if (checkerSize == 0) checkerSize = 1;
+
+    auto toByte = [](float v) -> uint32_t
+    {
+        float clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+        return static_cast<uint32_t>(clamped * 255.0f + 0.5f);
+    };
+
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            const bool alt = (((x / checkerSize) + (y / checkerSize)) & 1u) != 0u;
+
+            // Soft ambient occlusion in a band around each cell border, so AO is
+            // visibly doing something distinct from roughness.
+            const uint32_t cellX = x % checkerSize;
+            const uint32_t cellY = y % checkerSize;
+            const uint32_t edge = checkerSize / 8 + 1;
+            const uint32_t dx = cellX < checkerSize - cellX ? cellX : checkerSize - 1 - cellX;
+            const uint32_t dy = cellY < checkerSize - cellY ? cellY : checkerSize - 1 - cellY;
+            const uint32_t d = dx < dy ? dx : dy;
+            const float occlusion = d >= edge ? 1.0f
+                                  : 0.55f + 0.45f * (static_cast<float>(d) / static_cast<float>(edge));
+
+            const float roughness = alt ? altRoughness : baseRoughness;
+            const float metallic  = alt ? altMetallic  : baseMetallic;
+
+            // RGBA8 little-endian: R in the low byte.
+            pixels[static_cast<size_t>(y) * width + x] =
+                  (toByte(occlusion))
+                | (toByte(roughness) << 8)
+                | (toByte(metallic)  << 16)
+                | (0xFFu             << 24);
+        }
+    }
+
+    return pixels;
+}
+
 std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
     uint32_t width,
     uint32_t height,

@@ -51,7 +51,7 @@ void RTPipeline::Shutdown()
 //   [5] SRV - instance metadata StructuredBuffer (t3, space0)
 //   [6] SRV - triangle UV StructuredBuffer (t4, space0)
 //   [7] SRV - triangle positions (t5)
-//   [8] SRV descriptor table - albedo textures (t0, space4), normal textures (t0, space5)
+//   [8] SRV descriptor table - albedo (t0 space4), normal (t0 space5), ORM (t0 space6)
 // =============================================================================
 bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
 {
@@ -112,8 +112,8 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[7].Descriptor.RegisterSpace  = 0;
     rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Slot 8: Material texture descriptor table (albedo t0 space4, normal t0 space5)
-    D3D12_DESCRIPTOR_RANGE textureRanges[2] = {};
+    // Slot 8: Material texture descriptor table (albedo space4, normal space5, ORM space6)
+    D3D12_DESCRIPTOR_RANGE textureRanges[3] = {};
     textureRanges[0].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     textureRanges[0].NumDescriptors     = kMaxRTAlbedoTextures;
     textureRanges[0].BaseShaderRegister = 0;
@@ -125,6 +125,16 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     textureRanges[1].BaseShaderRegister = 0;
     textureRanges[1].RegisterSpace      = 5;
     textureRanges[1].OffsetInDescriptorsFromTableStart = kMaxRTAlbedoTextures;
+
+    // Packed occlusion/roughness/metallic. Offsets are table-relative and must
+    // match the descriptor layout PathTracer builds; kRT*DescriptorBase there is
+    // the same arithmetic against the heap.
+    textureRanges[2].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRanges[2].NumDescriptors     = kMaxRTOrmTextures;
+    textureRanges[2].BaseShaderRegister = 0;
+    textureRanges[2].RegisterSpace      = 6;
+    textureRanges[2].OffsetInDescriptorsFromTableStart =
+        kMaxRTAlbedoTextures + kMaxRTNormalTextures;
 
     rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParams[8].DescriptorTable.NumDescriptorRanges = _countof(textureRanges);

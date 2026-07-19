@@ -11,9 +11,9 @@ Do not merge old snapshots directly into this source tree.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
 - Layer 4 material work is partially landed: albedo/normal textures,
-  Cook-Torrance GGX shading, a linear HDR scene target and a separate tone-map
-  resolve pass exist; SM 6.6 bindless and metallic/roughness/AO/emissive maps do
-  not. See "Material System Status" below and `CLAUDE.md`.
+  Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
+  linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
+  SM 6.6 bindless and emissive maps do not. See "Material System Status" below and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build

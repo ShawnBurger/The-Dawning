@@ -151,6 +151,9 @@ void Scene::RenderEntities(render::D3D12Device& device,
         const render::Texture* normalTexture = nullptr;
         if (material.normalTextureHandle != UINT32_MAX)
             normalTexture = m_resources.GetTexture(TextureHandle(material.normalTextureHandle));
+        const render::Texture* ormTexture = nullptr;
+        if (material.ormTextureHandle != UINT32_MAX)
+            ormTexture = m_resources.GetTexture(TextureHandle(material.ormTextureHandle));
 
         const core::Mat4x4 worldMatrix =
             transform.ToCameraRelativeMatrix(cameraPosition);
@@ -158,7 +161,7 @@ void Scene::RenderEntities(render::D3D12Device& device,
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,
                           material.albedo, material.roughness, material.metallic,
-                          albedoTexture, normalTexture);
+                          albedoTexture, normalTexture, ormTexture);
     }
 }
 
@@ -319,6 +322,7 @@ void Scene::PathTraceEntities(
     std::vector<render::RTTrianglePositionData> trianglePositions;
     std::vector<const render::Texture*> albedoTextures;
     std::vector<const render::Texture*> normalTextures;
+    std::vector<const render::Texture*> ormTextures;
     materials.reserve(meshPool->Count());
     instanceData.reserve(meshPool->Count());
 
@@ -373,6 +377,9 @@ void Scene::PathTraceEntities(
         const uint32_t albedoTextureIndex =
             resolveTextureIndex(mat.albedoTextureHandle, albedoTextures,
                                 render::kMaxRTAlbedoTextures, "albedo");
+        const uint32_t ormTextureIndex =
+            resolveTextureIndex(mat.ormTextureHandle, ormTextures,
+                                render::kMaxRTOrmTextures, "orm");
         const uint32_t normalTextureIndex =
             resolveTextureIndex(mat.normalTextureHandle, normalTextures,
                                 render::kMaxRTNormalTextures, "normal");
@@ -388,6 +395,8 @@ void Scene::PathTraceEntities(
         rtMat.useAlbedoTexture = albedoTextureIndex == UINT32_MAX ? 0u : 1u;
         rtMat.normalTextureIndex = normalTextureIndex == UINT32_MAX ? 0u : normalTextureIndex;
         rtMat.useNormalTexture = normalTextureIndex == UINT32_MAX ? 0u : 1u;
+        rtMat.ormTextureIndex = ormTextureIndex == UINT32_MAX ? 0u : ormTextureIndex;
+        rtMat.useOrmTexture = ormTextureIndex == UINT32_MAX ? 0u : 1u;
         materials.push_back(rtMat);
 
         render::RTInstanceData rtInstance = {};
@@ -434,6 +443,7 @@ void Scene::PathTraceEntities(
                           trianglePositions.data(), static_cast<uint32_t>(trianglePositions.size()),
                           albedoTextures.data(), static_cast<uint32_t>(albedoTextures.size()),
                           normalTextures.data(), static_cast<uint32_t>(normalTextures.size()),
+                          ormTextures.data(), static_cast<uint32_t>(ormTextures.size()),
                           static_cast<uint32_t>(materials.size()),
                           qualityMode);
 }
