@@ -782,9 +782,17 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     shadowSampler.RegisterSpace    = 0;
     shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
+    // These two MUST be assigned before the array below copies the struct. They
+    // used to sit after it, which made them dead stores: the array captured
+    // staticSampler while ShaderVisibility was still its zero-initialised value,
+    // and zero is D3D12_SHADER_VISIBILITY_ALL, not PIXEL. Benign - ALL is a
+    // superset, and RegisterSpace's intended value is also 0 - which is exactly
+    // why it survived review. A dead store that happens to be harmless is still
+    // a lie about what the code does.
     staticSampler.RegisterSpace    = 0;
     staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
 
     D3D12_ROOT_SIGNATURE_FLAGS flags =
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
