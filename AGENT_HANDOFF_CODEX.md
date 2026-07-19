@@ -1,3 +1,34 @@
+# Parallel follow-up: descriptor allocator hardening
+
+Integration baseline: `b2ead45`, containing Claude's merged allocator and
+Codex's fixed-step velocity lane. Combined Debug/Release validation passes at
+65 cases / 980 checks and all six resize-stress captures match baseline.
+
+## Codex claim
+
+Independent review found that `DescriptorAllocator::Release` accepts duplicate
+and never-allocated indices. A duplicate release can place one slot in the free
+list twice and alias two live textures. `ResourceManager::Shutdown` also clears
+live textures without retiring their descriptors or GPU resources.
+
+Codex is taking `codex/descriptor-allocator-hardening` and owns:
+
+- `src/render/descriptor_allocator.h`
+- `src/render/texture.h`
+- `src/render/renderer.cpp` release diagnostics only
+- `src/scene/resource_manager.h` / `.cpp`
+- `src/scene/scene.h` / `.cpp` shutdown signature only
+- `src/app.cpp` shutdown call site only
+- `tests/test_descriptor_allocator.cpp`
+- this handoff entry
+
+Claude has released these files and reports no work in flight. This lane will
+add explicit per-slot state, make texture ownership move-only, retire all live
+scene resources through the existing fence paths, and add adversarial duplicate,
+free, pending, and never-allocated release tests.
+
+---
+
 # Parallel round: fixed-step velocity integration
 
 Integration baseline: `50f9c5d`. The D3D12 frame lifecycle lane is merged,
