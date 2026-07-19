@@ -115,7 +115,7 @@ struct ShadowPayload
 // =============================================================================
 // Utility functions
 // =============================================================================
-static const float PI = 3.14159265358979323846f;
+#include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with basic_ps.hlsl
 
 float3 SafeNormalize(float3 value, float3 fallback)
 {
@@ -172,95 +172,6 @@ float3 SampleCosineHemisphere(float2 u, float3 N)
     return normalize(T * localDir.x + N * localDir.y + B * localDir.z);
 }
 
-// Build an orthonormal basis around N (Duff et al. 2017, branchless and stable).
-void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
-{
-    float sign = N.z >= 0.0f ? 1.0f : -1.0f;
-    float a = -1.0f / (sign + N.z);
-    float b = N.x * N.y * a;
-    T = float3(1.0f + sign * N.x * N.x * a, sign * b, -sign * N.x);
-    B = float3(b, sign + N.y * N.y * a, -N.y);
-}
-
-// Sample the GGX distribution of VISIBLE normals (Heitz 2018, "Sampling the GGX
-// Distribution of Visible Normals"). Ve is the view direction in tangent space
-// with the shading normal along +Z; the returned half-vector is in the same space.
-//
-// Importance-sampling the visible normals rather than perturbing a mirror
-// direction is what makes the Monte Carlo weight tractable: with a separable
-// Smith G, f*cos/pdf collapses to exactly F * G1(NdotL), with no explicit PDF
-// division and no D or G evaluation needed at the sample point.
-float3 SampleGGXVNDF(float3 Ve, float alpha, float2 u)
-{
-    // Warp to the hemisphere configuration.
-    float3 Vh = normalize(float3(alpha * Ve.x, alpha * Ve.y, Ve.z));
-
-    // Orthonormal basis around Vh.
-    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
-    float3 T1 = lensq > 0.0f ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq)
-                             : float3(1.0f, 0.0f, 0.0f);
-    float3 T2 = cross(Vh, T1);
-
-    // Uniform point on the projected disk, warped for the hemisphere.
-    float r   = sqrt(u.x);
-    float phi = 2.0f * PI * u.y;
-    float t1  = r * cos(phi);
-    float t2  = r * sin(phi);
-    float s   = 0.5f * (1.0f + Vh.z);
-    t2 = (1.0f - s) * sqrt(saturate(1.0f - t1 * t1)) + s * t2;
-
-    // Reproject onto the hemisphere.
-    float3 Nh = t1 * T1 + t2 * T2 + sqrt(saturate(1.0f - t1 * t1 - t2 * t2)) * Vh;
-
-    // Unwarp back to the ellipsoid configuration.
-    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0f, Nh.z)));
-}
-
-// Schlick Fresnel
-float3 FresnelSchlick(float cosTheta, float3 F0)
-{
-    return F0 + (1.0f - F0) * pow(saturate(1.0f - cosTheta), 5.0f);
-}
-
-// GGX Normal Distribution Function
-float DistributionGGX(float NdotH, float roughness)
-{
-    float a  = roughness * roughness;
-    float a2 = a * a;
-    float d  = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
-    // Multiplicative floor, NOT an additive epsilon: at the lobe peak d == a2, so the
-    // true denominator is PI*a2*a2, which for roughness < ~0.35 is smaller than 1e-4.
-    // Adding an epsilon there lets it dominate and flattens the specular peak away.
-    return a2 / max(PI * d * d, 1e-7f);
-}
-
-// Smith geometry function (single direction)
-float GeometrySmithG1(float NdotV, float roughness)
-{
-    float r = roughness + 1.0f;
-    float k = (r * r) / 8.0f;
-    return NdotV / (NdotV * (1.0f - k) + k);
-}
-
-float GeometrySmith(float NdotV, float NdotL, float roughness)
-{
-    return GeometrySmithG1(NdotV, roughness) * GeometrySmithG1(NdotL, roughness);
-}
-
-float Luminance(float3 color)
-{
-    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
-}
-
-// Bound outlier samples before they enter the running mean.
-//
-// This deliberately does NOT reference the previous frame's radiance. The old
-// version clamped against `previousLum * 3 + 0.25`, i.e. against its own already
-// clamped output, which is a multiplicative ratchet rather than a filter: a bright
-// region could only grow 3x per frame from whatever it had previously been bounded
-// to, biasing the estimator by an amount determined by frame history instead of
-// sample statistics. Because the accumulation index resets on any camera motion,
-// the hard branch also ran on every frame while the user was moving.
 float3 ClampFireflySample(float3 sampleRadiance)
 {
     // Scrub NaN/Inf first. The old code computed maxLum/sampleLum with an infinite
@@ -269,7 +180,7 @@ float3 ClampFireflySample(float3 sampleRadiance)
     if (any(isnan(sampleRadiance)) || any(isinf(sampleRadiance)))
         return float3(0.0f, 0.0f, 0.0f);
 
-    float sampleLum = Luminance(sampleRadiance);
+    float sampleLum = DawningLuminance(sampleRadiance);
     if (sampleLum <= 0.0001f)
         return sampleRadiance;
 
@@ -482,13 +393,12 @@ void RayGen()
                 float NdotV = saturate(dot(N, V));
                 float VdotH = saturate(dot(V, H));
 
-                float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
-                float3 F  = FresnelSchlick(VdotH, F0);
-                float  D  = DistributionGGX(NdotH, mat.roughness);
-                float  G  = GeometrySmith(NdotV, NdotL, mat.roughness);
+                float3 F0 = DawningF0(albedo, mat.metallic);
+                float3 F  = DawningFresnelSchlick(VdotH, F0);
 
-                float3 specular = (D * G * F) / (4.0f * NdotV * NdotL + 0.0001f);
-                float3 kD = (1.0f - F) * (1.0f - mat.metallic);
+                float3 specular = DawningCookTorranceSpecular(NdotV, NdotL, NdotH, VdotH,
+                                                              mat.roughness, F0);
+                float3 kD = DawningDiffuseWeight(F, mat.metallic);
                 float3 diffuse = kD * albedo / PI;
 
                 float3 directLight = (diffuse + specular) * g_LightColor.rgb * NdotL;
@@ -503,7 +413,7 @@ void RayGen()
             float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f;
             float3 envReflection = DawningSkyRadiance(reflect(-V, N));
             float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, mat.metallic);
-            float3 envF = FresnelSchlick(saturate(dot(N, V)), envF0);
+            float3 envF = DawningFresnelSchlick(saturate(dot(N, V)), envF0);
             float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
             float3 envSpecular = envReflection * envF * envGloss;
             radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
@@ -537,8 +447,8 @@ void RayGen()
             newDir = SampleCosineHemisphere(u, N);
 
             // Update throughput
-            float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
-            float3 F = FresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
+            float3 F0 = DawningF0(albedo, mat.metallic);
+            float3 F = DawningFresnelSchlick(saturate(dot(V, normalize(V + newDir))), F0);
             float3 kD = (1.0f - F) * (1.0f - mat.metallic);
             throughput *= kD * albedo;
         }
@@ -555,14 +465,14 @@ void RayGen()
             // had no lower-hemisphere guard, firing a large share of rays at grazing
             // angles straight into the surface.
             float3 T, B;
-            BuildOrthonormalBasis(N, T, B);
+            DawningBuildOrthonormalBasis(N, T, B);
 
             // Clamp alpha away from zero so the VNDF stays well-defined; a true
             // delta mirror would need a separate specular-path branch.
             float alpha = max(mat.roughness * mat.roughness, 1e-3f);
 
             float3 Ve = float3(dot(V, T), dot(V, B), dot(V, N));
-            float3 Hl = SampleGGXVNDF(Ve, alpha, u);
+            float3 Hl = DawningSampleGGXVNDF(Ve, alpha, u);
             float3 H  = normalize(Hl.x * T + Hl.y * B + Hl.z * N);
 
             newDir = reflect(-V, H);
@@ -571,12 +481,12 @@ void RayGen()
             if (NdotL <= 0.0f)
                 break;   // Sampled below the horizon; this path carries no energy.
 
-            float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, mat.metallic);
-            float3 F  = FresnelSchlick(saturate(dot(V, H)), F0);
+            float3 F0 = DawningF0(albedo, mat.metallic);
+            float3 F  = DawningFresnelSchlick(saturate(dot(V, H)), F0);
 
             // f * cos / pdf for VNDF sampling with separable Smith G reduces to
             // F * G1(NdotL). See SampleGGXVNDF.
-            throughput *= F * GeometrySmithG1(saturate(NdotL), mat.roughness);
+            throughput *= F * DawningGeometrySmithG1(saturate(NdotL), mat.roughness);
         }
 
         // Correct for sampling probability

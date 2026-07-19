@@ -70,6 +70,7 @@ set(SHADER_FILES
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
     shaders/path_trace.hlsl
+    shaders/brdf_common.hlsli
     shaders/display_common.hlsli
     shaders/sky_common.hlsli
 )

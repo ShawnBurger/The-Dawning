@@ -42,7 +42,7 @@ cbuffer CBMaterial : register(b2)
 Texture2D<float4> materialTextures[128] : register(t0);
 SamplerState linearSampler : register(s0);
 
-static const float PI = 3.14159265358979323846;
+#include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
 
 struct PSInput
 {
@@ -88,35 +88,6 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
     return dot(mappedNormal, mappedNormal) > 1e-8 ? normalize(mappedNormal) : N;
 }
 
-float3 FresnelSchlick(float cosTheta, float3 F0)
-{
-    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
-}
-
-float DistributionGGX(float NdotH, float materialRoughness)
-{
-    float a = materialRoughness * materialRoughness;
-    float a2 = a * a;
-    float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    // Multiplicative floor, NOT an additive epsilon: at the lobe peak d == a2, so the
-    // true denominator is PI*a2*a2, which for roughness < ~0.35 is smaller than 1e-4.
-    // Adding an epsilon there lets it dominate and flattens the specular peak away.
-    return a2 / max(PI * d * d, 1e-7);
-}
-
-float GeometrySmithG1(float NdotV, float materialRoughness)
-{
-    float r = materialRoughness + 1.0;
-    float k = (r * r) / 8.0;
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float GeometrySmith(float NdotV, float NdotL, float materialRoughness)
-{
-    return GeometrySmithG1(NdotV, materialRoughness) *
-           GeometrySmithG1(NdotL, materialRoughness);
-}
-
 float4 main(PSInput input) : SV_TARGET
 {
     float3 N = normalize(input.normalWS);
@@ -140,13 +111,12 @@ float4 main(PSInput input) : SV_TARGET
     float materialRoughness = clamp(roughness, 0.04, 1.0);
 
     // Cook-Torrance direct lighting
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
-    float3 F = FresnelSchlick(VdotH, F0);
-    float D = DistributionGGX(NdotH, materialRoughness);
-    float G = GeometrySmith(NdotV, NdotL, materialRoughness);
-
-    float3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.0001);
-    float3 kD = (1.0 - F) * (1.0 - metallic);
+    float3 F0 = DawningF0(baseColor, metallic);
+    
+    float3 F = DawningFresnelSchlick(VdotH, F0);
+    float3 specular = DawningCookTorranceSpecular(NdotV, NdotL, NdotH, VdotH,
+                                                  materialRoughness, F0);
+    float3 kD = DawningDiffuseWeight(F, metallic);
     float3 diffuse = kD * baseColor / PI;
     float3 direct = (diffuse + specular) * lightColor * NdotL;
 
@@ -154,7 +124,7 @@ float4 main(PSInput input) : SV_TARGET
     float hemisphereBlend = N.y * 0.5 + 0.5;
     float3 groundColor = ambientColor * 0.3;
     float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend) * (1.0 - metallic);
-    float3 ambientSpecular = FresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
+    float3 ambientSpecular = DawningFresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
                              lerp(0.2, 0.8, 1.0 - materialRoughness);
 
     // Combine
