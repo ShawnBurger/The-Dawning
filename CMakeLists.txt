@@ -102,6 +102,7 @@ set(ECS_HEADERS
 set(SCENE_SOURCES
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
+    src/scene/model_loader.cpp
 )
 
 set(SCENE_HEADERS
