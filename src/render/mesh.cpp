@@ -379,7 +379,7 @@ MeshData GenerateCube(const core::Color& color)
 // GeneratePlane — XZ plane
 // =============================================================================
 MeshData GeneratePlane(float width, float depth, uint32_t subdivX, uint32_t subdivZ,
-                       const core::Color& color)
+                       const core::Color& color, float uvTiles)
 {
     MeshData data;
 
@@ -403,8 +403,8 @@ MeshData GeneratePlane(float width, float depth, uint32_t subdivX, uint32_t subd
         {
             float px = -halfW + static_cast<float>(x) * dx;
             float pz = -halfD + static_cast<float>(z) * dz;
-            float u = static_cast<float>(x) / static_cast<float>(subdivX);
-            float v = static_cast<float>(z) / static_cast<float>(subdivZ);
+            float u = (static_cast<float>(x) / static_cast<float>(subdivX)) * uvTiles;
+            float v = (static_cast<float>(z) / static_cast<float>(subdivZ)) * uvTiles;
 
             data.vertices.push_back({
                 { px, 0.0f, pz },

@@ -212,7 +212,13 @@ bool App::InitializeScene()
     // cascade and nothing could exercise - or fail to exercise - the others.
     // A material feature no scene uses is untested code; this project has been
     // bitten by that enough times to stop repeating it.
-    auto planeData = render::GeneratePlane(200.0f, 200.0f, 40, 40, core::Color::White());
+    // 20 tiles across 200 units keeps one texture repeat per 10 world units,
+    // which is exactly the density the old 10x10 plane had. Without this the
+    // enlarged plane stretches the same single repeat over 20x the area and the
+    // ground loses all its detail - a regression introduced by growing the
+    // plane, not by anything to do with shadows.
+    auto planeData = render::GeneratePlane(200.0f, 200.0f, 40, 40,
+                                           core::Color::White(), 20.0f);
     auto sphereData = render::GenerateSphere(0.5f, 32, 16, core::Color::White());
 
     auto cubeMesh = render::CreateMesh(
