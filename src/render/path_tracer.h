@@ -90,6 +90,7 @@ private:
     bool CreateDescriptorHeap(ID3D12Device5* device);
     bool CreateConstantBuffer(ID3D12Device5* device);
     bool CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMaterials);
+    bool EnsureMaterialBuffer(ID3D12Device5* device, uint32_t materialCount);
     bool EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount);
     bool EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount);
     bool EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangleCount);

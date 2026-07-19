@@ -481,6 +481,35 @@ bool PathTracer::CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMateria
 // =============================================================================
 // Dispatch — execute the path tracer for one frame
 // =============================================================================
+// Grow the material buffer like every other per-frame RT buffer. It used to be
+// created once at a hard 256 entries with no growth path, and the upload silently
+// clamped the memcpy to that cap while DispatchRays still covered every instance.
+// Because materials are bound as a ROOT SRV there is no descriptor and no size
+// information for the shader to bounds-check against, so g_Materials[InstanceID()]
+// read past the allocation outright for instance 256 and beyond.
+bool PathTracer::EnsureMaterialBuffer(ID3D12Device5* device, uint32_t materialCount)
+{
+    if (materialCount == 0) return false;
+    if (m_materialBuffer && materialCount <= m_maxMaterials) return true;
+
+    if (m_materialBuffer && m_materialMapped)
+    {
+        m_materialBuffer->Unmap(0, nullptr);
+        m_materialMapped = nullptr;
+    }
+    m_materialBuffer.Reset();
+
+    m_maxMaterials = materialCount + 64;
+    uint64_t bufSize = sizeof(RTMaterialData) * static_cast<uint64_t>(m_maxMaterials);
+    if (!CreateMappedUploadBuffer(device, bufSize, L"RT_MaterialBuffer",
+                                  m_materialBuffer, &m_materialMapped))
+    {
+        m_maxMaterials = 0;
+        return false;
+    }
+    return true;
+}
+
 bool PathTracer::EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount)
 {
     if (instanceCount == 0) return false;
@@ -696,12 +725,8 @@ void PathTracer::Dispatch(
 
     memcpy(m_cbMapped[m_frameIndex], &cb, sizeof(cb));
 
-    // --- Upload materials ---
-    uint32_t matCount = materialCount < m_maxMaterials ? materialCount : m_maxMaterials;
-    if (matCount > 0 && materials)
-        memcpy(m_materialMapped, materials, sizeof(RTMaterialData) * matCount);
-
-    if (!EnsureInstanceDataBuffer(device.Device5(), instanceDataCount) ||
+    if (!EnsureMaterialBuffer(device.Device5(), materialCount) ||
+        !EnsureInstanceDataBuffer(device.Device5(), instanceDataCount) ||
         !EnsureTriangleNormalBuffer(device.Device5(), triangleNormalCount) ||
         !EnsureTriangleUVBuffer(device.Device5(), triangleUVCount) ||
         !EnsureTrianglePositionBuffer(device.Device5(), trianglePositionCount))
@@ -709,6 +734,13 @@ void PathTracer::Dispatch(
         core::Log::Error("PathTracer dispatch skipped: failed to prepare RT geometry buffers");
         return;
     }
+
+    // --- Upload materials ---
+    // No clamp: the buffer is guaranteed to hold materialCount entries above.
+    // Clamping here while DispatchRays still covered every instance is what made
+    // g_Materials[InstanceID()] read past the allocation for instance 256+.
+    if (materialCount > 0 && materials)
+        memcpy(m_materialMapped, materials, sizeof(RTMaterialData) * materialCount);
 
     memcpy(m_instanceDataMapped, instanceData, sizeof(RTInstanceData) * instanceDataCount);
     memcpy(m_triangleNormalMapped, triangleNormals, sizeof(RTTriangleNormalData) * triangleNormalCount);
