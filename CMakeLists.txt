@@ -82,6 +82,16 @@ set(SCENE_HEADERS
     src/scene/scene.h
 )
 
+set(TEST_SOURCES
+    tests/test_main.cpp
+    tests/test_math.cpp
+    tests/test_ecs.cpp
+)
+
+set(TEST_HEADERS
+    tests/test_framework.h
+)
+
 # =============================================================================
 # Executable
 # =============================================================================
@@ -162,3 +172,48 @@ if(MSVC)
         /permissive-  # Strict conformance
     )
 endif()
+
+# =============================================================================
+# Unit tests — TheDawningTests
+# =============================================================================
+# CPU-only by construction. This target links NO graphics libraries and creates
+# no device, so it runs on any machine (including a GPU-less CI runner). It
+# covers only the GPU-independent headers: src/core/types.h and src/ecs/*.h.
+#
+# Do NOT add src/render/* or src/scene/* here — scene/ holds a render::PathTracer
+# by value and would drag D3D12 into the test binary.
+#
+#   cmake --build build --config Debug
+#   ctest --test-dir build -C Debug --output-on-failure
+# =============================================================================
+enable_testing()
+
+add_executable(TheDawningTests
+    ${TEST_SOURCES}
+    ${TEST_HEADERS}
+    src/core/types.h
+    ${ECS_HEADERS}
+)
+
+set_target_properties(TheDawningTests PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
+)
+
+target_include_directories(TheDawningTests PRIVATE src tests)
+
+# Intentionally no target_link_libraries(): see the note above.
+
+if(MSVC)
+    target_compile_options(TheDawningTests PRIVATE
+        /W4
+        /WX-
+        /MP
+        /Zi
+        /permissive-
+        /utf-8        # Test sources are UTF-8; avoids C4819 on non-ASCII comments
+    )
+endif()
+
+source_group("Tests" FILES ${TEST_SOURCES} ${TEST_HEADERS})
+
+add_test(NAME unit_tests COMMAND TheDawningTests)
