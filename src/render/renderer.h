@@ -211,6 +211,28 @@ public:
     // not rasterise a single triangle.
     bool ReadShadowMapCoverage(float& writtenFraction, float& minDepth) const;
 
+    // Advance the per-frame constant ring. MUST run exactly once per frame,
+    // BEFORE any pass uploads constants.
+    //
+    // This used to live inside BeginFrame, which was wrong the moment a pass
+    // started running earlier than BeginFrame. The shadow pass does exactly
+    // that: it runs before BeginScenePass, which runs before BeginFrame, so its
+    // per-object constants were allocated against the PREVIOUS frame's index
+    // and appended past that frame's high-water mark. It did not corrupt
+    // anything only because the regions happened to be disjoint and three
+    // frames in flight gave enough fence slack - an accident of the current
+    // allocation pattern, not a property anything enforced.
+    //
+    // Called for both the raster and path-tracing branches so the ring is
+    // advanced uniformly regardless of which one runs.
+    void BeginFrameResources(D3D12Device& device);
+
+    // Peak bytes used in the constant ring on any frame so far. Exposed because
+    // the ring is a fixed kCBRingSize and every new per-draw pass multiplies
+    // pressure on it; a silent overflow degrades into dropped draws.
+    uint32_t ConstantRingPeakBytes() const { return m_cbPeak; }
+    uint32_t ConstantRingCapacity() const { return kCBRingSize; }
+
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
                              const core::Vec3f& color,
@@ -323,6 +345,7 @@ private:
     ComPtr<ID3D12Resource> m_cbUploadBuffers[kFrameCount];
     uint8_t* m_cbMappedPtrs[kFrameCount] = {};
     uint32_t m_cbOffset = 0;       // Current write offset in ring
+    uint32_t m_cbPeak = 0;         // Highest offset reached on any frame
     uint32_t m_currentFrame = 0;
 
     // Cached view-projection matrix for the current frame

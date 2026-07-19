@@ -19,7 +19,10 @@ cbuffer CBPerFrame : register(b1)
     float  pad3;
     // Camera basis; used by sky_ps.hlsl. Declared here too because both shaders
     // bind the same b1 and the layouts must agree. Keep in sync with
-    // struct CBPerFrame in src/render/renderer.h (static_assert'd at 112 bytes).
+    // struct CBPerFrame in src/render/renderer.h (static_assert'd at 176 bytes).
+    // sky_ps.hlsl declares only the first 112 bytes of that struct, so fields may
+    // only ever be APPENDED - inserting one above the lightViewProj block shifts
+    // every offset sky_ps.hlsl reads, silently, with no compile error anywhere.
     float3 camRight;
     float  tanHalfFovY;
     float3 camUp;

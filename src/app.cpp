@@ -745,6 +745,9 @@ int App::RunMainLoop()
                 m_captureThisFrame = m_options.smokeCapture;
                 m_verifyShadowThisFrame = true;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");
+                core::Log::Infof("[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u",
+                                 m_renderer.ConstantRingPeakBytes(),
+                                 m_renderer.ConstantRingCapacity());
                 core::Log::Infof("[SMOKE] rt_available=%s", m_rtAvailable ? "yes" : "no");
                 core::Log::Infof("[SMOKE] rt_active=%s",
                                  (m_usePathTracing && m_rtAvailable) ? "yes" : "no");
@@ -1105,6 +1108,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     auto* commandList = m_device.CmdList();
     m_renderer.ReclaimTextureDescriptors(m_device);
+
+    // Advance the constant ring before ANY pass allocates from it. The shadow
+    // pass below runs before BeginFrame, so leaving this to BeginFrame put its
+    // constants in the previous frame's buffer.
+    m_renderer.BeginFrameResources(m_device);
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
 
     if (renderedPathTracing)

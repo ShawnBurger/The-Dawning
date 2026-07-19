@@ -718,9 +718,15 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 //   Slot 0: Root CBV at b0 (per-object) — 2 DWORDs, hot, changes every draw
 //   Slot 1: Root CBV at b1 (per-frame)  — 2 DWORDs, warm, changes once/frame
 //   Slot 2: Root CBV at b2 (material)   — 2 DWORDs, warm, changes per material
-//   Slot 3: Descriptor table for material textures (t0-t127)
-//   Static sampler at s0
-// Total: 7 DWORDs - well within 64 DWORD limit
+//   Slot 3: Descriptor table for material textures (t0-t127) - 1 DWORD
+//   Slot 4: Descriptor table for the shadow map (t0, space1) - 1 DWORD
+//   Static sampler at s0 (anisotropic), s1 (shadow comparison)
+// Total: 8 DWORDs - well within the 64 DWORD limit.
+//
+// Root CBVs cost 2 DWORDs each, descriptor tables 1. Recompute this when adding
+// a parameter: two different wrong numbers were sitting in this file at once,
+// which is what happens when a running total is maintained by hand and never
+// checked.
 // =============================================================================
 bool Renderer::CreateRootSignature(ID3D12Device* device)
 {
@@ -736,7 +742,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
 
     // Static sampler (free — doesn't cost root signature space)
     D3D12_STATIC_SAMPLER_DESC staticSampler = {};
-    staticSampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    // ANISOTROPIC, not MIN_MAG_MIP_LINEAR. MaxAnisotropy below was already set to
+    // 16 and did nothing, because anisotropy is only consulted when the filter
+    // actually selects it - it read as a deliberate quality setting while being
+    // inert. It matters here: the ground plane is 200x200 world units, so most
+    // of it is viewed at a grazing angle where trilinear filtering blurs the
+    // texture into mush along the direction of anisotropy.
+    staticSampler.Filter           = D3D12_FILTER_ANISOTROPIC;
     staticSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     staticSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     staticSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -921,7 +933,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 9 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 8 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1240,6 +1252,11 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
         return 0;
     }
 
+    // Track the high-water mark across the whole run, not just this frame, so
+    // ring pressure is observable before it becomes an overflow.
+    if (m_cbOffset + alignedSize > m_cbPeak)
+        m_cbPeak = m_cbOffset + alignedSize;
+
     // Copy data to the mapped buffer
     uint8_t* dest = m_cbMappedPtrs[m_currentFrame] + m_cbOffset;
     memcpy(dest, data, dataSize);
@@ -1258,11 +1275,18 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
 // =============================================================================
 // BeginFrame — set up pipeline state and per-frame constants
 // =============================================================================
-void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
+void Renderer::BeginFrameResources(D3D12Device& device)
 {
     m_currentFrame = device.FrameIndex();
-    m_cbOffset = 0; // Reset ring for this frame
+    m_cbOffset = 0;
+}
 
+void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
+{
+    // NOTE: the ring advance deliberately does NOT happen here any more - see
+    // BeginFrameResources. Passes that run earlier than this function (the
+    // shadow pass) allocate constants too, and resetting here would strand
+    // their allocations in the previous frame's buffer.
     auto* cmd = device.CmdList();
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
     cmd->SetDescriptorHeaps(1, heaps);
