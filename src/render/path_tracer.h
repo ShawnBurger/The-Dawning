@@ -147,7 +147,7 @@ private:
     uint8_t* m_trianglePositionMapped = nullptr;
     uint32_t m_maxTrianglePositions = 0;
 
-    core::Vec3f m_prevCameraPos = {};
+    core::Vec3d m_prevCameraPos = {};
     core::Vec3f m_prevCameraRight = {};
     core::Vec3f m_prevCameraUp = {};
     core::Vec3f m_prevCameraForward = {};

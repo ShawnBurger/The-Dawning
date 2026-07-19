@@ -53,10 +53,13 @@ public:
     void UpdateSystems(float dt);
 
     // Phase 2a: Render all visible entities with rasterization
-    void RenderEntities(render::D3D12Device& device, render::Renderer& renderer);
+    void RenderEntities(render::D3D12Device& device,
+                        render::Renderer& renderer,
+                        const core::Vec3d& cameraPosition);
 
     // Phase 2b: Build acceleration structures and dispatch path tracing
-    void BuildAccelerationStructures(render::D3D12Device& device);
+    void BuildAccelerationStructures(render::D3D12Device& device,
+                                     const core::Vec3d& cameraPosition);
     void PathTraceEntities(render::D3D12Device& device,
                            const render::Camera& camera,
                            const core::Vec3f& lightDir,

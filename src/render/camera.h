@@ -15,7 +15,7 @@ namespace render
 class Camera
 {
 public:
-    void Init(const core::Vec3f& position, float yawDeg, float pitchDeg);
+    void Init(const core::Vec3d& position, float yawDeg, float pitchDeg);
 
     // Call once per frame with input deltas
     void Update(float dt,
@@ -31,7 +31,7 @@ public:
     core::Mat4x4 ViewProjectionMatrix(float aspectRatio) const;
 
     // Accessors
-    core::Vec3f Position() const { return m_position; }
+    const core::Vec3d& Position() const { return m_position; }
     core::Vec3f Forward() const;
     core::Vec3f Right() const;
     core::Vec3f Up() const { return { 0.0f, 1.0f, 0.0f }; }
@@ -51,7 +51,7 @@ public:
     float GetFarZ() const { return m_farZ; }
 
 private:
-    core::Vec3f m_position = { 0.0f, 0.0f, 0.0f };
+    core::Vec3d m_position = { 0.0, 0.0, 0.0 };
     float m_yaw = 0.0f;      // Degrees, 0 = looking down +Z
     float m_pitch = 0.0f;    // Degrees, clamped to [-89, 89]
 

@@ -704,7 +704,7 @@ void App::RenderFrame(const core::TimeStep& timeStep)
             D3D12_RESOURCE_STATE_PRESENT,
             D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-        m_scene.BuildAccelerationStructures(m_device);
+        m_scene.BuildAccelerationStructures(m_device, m_camera.Position());
 
         const core::Vec3f lightDirection = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
         const core::Vec3f lightColor = { 1.0f, 0.97f, 0.92f };
@@ -758,7 +758,7 @@ void App::RenderFrame(const core::TimeStep& timeStep)
 
         m_renderer.BeginFrame(m_device, m_camera);
         m_renderer.DrawSky(m_device);
-        m_scene.RenderEntities(m_device, m_renderer);
+        m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
 
         if (m_debugOverlayReady && m_showDebugOverlay)
         {

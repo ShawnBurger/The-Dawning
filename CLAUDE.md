@@ -126,15 +126,12 @@ Phase 7: Opacity Micro-Maps for alpha-tested geometry (foliage, fences)
 
 ## RULES
 
-1. TARGET, PARTIALLY ENFORCED — double precision (Vec3d) for world positions,
-   Vec3f only after camera subtraction. Groundwork is now in place: `Vec3d` has
-   `Cross`, compound assignment, scalar-left `operator*`, `Lerp`, `Distance` and
-   `FromFloat`, and `Mat4x4::Inverse` exists. What remains is the retrofit
-   itself: `ecs::Transform::position` and `Camera::m_position` are still `Vec3f`,
-   and nothing subtracts the camera position at the extraction boundary. Until
-   that lands, do not write new code that assumes world positions are already
-   double-precision — but DO use `Vec3d` for any new world-space quantity you
-   introduce, so the retrofit does not grow.
+1. ENFORCED — double precision (`Vec3d`) for world positions, `Vec3f` only after
+   camera subtraction. `ecs::Transform::position` and `Camera::m_position` are
+   `Vec3d`; `Scene` produces camera-relative float matrices for both raster and
+   DXR. GPU camera position is local zero, while path-tracing history compares
+   the full double-precision position. New world-space quantities must use
+   `Vec3d`; never narrow an absolute world position before camera subtraction.
 2. Proper .h/.cpp split. No header-only implementations except tiny inlines/templates.
 3. No copyrighted terms. Rename map: Starfleet→Vanguard, LCARS→HELIX, Phaser→Arc Lance,
    Photon Torpedo→Fusion Torpedo, Dilithium→Helion, Federation→Commonwealth, etc.
