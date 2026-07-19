@@ -95,7 +95,6 @@ bool PathTracer::Init(D3D12Device& device)
     if (!CreateDescriptorHeap(dev5)) return false;
     if (!CreateOutputTexture(dev5, device.Width(), device.Height())) return false;
     if (!CreateConstantBuffer(dev5)) return false;
-    if (!CreateMaterialBuffer(dev5, 256)) return false;
 
     m_initialized = true;
     core::Log::Info("PathTracer initialized");
@@ -113,47 +112,19 @@ void PathTracer::Shutdown()
         }
     }
 
-    if (m_materialBuffer && m_materialMapped)
-    {
-        m_materialBuffer->Unmap(0, nullptr);
-        m_materialMapped = nullptr;
-    }
-
-    if (m_instanceDataBuffer && m_instanceDataMapped)
-    {
-        m_instanceDataBuffer->Unmap(0, nullptr);
-        m_instanceDataMapped = nullptr;
-    }
-
-    if (m_triangleNormalBuffer && m_triangleNormalMapped)
-    {
-        m_triangleNormalBuffer->Unmap(0, nullptr);
-        m_triangleNormalMapped = nullptr;
-    }
-
-    if (m_triangleUVBuffer && m_triangleUVMapped)
-    {
-        m_triangleUVBuffer->Unmap(0, nullptr);
-        m_triangleUVMapped = nullptr;
-    }
-
-    if (m_trianglePositionBuffer && m_trianglePositionMapped)
-    {
-        m_trianglePositionBuffer->Unmap(0, nullptr);
-        m_trianglePositionMapped = nullptr;
-    }
-
     m_pipeline.Shutdown();
     m_accel.Shutdown();
 
     m_outputTexture.Reset();
     m_displayTexture.Reset();
     m_srvUavHeap.Reset();
-    m_materialBuffer.Reset();
-    m_instanceDataBuffer.Reset();
-    m_triangleNormalBuffer.Reset();
-    m_triangleUVBuffer.Reset();
-    m_trianglePositionBuffer.Reset();
+
+    // FrameUploadBuffer::Reset unmaps and releases every frame instance.
+    m_materialBuffers.Reset();
+    m_instanceDataBuffers.Reset();
+    m_triangleNormalBuffers.Reset();
+    m_triangleUVBuffers.Reset();
+    m_trianglePositionBuffers.Reset();
     for (auto& cb : m_constantBuffer) cb.Reset();
 
     m_srvUavDescSize = 0;
@@ -161,10 +132,6 @@ void PathTracer::Shutdown()
     m_boundAlbedoTextureResources.fill(nullptr);
     m_boundNormalTextureCount = 0;
     m_boundNormalTextureResources.fill(nullptr);
-    m_maxInstanceData = 0;
-    m_maxTriangleNormals = 0;
-    m_maxTriangleUVs = 0;
-    m_maxTrianglePositions = 0;
     m_accumFrameIndex = 0;
     m_hasPrevCamera = false;
     m_hasPrevQuality = false;
@@ -443,150 +410,49 @@ bool PathTracer::CreateConstantBuffer(ID3D12Device5* device)
     return true;
 }
 
-// =============================================================================
-// Material StructuredBuffer (upload heap, updated per frame)
-// =============================================================================
-bool PathTracer::CreateMaterialBuffer(ID3D12Device5* device, uint32_t maxMaterials)
-{
-    m_maxMaterials = maxMaterials;
-    uint64_t bufSize = sizeof(RTMaterialData) * maxMaterials;
-
-    D3D12_HEAP_PROPERTIES heapProps = {};
-    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-    D3D12_RESOURCE_DESC desc = {};
-    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-    desc.Width            = bufSize;
-    desc.Height           = 1;
-    desc.DepthOrArraySize = 1;
-    desc.MipLevels        = 1;
-    desc.Format           = DXGI_FORMAT_UNKNOWN;
-    desc.SampleDesc       = { 1, 0 };
-    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-    HRESULT hr = device->CreateCommittedResource(
-        &heapProps, D3D12_HEAP_FLAG_NONE,
-        &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, IID_PPV_ARGS(&m_materialBuffer));
-    if (FAILED(hr)) return false;
-
-    m_materialBuffer->SetName(L"RT_MaterialBuffer");
-    D3D12_RANGE readRange = { 0, 0 };
-    hr = m_materialBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_materialMapped));
-    if (FAILED(hr) || !m_materialMapped)
-    {
-        core::Log::Errorf("Failed to map RT material buffer: 0x%08X", hr);
-        m_materialMapped = nullptr;
-        m_materialBuffer.Reset();
-        m_maxMaterials = 0;
-        return false;
-    }
-
-    return true;
-}
 
 // =============================================================================
 // Dispatch — execute the path tracer for one frame
 // =============================================================================
-// Grow the material buffer like every other per-frame RT buffer. It used to be
-// created once at a hard 256 entries with no growth path, and the upload silently
-// clamped the memcpy to that cap while DispatchRays still covered every instance.
-// Because materials are bound as a ROOT SRV there is no descriptor and no size
-// information for the shader to bounds-check against, so g_Materials[InstanceID()]
-// read past the allocation outright for instance 256 and beyond.
-bool PathTracer::EnsureMaterialBuffer(ID3D12Device5* device, uint32_t materialCount)
+// =============================================================================
+// Per-frame RT upload buffers
+// =============================================================================
+// One growth path for all five. Allocates kFrameCount instances so each frame in
+// flight writes its own copy; previously these were single-instanced and the
+// per-frame CPU memcpy raced any command list still reading them. The full
+// WaitForGpu at the end of each path-traced frame hid that, at the cost of
+// pinning RT to zero frames in flight.
+bool PathTracer::EnsureFrameUploadBuffer(ID3D12Device5* device,
+                                         FrameUploadBuffer& target,
+                                         uint32_t elementCount,
+                                         uint64_t elementSize,
+                                         const wchar_t* debugName)
 {
-    if (materialCount == 0) return false;
-    if (m_materialBuffer && materialCount <= m_maxMaterials) return true;
+    if (elementCount == 0) return false;
+    if (target.Valid() && elementCount <= target.capacity) return true;
 
-    if (m_materialBuffer && m_materialMapped)
-    {
-        m_materialBuffer->Unmap(0, nullptr);
-        m_materialMapped = nullptr;
-    }
-    m_materialBuffer.Reset();
+    target.Reset();
 
-    m_maxMaterials = materialCount + 64;
-    uint64_t bufSize = sizeof(RTMaterialData) * static_cast<uint64_t>(m_maxMaterials);
-    if (!CreateMappedUploadBuffer(device, bufSize, L"RT_MaterialBuffer",
-                                  m_materialBuffer, &m_materialMapped))
+    // Same headroom the per-buffer versions used, so growth still amortises.
+    const uint32_t newCapacity = elementCount + 64;
+    const uint64_t byteSize = elementSize * static_cast<uint64_t>(newCapacity);
+
+    for (uint32_t i = 0; i < kFrameCount; ++i)
     {
-        m_maxMaterials = 0;
-        return false;
+        wchar_t name[96];
+        swprintf_s(name, L"%s[%u]", debugName, i);
+        if (!CreateMappedUploadBuffer(device, byteSize, name,
+                                      target.buffer[i], &target.mapped[i]))
+        {
+            // Partial allocation is worse than none: Dispatch would write some
+            // frames and not others.
+            target.Reset();
+            return false;
+        }
     }
+
+    target.capacity = newCapacity;
     return true;
-}
-
-bool PathTracer::EnsureInstanceDataBuffer(ID3D12Device5* device, uint32_t instanceCount)
-{
-    if (instanceCount == 0) return false;
-    if (m_instanceDataBuffer && instanceCount <= m_maxInstanceData) return true;
-
-    if (m_instanceDataBuffer && m_instanceDataMapped)
-    {
-        m_instanceDataBuffer->Unmap(0, nullptr);
-        m_instanceDataMapped = nullptr;
-    }
-    m_instanceDataBuffer.Reset();
-
-    m_maxInstanceData = instanceCount + 64;
-    uint64_t bufSize = sizeof(RTInstanceData) * static_cast<uint64_t>(m_maxInstanceData);
-    return CreateMappedUploadBuffer(device, bufSize, L"RT_InstanceDataBuffer",
-                                    m_instanceDataBuffer, &m_instanceDataMapped);
-}
-
-bool PathTracer::EnsureTriangleNormalBuffer(ID3D12Device5* device, uint32_t triangleCount)
-{
-    if (triangleCount == 0) return false;
-    if (m_triangleNormalBuffer && triangleCount <= m_maxTriangleNormals) return true;
-
-    if (m_triangleNormalBuffer && m_triangleNormalMapped)
-    {
-        m_triangleNormalBuffer->Unmap(0, nullptr);
-        m_triangleNormalMapped = nullptr;
-    }
-    m_triangleNormalBuffer.Reset();
-
-    m_maxTriangleNormals = triangleCount + 256;
-    uint64_t bufSize = sizeof(RTTriangleNormalData) * static_cast<uint64_t>(m_maxTriangleNormals);
-    return CreateMappedUploadBuffer(device, bufSize, L"RT_TriangleNormalBuffer",
-                                    m_triangleNormalBuffer, &m_triangleNormalMapped);
-}
-
-bool PathTracer::EnsureTriangleUVBuffer(ID3D12Device5* device, uint32_t triangleCount)
-{
-    if (triangleCount == 0) return false;
-    if (m_triangleUVBuffer && triangleCount <= m_maxTriangleUVs) return true;
-
-    if (m_triangleUVBuffer && m_triangleUVMapped)
-    {
-        m_triangleUVBuffer->Unmap(0, nullptr);
-        m_triangleUVMapped = nullptr;
-    }
-    m_triangleUVBuffer.Reset();
-
-    m_maxTriangleUVs = triangleCount + 256;
-    uint64_t bufSize = sizeof(RTTriangleUVData) * static_cast<uint64_t>(m_maxTriangleUVs);
-    return CreateMappedUploadBuffer(device, bufSize, L"RT_TriangleUVBuffer",
-                                    m_triangleUVBuffer, &m_triangleUVMapped);
-}
-
-bool PathTracer::EnsureTrianglePositionBuffer(ID3D12Device5* device, uint32_t triangleCount)
-{
-    if (triangleCount == 0) return false;
-    if (m_trianglePositionBuffer && triangleCount <= m_maxTrianglePositions) return true;
-
-    if (m_trianglePositionBuffer && m_trianglePositionMapped)
-    {
-        m_trianglePositionBuffer->Unmap(0, nullptr);
-        m_trianglePositionMapped = nullptr;
-    }
-    m_trianglePositionBuffer.Reset();
-
-    m_maxTrianglePositions = triangleCount + 256;
-    uint64_t bufSize = sizeof(RTTrianglePositionData) * static_cast<uint64_t>(m_maxTrianglePositions);
-    return CreateMappedUploadBuffer(device, bufSize, L"RT_TrianglePositionBuffer",
-                                    m_trianglePositionBuffer, &m_trianglePositionMapped);
 }
 
 void PathTracer::Dispatch(
@@ -733,11 +599,17 @@ void PathTracer::Dispatch(
 
     memcpy(m_cbMapped[m_frameIndex], &cb, sizeof(cb));
 
-    if (!EnsureMaterialBuffer(device.Device5(), materialCount) ||
-        !EnsureInstanceDataBuffer(device.Device5(), instanceDataCount) ||
-        !EnsureTriangleNormalBuffer(device.Device5(), triangleNormalCount) ||
-        !EnsureTriangleUVBuffer(device.Device5(), triangleUVCount) ||
-        !EnsureTrianglePositionBuffer(device.Device5(), trianglePositionCount))
+    auto* dev5 = device.Device5();
+    if (!EnsureFrameUploadBuffer(dev5, m_materialBuffers, materialCount,
+                                 sizeof(RTMaterialData), L"RT_MaterialBuffer") ||
+        !EnsureFrameUploadBuffer(dev5, m_instanceDataBuffers, instanceDataCount,
+                                 sizeof(RTInstanceData), L"RT_InstanceDataBuffer") ||
+        !EnsureFrameUploadBuffer(dev5, m_triangleNormalBuffers, triangleNormalCount,
+                                 sizeof(RTTriangleNormalData), L"RT_TriangleNormalBuffer") ||
+        !EnsureFrameUploadBuffer(dev5, m_triangleUVBuffers, triangleUVCount,
+                                 sizeof(RTTriangleUVData), L"RT_TriangleUVBuffer") ||
+        !EnsureFrameUploadBuffer(dev5, m_trianglePositionBuffers, trianglePositionCount,
+                                 sizeof(RTTrianglePositionData), L"RT_TrianglePositionBuffer"))
     {
         core::Log::Error("PathTracer dispatch skipped: failed to prepare RT geometry buffers");
         return;
@@ -748,12 +620,12 @@ void PathTracer::Dispatch(
     // Clamping here while DispatchRays still covered every instance is what made
     // g_Materials[InstanceID()] read past the allocation for instance 256+.
     if (materialCount > 0 && materials)
-        memcpy(m_materialMapped, materials, sizeof(RTMaterialData) * materialCount);
+        memcpy(m_materialBuffers.mapped[m_frameIndex], materials, sizeof(RTMaterialData) * materialCount);
 
-    memcpy(m_instanceDataMapped, instanceData, sizeof(RTInstanceData) * instanceDataCount);
-    memcpy(m_triangleNormalMapped, triangleNormals, sizeof(RTTriangleNormalData) * triangleNormalCount);
-    memcpy(m_triangleUVMapped, triangleUVs, sizeof(RTTriangleUVData) * triangleUVCount);
-    memcpy(m_trianglePositionMapped, trianglePositions, sizeof(RTTrianglePositionData) * trianglePositionCount);
+    memcpy(m_instanceDataBuffers.mapped[m_frameIndex], instanceData, sizeof(RTInstanceData) * instanceDataCount);
+    memcpy(m_triangleNormalBuffers.mapped[m_frameIndex], triangleNormals, sizeof(RTTriangleNormalData) * triangleNormalCount);
+    memcpy(m_triangleUVBuffers.mapped[m_frameIndex], triangleUVs, sizeof(RTTriangleUVData) * triangleUVCount);
+    memcpy(m_trianglePositionBuffers.mapped[m_frameIndex], trianglePositions, sizeof(RTTrianglePositionData) * trianglePositionCount);
     UpdateTextureDescriptors(device.Device5(), albedoTextures, albedoTextureCount,
                              kRTAlbedoDescriptorBase, kMaxRTAlbedoTextures,
                              m_boundAlbedoTextureCount, m_boundAlbedoTextureResources.data());
@@ -780,19 +652,19 @@ void PathTracer::Dispatch(
         m_constantBuffer[m_frameIndex]->GetGPUVirtualAddress());
     // [3] Material buffer
     cmd->SetComputeRootShaderResourceView(3,
-        m_materialBuffer->GetGPUVirtualAddress());
+        m_materialBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
     // [4] Triangle normal buffer
     cmd->SetComputeRootShaderResourceView(4,
-        m_triangleNormalBuffer->GetGPUVirtualAddress());
+        m_triangleNormalBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
     // [5] Instance metadata buffer
     cmd->SetComputeRootShaderResourceView(5,
-        m_instanceDataBuffer->GetGPUVirtualAddress());
+        m_instanceDataBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
     // [6] Triangle UV buffer
     cmd->SetComputeRootShaderResourceView(6,
-        m_triangleUVBuffer->GetGPUVirtualAddress());
+        m_triangleUVBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
     // [7] Triangle position buffer
     cmd->SetComputeRootShaderResourceView(7,
-        m_trianglePositionBuffer->GetGPUVirtualAddress());
+        m_trianglePositionBuffers.buffer[m_frameIndex]->GetGPUVirtualAddress());
     // [8] Material texture descriptor table (albedo, then normal)
     D3D12_GPU_DESCRIPTOR_HANDLE textureTable = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
     textureTable.ptr += static_cast<UINT64>(kRTAlbedoDescriptorBase) * m_srvUavDescSize;
