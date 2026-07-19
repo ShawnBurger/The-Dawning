@@ -15,6 +15,7 @@
 #include <wrl/client.h>
 #include <vector>
 #include <cstdint>
+#include "d3d12_device.h"   // kFrameCount
 
 using Microsoft::WRL::ComPtr;
 
@@ -111,6 +112,23 @@ private:
     ComPtr<ID3D12Resource> m_shaderTable;
     uint64_t m_shaderTableSize = 0;
     uint32_t m_shaderTableInstanceCount = UINT32_MAX;
+
+    // Retired shader tables, kept alive across kFrameCount rebuilds.
+    //
+    // BuildShaderTable early-outs unless the instance count changes, so this is
+    // not a per-frame hazard - but when the scene's topology DOES change, the
+    // old table is replaced while a previously recorded DispatchRays may still
+    // reference it. Dropping the ComPtr there is a use-after-free.
+    //
+    // A ring rather than a fence-tagged queue because this class holds only an
+    // ID3D12Device5*, not the D3D12Device wrapper that owns the fence, and
+    // plumbing the wrapper in for a rare event is not worth the coupling.
+    // Rebuilds are infrequent and a table is a few hundred bytes, so holding the
+    // last kFrameCount of them is cheap and unconditionally safe: by the time a
+    // slot is overwritten, kFrameCount further rebuilds have occurred, each at
+    // least a frame apart.
+    ComPtr<ID3D12Resource> m_retiredShaderTables[kFrameCount];
+    uint32_t               m_retiredShaderTableSlot = 0;
 
     // SBT layout offsets
     uint64_t m_rayGenOffset = 0;

@@ -74,16 +74,19 @@ bool RTAcceleration::Init(ID3D12Device5* device)
 
 void RTAcceleration::Shutdown()
 {
-    if (m_tlasInstanceBuffer && m_tlasInstanceMapped)
+    for (uint32_t i = 0; i < kFrameCount; ++i)
     {
-        m_tlasInstanceBuffer->Unmap(0, nullptr);
-        m_tlasInstanceMapped = nullptr;
+        if (m_tlasInstanceBuffer[i] && m_tlasInstanceMapped[i])
+        {
+            m_tlasInstanceBuffer[i]->Unmap(0, nullptr);
+            m_tlasInstanceMapped[i] = nullptr;
+        }
+        m_tlasInstanceBuffer[i].Reset();
+        m_tlasResult[i].Reset();
+        m_tlasScratch[i].Reset();
     }
 
     m_blasPool.clear();
-    m_tlasResult.Reset();
-    m_tlasScratch.Reset();
-    m_tlasInstanceBuffer.Reset();
     core::Log::Info("RTAcceleration shut down");
 }
 
@@ -182,19 +185,28 @@ bool RTAcceleration::BuildTLAS(
 {
     if (instanceCount == 0) return true;
 
+    // Advance first, so GetTLAS/GetTLASAddress below and in PathTracer::Dispatch
+    // all name the slot this call is about to write.
+    m_frameSlot = (m_frameSlot + 1) % kFrameCount;
+
     const uint64_t instanceDescSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
 
-    // Grow instance upload buffer if needed
+    // Grow instance upload buffers if needed - all slots together, since they
+    // share one capacity.
     if (instanceCount > m_tlasMaxInstances)
     {
-        if (m_tlasInstanceBuffer && m_tlasInstanceMapped)
+        for (uint32_t i = 0; i < kFrameCount; ++i)
         {
-            m_tlasInstanceBuffer->Unmap(0, nullptr);
-            m_tlasInstanceMapped = nullptr;
+            if (m_tlasInstanceBuffer[i] && m_tlasInstanceMapped[i])
+            {
+                m_tlasInstanceBuffer[i]->Unmap(0, nullptr);
+                m_tlasInstanceMapped[i] = nullptr;
+            }
+            m_tlasInstanceBuffer[i].Reset();
         }
 
-        uint32_t newMax = instanceCount + 64; // headroom
-        uint64_t newSize = instanceDescSize * newMax;
+        const uint32_t newMax = instanceCount + 64; // headroom
+        const uint64_t newSize = instanceDescSize * newMax;
 
         D3D12_HEAP_PROPERTIES heapProps = {};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -209,43 +221,47 @@ bool RTAcceleration::BuildTLAS(
         desc.SampleDesc       = { 1, 0 };
         desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-        HRESULT hr = device->CreateCommittedResource(
-            &heapProps, D3D12_HEAP_FLAG_NONE,
-            &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr, IID_PPV_ARGS(&m_tlasInstanceBuffer));
-
-        if (FAILED(hr))
+        for (uint32_t i = 0; i < kFrameCount; ++i)
         {
-            core::Log::Errorf("BuildTLAS: failed to create instance buffer: 0x%08X", hr);
-            return false;
-        }
-        m_tlasInstanceBuffer->SetName(L"TLAS_InstanceBuffer");
+            HRESULT hr = device->CreateCommittedResource(
+                &heapProps, D3D12_HEAP_FLAG_NONE,
+                &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr, IID_PPV_ARGS(&m_tlasInstanceBuffer[i]));
+            if (FAILED(hr))
+            {
+                core::Log::Errorf("BuildTLAS: failed to create instance buffer %u: 0x%08X", i, hr);
+                m_tlasMaxInstances = 0;
+                return false;
+            }
+            wchar_t name[48];
+            swprintf_s(name, L"TLAS_InstanceBuffer[%u]", i);
+            m_tlasInstanceBuffer[i]->SetName(name);
 
-        D3D12_RANGE readRange = { 0, 0 };
-        hr = m_tlasInstanceBuffer->Map(0, &readRange,
-                                       reinterpret_cast<void**>(&m_tlasInstanceMapped));
-        if (FAILED(hr) || !m_tlasInstanceMapped)
-        {
-            // Do NOT commit m_tlasMaxInstances on failure. Doing so would make every
-            // later call skip this grow branch and write straight through the null
-            // pointer below, permanently.
-            core::Log::Errorf("BuildTLAS: failed to map instance buffer: 0x%08X", hr);
-            m_tlasInstanceMapped = nullptr;
-            m_tlasInstanceBuffer.Reset();
-            m_tlasMaxInstances = 0;
-            return false;
+            D3D12_RANGE readRange = { 0, 0 };
+            hr = m_tlasInstanceBuffer[i]->Map(0, &readRange,
+                                              reinterpret_cast<void**>(&m_tlasInstanceMapped[i]));
+            if (FAILED(hr) || !m_tlasInstanceMapped[i])
+            {
+                // Do NOT commit m_tlasMaxInstances on failure: a later call would
+                // skip this branch and write through a null pointer, permanently.
+                core::Log::Errorf("BuildTLAS: failed to map instance buffer %u: 0x%08X", i, hr);
+                m_tlasInstanceMapped[i] = nullptr;
+                m_tlasInstanceBuffer[i].Reset();
+                m_tlasMaxInstances = 0;
+                return false;
+            }
         }
         m_tlasMaxInstances = newMax;
     }
 
-    if (!m_tlasInstanceMapped)
+    if (!m_tlasInstanceMapped[m_frameSlot])
     {
         core::Log::Error("BuildTLAS: instance buffer is not mapped");
         return false;
     }
 
     // Fill instance descriptors
-    auto* dstDescs = reinterpret_cast<D3D12_RAYTRACING_INSTANCE_DESC*>(m_tlasInstanceMapped);
+    auto* dstDescs = reinterpret_cast<D3D12_RAYTRACING_INSTANCE_DESC*>(m_tlasInstanceMapped[m_frameSlot]);
     for (uint32_t i = 0; i < instanceCount; i++)
     {
         auto& dst = dstDescs[i];
@@ -266,7 +282,7 @@ bool RTAcceleration::BuildTLAS(
     inputs.Type          = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
     inputs.DescsLayout   = D3D12_ELEMENTS_LAYOUT_ARRAY;
     inputs.NumDescs      = instanceCount;
-    inputs.InstanceDescs = m_tlasInstanceBuffer->GetGPUVirtualAddress();
+    inputs.InstanceDescs = m_tlasInstanceBuffer[m_frameSlot]->GetGPUVirtualAddress();
     inputs.Flags         = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
@@ -275,19 +291,29 @@ bool RTAcceleration::BuildTLAS(
     // Allocate/grow TLAS buffers if needed
     if (prebuild.ResultDataMaxSizeInBytes > m_tlasResultSize)
     {
-        m_tlasResult = CreateUAVBuffer(device, prebuild.ResultDataMaxSizeInBytes,
-            D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"TLAS_Result");
+        for (uint32_t i = 0; i < kFrameCount; ++i)
+        {
+            wchar_t name[40];
+            swprintf_s(name, L"TLAS_Result[%u]", i);
+            m_tlasResult[i] = CreateUAVBuffer(device, prebuild.ResultDataMaxSizeInBytes,
+                D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, name);
+        }
         m_tlasResultSize = prebuild.ResultDataMaxSizeInBytes;
     }
 
     if (prebuild.ScratchDataSizeInBytes > m_tlasScratchSize)
     {
-        m_tlasScratch = CreateUAVBuffer(device, prebuild.ScratchDataSizeInBytes,
-            D3D12_RESOURCE_STATE_COMMON, L"TLAS_Scratch");
+        for (uint32_t i = 0; i < kFrameCount; ++i)
+        {
+            wchar_t name[40];
+            swprintf_s(name, L"TLAS_Scratch[%u]", i);
+            m_tlasScratch[i] = CreateUAVBuffer(device, prebuild.ScratchDataSizeInBytes,
+                D3D12_RESOURCE_STATE_COMMON, name);
+        }
         m_tlasScratchSize = prebuild.ScratchDataSizeInBytes;
     }
 
-    if (!m_tlasResult || !m_tlasScratch)
+    if (!m_tlasResult[m_frameSlot] || !m_tlasScratch[m_frameSlot])
     {
         core::Log::Error("BuildTLAS: failed to allocate TLAS buffers");
         return false;
@@ -296,15 +322,15 @@ bool RTAcceleration::BuildTLAS(
     // Build TLAS
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
     buildDesc.Inputs                           = inputs;
-    buildDesc.DestAccelerationStructureData    = m_tlasResult->GetGPUVirtualAddress();
-    buildDesc.ScratchAccelerationStructureData = m_tlasScratch->GetGPUVirtualAddress();
+    buildDesc.DestAccelerationStructureData    = m_tlasResult[m_frameSlot]->GetGPUVirtualAddress();
+    buildDesc.ScratchAccelerationStructureData = m_tlasScratch[m_frameSlot]->GetGPUVirtualAddress();
 
     cmdList->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
 
     // UAV barrier — TLAS must complete before TraceRay
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    barrier.UAV.pResource = m_tlasResult.Get();
+    barrier.UAV.pResource = m_tlasResult[m_frameSlot].Get();
     cmdList->ResourceBarrier(1, &barrier);
 
     return true;
