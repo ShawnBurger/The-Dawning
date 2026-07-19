@@ -141,6 +141,13 @@ Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 # wrong" - so assert the slot, not just that shadows exist.
 Assert-Marker "shadow_map" "ok"
 Assert-Marker "shadow_map_slot" "1"
+# Raster only - the probe is skipped in path-tracing runs, which do not use the
+# shadow map at all. This is the assertion with teeth: shadow_map=ok only proves
+# the resource was created, and deleting the shadow pass entirely leaves the map
+# at its cleared value with every pixel reading fully lit, which nothing else
+# here would notice. Verified by deleting the caster draw and watching this flip
+# to "no".
+if ($RasterOnly) { Assert-Marker "shadow_map_written" "yes" }
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {

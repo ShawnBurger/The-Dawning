@@ -197,6 +197,20 @@ public:
 
     bool ShadowsAvailable() const { return m_shadowMap != nullptr; }
 
+    // Smoke-test instrumentation. Without this, deleting the shadow pass call
+    // in App::Render breaks nothing that any test or assertion can see: the map
+    // stays at its cleared value, every pixel reads fully lit, and the frame
+    // still looks plausible. "It compiles" is not "it runs", and this project
+    // has been bitten by exactly that gap before.
+    //
+    // Two phases, matching the back-buffer capture: record the copy into the
+    // frame's command list, then read it after the GPU has caught up.
+    bool RecordShadowMapReadback(D3D12Device& device);
+    // Fraction of sampled texels holding anything other than the cleared 1.0,
+    // and the smallest depth found. A fraction of zero means the depth pass did
+    // not rasterise a single triangle.
+    bool ReadShadowMapCoverage(float& writtenFraction, float& minDepth) const;
+
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
                              const core::Vec3f& color,
@@ -289,6 +303,11 @@ private:
     ComPtr<ID3D12PipelineState>  m_shadowPSO;
     core::Mat4x4                 m_lightViewProj;
     bool                         m_shadowIsDepthTarget = false;
+    // A centred window rather than the whole 2048x2048 map: 256 KB instead of
+    // 16 MB, and the light frustum is centred on the camera so this is where
+    // the geometry lands.
+    static constexpr uint32_t    kShadowProbeSize = 256;
+    ComPtr<ID3D12Resource>       m_shadowReadback;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
     // slot 1 the shadow map.

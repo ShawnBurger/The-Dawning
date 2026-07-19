@@ -77,6 +77,7 @@ private:
     bool m_rtInitAttempted = false;
     bool m_smokeRTStarted = false;
     bool m_captureThisFrame = false;
+    bool m_verifyShadowThisFrame = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;
