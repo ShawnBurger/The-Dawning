@@ -26,6 +26,7 @@ cbuffer CBPerFrame : register(b1)
     float  aspect;
     float3 camForward;
     float  pad4;
+    float4x4 lightViewProj;
 };
 
 cbuffer CBMaterial : register(b2)
@@ -58,7 +59,82 @@ cbuffer CBMaterial : register(b2)
 Texture2D<float4> materialTextures[MAX_RASTER_TEXTURES] : register(t0);
 SamplerState linearSampler : register(s0);
 
+// Shadow map in its own register space so it cannot collide with the material
+// table, however large that grows. s1 is a COMPARISON sampler: the hardware
+// compares each of four texels against the reference depth and bilinearly
+// filters the four boolean results, so one SampleCmpLevelZero is already 2x2
+// percentage-closer filtering.
+Texture2D<float>          shadowMap     : register(t0, space1);
+SamplerComparisonState    shadowSampler : register(s1);
+
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
+
+// Returns 1 for fully lit, 0 for fully shadowed.
+//
+// NdotL is used for a normal-offset: the shading point is pushed along its
+// normal before projection, by an amount that grows as the surface turns away
+// from the light. That handles the acne the rasteriser depth bias cannot,
+// because depth bias acts along the light direction while the sampling error is
+// across the surface. The two together are what keeps flat ground clean without
+// the shadows visibly detaching from their casters.
+float ComputeShadow(float3 positionWS, float3 N, float NdotL)
+{
+    // World units per shadow texel: the frustum is kShadowExtent*2 wide across
+    // kShadowMapSize texels. Kept in sync with renderer.h by the numbers below
+    // being the only place either appears in this shader.
+    const float shadowExtent  = 24.0f;
+    const float shadowMapSize = 2048.0f;
+    const float texelWorld    = (shadowExtent * 2.0f) / shadowMapSize;
+
+    const float slope  = saturate(1.0f - NdotL);
+    const float offset = texelWorld * (1.0f + 3.0f * slope);
+    float3 offsetPos   = positionWS + N * offset;
+
+    float4 lightClip = mul(lightViewProj, float4(offsetPos, 1.0f));
+
+    // Single exit rather than early returns. FXC's flow analysis reports X4000
+    // "potentially uninitialized" for a function whose returns sit inside
+    // branches, and the raster path compiles with /WX - so this shape is load
+    // bearing, not style.
+    float result = 1.0f;
+
+    // w is 1 for the orthographic light projection, so this guard is defensive
+    // against a future perspective (spot/point) light rather than live today.
+    if (lightClip.w > 0.0f)
+    {
+        lightClip.xyz /= lightClip.w;
+
+        // Outside the frustum along Z there is no depth information; treat as
+        // lit rather than shadowed. The XY case is handled by the sampler's
+        // white border, so it needs no branch here.
+        if (lightClip.z >= 0.0f && lightClip.z <= 1.0f)
+        {
+            // Clip space to texture space. Y flips because clip space is +Y up
+            // and texture space is +Y down.
+            float2 shadowUV = float2(lightClip.x * 0.5f + 0.5f,
+                                     -lightClip.y * 0.5f + 0.5f);
+
+            // 3x3 grid of hardware-PCF taps: 9 taps, each already 2x2 filtered,
+            // so the effective kernel is 4x4 texels. Enough to hide the texel
+            // grid at this resolution without a separate blur pass.
+            const float texel = 1.0f / shadowMapSize;
+            float sum = 0.0f;
+            [unroll]
+            for (int y = -1; y <= 1; ++y)
+            {
+                [unroll]
+                for (int x = -1; x <= 1; ++x)
+                {
+                    sum += shadowMap.SampleCmpLevelZero(
+                        shadowSampler, shadowUV + float2(x, y) * texel, lightClip.z);
+                }
+            }
+            result = sum / 9.0f;
+        }
+    }
+
+    return result;
+}
 
 struct PSInput
 {
@@ -151,7 +227,16 @@ float4 main(PSInput input) : SV_TARGET
                                                   materialRoughness, F0);
     float3 kD = DawningDiffuseWeight(F, materialMetallic);
     float3 diffuse = kD * baseColor / PI;
-    float3 direct = (diffuse + specular) * lightColor * NdotL;
+
+    // Shadowing multiplies DIRECT light only. Ambient and emission are
+    // deliberately untouched: ambient is a crude stand-in for everything the
+    // single directional light does not carry, so occluding it too would leave
+    // shadowed regions pure black, and emission is produced by the surface
+    // rather than received. This matches what the path tracer does, where the
+    // shadow ray gates the NEE term and nothing else.
+    float shadow = ComputeShadow(input.positionWS, N, NdotL);
+
+    float3 direct = (diffuse + specular) * lightColor * NdotL * shadow;
 
     // Ambient (hemisphere approximation — ground color darker)
     float hemisphereBlend = N.y * 0.5 + 0.5;

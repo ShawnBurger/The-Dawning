@@ -130,6 +130,12 @@ Assert-Marker "descriptor_reuse_before_fence" "blocked"
 Assert-Marker "descriptor_reuse_after_fence" "reused"
 Assert-Marker "descriptors_in_use_after_scene_shutdown" "0"
 Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
+# The shadow map reserves descriptor slot 1, immediately after the null SRV. If
+# that reservation ever slips, a material texture lands on top of the shadow map
+# and the failure looks like "shadows are wrong" rather than "descriptors are
+# wrong" - so assert the slot, not just that shadows exist.
+Assert-Marker "shadow_map" "ok"
+Assert-Marker "shadow_map_slot" "1"
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {

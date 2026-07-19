@@ -105,8 +105,11 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
            material shader; post-process passes insert between
            Scene::RenderEntities and Renderer::ResolveToBackBuffer
-  Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC),
-           shadow maps, and any real mesh file loading. Emissive surfaces shade
+  Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
+           and any real mesh file loading. The shadow map is a SINGLE cascade
+           covering 24 world units around the camera - beyond that everything
+           reads as lit, which is correct-looking for the demo and wrong for a
+           planet. Cascades are the obvious next step. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a
            bright panel does not illuminate anything around it.
            `assets/textures/` ships only a README, so a clean clone always takes

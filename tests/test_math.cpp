@@ -623,3 +623,95 @@ TEST_CASE(Vec3d_CameraRelativeSurvivesPlanetaryDistance)
     const core::Vec3f relative = (objectPos - cameraPos).ToFloat();
     CHECK_APPROX_EPS(relative.x, 0.25f, 1e-6f);
 }
+
+// =============================================================================
+// Shadow-map projection
+//
+// The directional shadow map is built as LookAt(light) * OrthoLH(...), and the
+// pixel shader relies on that product mapping the light frustum onto D3D clip
+// space exactly: XY to [-1,1] and Z to [0,1]. Neither OrthoLH nor the light
+// matrix had any coverage before shadows started depending on them, and a
+// silent error here does not crash - it produces shadows that are subtly
+// misplaced, or a shadow map that is entirely lit, which is very hard to
+// distinguish from "shadows not implemented yet".
+// =============================================================================
+
+TEST_CASE(OrthoLH_MapsExtentsToClipSpace)
+{
+    const core::Mat4x4 proj = core::Mat4x4::OrthoLH(20.0f, 10.0f, 1.0f, 101.0f);
+
+    // Centre of the near plane sits at clip origin with depth 0.
+    const core::Vec3f centreNear = proj.TransformPoint({ 0.0f, 0.0f, 1.0f });
+    CHECK_APPROX(centreNear.x, 0.0f);
+    CHECK_APPROX(centreNear.y, 0.0f);
+    CHECK_APPROX(centreNear.z, 0.0f);
+
+    // Far plane maps to depth 1 - the D3D convention, not OpenGL's [-1,1].
+    const core::Vec3f centreFar = proj.TransformPoint({ 0.0f, 0.0f, 101.0f });
+    CHECK_APPROX(centreFar.z, 1.0f);
+
+    // Half-width and half-height land on the clip-space edges.
+    const core::Vec3f corner = proj.TransformPoint({ 10.0f, 5.0f, 1.0f });
+    CHECK_APPROX(corner.x, 1.0f);
+    CHECK_APPROX(corner.y, 1.0f);
+
+    const core::Vec3f opposite = proj.TransformPoint({ -10.0f, -5.0f, 1.0f });
+    CHECK_APPROX(opposite.x, -1.0f);
+    CHECK_APPROX(opposite.y, -1.0f);
+}
+
+// Mirrors Renderer::UpdateLightMatrix. The camera-relative origin must land
+// inside the light frustum and at a sane depth, because that origin is where
+// the camera is - if it fell outside, everything the viewer looks at would be
+// outside the shadow map.
+TEST_CASE(ShadowLightMatrix_PlacesCameraOriginInsideFrustum)
+{
+    const core::Vec3f lightDir = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
+    const float extent      = 24.0f;
+    const float depthRange  = 120.0f;
+
+    const core::Vec3f eye = lightDir * (depthRange * 0.5f);
+    const core::Mat4x4 view =
+        core::Mat4x4::LookAt(eye, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
+    const core::Mat4x4 proj =
+        core::Mat4x4::OrthoLH(extent * 2.0f, extent * 2.0f, 0.1f, depthRange);
+    const core::Mat4x4 lightViewProj = view * proj;
+
+    const core::Vec3f origin = lightViewProj.TransformPoint({ 0.0f, 0.0f, 0.0f });
+    CHECK_APPROX_EPS(origin.x, 0.0f, 1e-4f);
+    CHECK_APPROX_EPS(origin.y, 0.0f, 1e-4f);
+    CHECK(origin.z > 0.0f);
+    CHECK(origin.z < 1.0f);
+
+    // A point directly beneath the light is CLOSER to it, so it must have a
+    // smaller depth than the origin. This is the comparison the shadow test
+    // actually performs; getting the sign backwards inverts every shadow.
+    const core::Vec3f nearer = lightViewProj.TransformPoint(lightDir * 5.0f);
+    CHECK(nearer.z < origin.z);
+
+    // A point well outside the horizontal extent must fall outside clip space,
+    // which is what the sampler's white border then reports as "lit".
+    const core::Vec3f outside =
+        lightViewProj.TransformPoint({ extent * 3.0f, 0.0f, 0.0f });
+    CHECK(std::fabs(outside.x) > 1.0f || std::fabs(outside.y) > 1.0f);
+}
+
+// A light pointing straight up is the degenerate case for LookAt: the default
+// up vector is parallel to the view direction and the cross product collapses.
+// UpdateLightMatrix switches up vectors past 0.99; verify the switched-to one
+// actually produces a usable basis rather than NaNs.
+TEST_CASE(ShadowLightMatrix_HandlesStraightDownLight)
+{
+    const core::Vec3f lightDir = { 0.0f, 1.0f, 0.0f };
+    const core::Mat4x4 view = core::Mat4x4::LookAt(
+        lightDir * 60.0f, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f });
+    const core::Mat4x4 proj = core::Mat4x4::OrthoLH(48.0f, 48.0f, 0.1f, 120.0f);
+    const core::Vec3f origin = (view * proj).TransformPoint({ 0.0f, 0.0f, 0.0f });
+
+    CHECK(!std::isnan(origin.x));
+    CHECK(!std::isnan(origin.y));
+    CHECK(!std::isnan(origin.z));
+    CHECK_APPROX_EPS(origin.x, 0.0f, 1e-4f);
+    CHECK_APPROX_EPS(origin.y, 0.0f, 1e-4f);
+    CHECK(origin.z > 0.0f && origin.z < 1.0f);
+}

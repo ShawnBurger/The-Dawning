@@ -990,6 +990,16 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     else
     {
+        // Shadow depth first, into its own target. Must precede BeginScenePass:
+        // it rebinds render targets, viewport and scissor, so running it after
+        // would leave the scene pass pointing at a 2048x2048 depth-only target.
+        if (m_renderer.ShadowsAvailable())
+        {
+            m_renderer.BeginShadowPass(m_device);
+            m_scene.RenderShadowCasters(m_device, m_renderer, m_camera.Position());
+            m_renderer.EndShadowPass(m_device);
+        }
+
         // Scene renders into the linear HDR target, not the back buffer. The
         // back buffer is not touched until ResolveToBackBuffer tone-maps into it,
         // which is also what transitions it out of PRESENT.

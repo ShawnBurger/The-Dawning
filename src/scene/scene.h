@@ -58,6 +58,14 @@ public:
                         render::Renderer& renderer,
                         const core::Vec3d& cameraPosition);
 
+    // Phase 2a-pre: depth-only pass from the light's point of view. Same
+    // traversal and the same visibility rules as RenderEntities - a caster the
+    // two passes disagree about is a shadow with no object or an object with no
+    // shadow, so the filter must not drift.
+    void RenderShadowCasters(render::D3D12Device& device,
+                             render::Renderer& renderer,
+                             const core::Vec3d& cameraPosition);
+
     // Phase 2b: Build acceleration structures and dispatch path tracing
     void BuildAccelerationStructures(render::D3D12Device& device,
                                      const core::Vec3d& cameraPosition);
