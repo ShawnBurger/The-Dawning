@@ -235,15 +235,17 @@ counter with no reclamation, so they are sized for demo scale only.
 Raster lighting uses Cook-Torrance/GGX direct lighting so material roughness and
 metallic response track more closely between preview and path tracing.
 
-Raster mode also draws a tone-mapped sky gradient, but it is NOT the same
-evaluation the DXR path uses. Both include `shaders/sky_common.hlsli` and share
-the gradient ramp `DawningSkyRadianceFromBlend`, however they feed it different
-inputs: `sky_ps.hlsl:16` uses a screen-space blend (`1.0 - saturate(input.uv.y)`),
-while the path tracer calls `DawningSkyRadiance(direction)`
-(`path_trace.hlsl:383, 448`), a function of world-space elevation. The raster sky
-is therefore nailed to the framebuffer — it does not rotate with the camera and
-does not respond to pitch or FOV. Pitching the camera and pressing `F1` visibly
-moves the horizon.
+Raster mode draws its sky through the SAME evaluation the DXR path uses. Both
+include `shaders/sky_common.hlsli` and both call `DawningSkyRadiance(direction)`
+on a world-space view ray. The raster shader reconstructs that ray per pixel from
+the camera basis and projection extents carried in `CBPerFrame`, matching how the
+path tracer builds primary rays.
+
+This was previously a real divergence: `sky_ps.hlsl` used a screen-space blend,
+which nailed the gradient to the framebuffer so it did not rotate with the camera
+or respond to pitch or FOV, and the horizon visibly jumped when toggling `F1`.
+The camera basis exists in `CBPerFrame` specifically to close that gap. Toggling
+`F1` at any camera orientation is the check that it stays closed.
 
 ## Runtime Controls
 

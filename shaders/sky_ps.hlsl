@@ -22,6 +22,17 @@ cbuffer CBPerFrame : register(b1)
     float  aspect;
     float3 camForward;
     float  pad4;
+
+    // NOTE: this is a deliberate PREFIX of CBPerFrame, not the whole thing. The
+    // C++ struct (renderer.h, static_assert'd at 176 bytes) ends with a
+    // float4x4 lightViewProj that this shader has no use for, and a cbuffer may
+    // declare fewer members than the buffer holds - reads are by offset.
+    //
+    // The consequence: fields may only be APPENDED to CBPerFrame. Inserting one
+    // anywhere above this point shifts every offset below it and this shader
+    // starts reading the wrong bytes, silently, with no compile error on either
+    // side. basic_ps.hlsl declares the full struct and would still agree with
+    // C++, so the two raster shaders would disagree with each other.
 };
 
 struct PSInput
