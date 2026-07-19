@@ -99,14 +99,15 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            raster and DXR paths, packed occlusion/roughness/metallic (ORM) maps
            in the glTF channel convention modulating the material scalars in
            both paths, bloom with a parameterised exposure, and a linear
-           R16G16B16A16_FLOAT scene target
-           resolved to the back buffer by a dedicated tone-map pass
+           R16G16B16A16_FLOAT scene target resolved to the back buffer by a
+           dedicated tone-map pass
            (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
            material shader; post-process passes insert between
            Scene::RenderEntities and Renderer::ResolveToBackBuffer
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC),
-           emissive maps, shadow maps, and any real mesh file loading. `assets/textures/` ships only a README, so a clean
-           clone always takes the procedural fallback path
+           emissive maps, shadow maps, and any real mesh file loading.
+           `assets/textures/` ships only a README, so a clean clone always takes
+           the procedural fallback path
 Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relative
 
 ## RT UPGRADE PATH (future)
