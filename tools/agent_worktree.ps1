@@ -157,10 +157,5 @@ Write-Host "Ready:"
 Write-Host "  cd `"$worktree`""
 
 if ($Agent -eq "claude") {
-    if (Get-Command claude -ErrorAction SilentlyContinue) {
-        Write-Host "  claude"
-    }
-    else {
-        Write-Warning "Claude Code CLI was not found on PATH. Install it, then run 'claude' from the worktree."
-    }
+    Write-Host "  .\tools\claude.cmd"
 }

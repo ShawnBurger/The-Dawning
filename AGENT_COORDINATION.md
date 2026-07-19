@@ -71,11 +71,17 @@ copying, build commands, and smoke-test behavior.
 ```powershell
 .\tools\agent_worktree.ps1 -Agent claude -Task camera-polish
 cd .agents\worktrees\claude-camera-polish
-claude
+.\tools\claude.cmd
 ```
 
-If the `claude` command is not found, install Claude Code first using
-Anthropic's current Claude Code setup documentation, then rerun the command.
+`tools\claude.cmd` resolves normal CLI installs and the Claude desktop app's
+bundled Claude Code executable, which is useful when a newly installed command
+has not reached the current shell's `PATH` yet. It forwards all arguments, so
+non-interactive runs work too:
+
+```powershell
+.\tools\claude.cmd -p "Review this branch and report the highest-risk issue."
+```
 
 ## Check Parallel State
 
