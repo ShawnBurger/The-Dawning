@@ -10,9 +10,10 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
-- Layer 4 material work is partially landed: albedo/normal textures and
-  Cook-Torrance GGX shading exist; SM 6.6 bindless, HDR targets, and a separate
-  tone-map pass do not. See "Material System Status" below and `CLAUDE.md`.
+- Layer 4 material work is partially landed: albedo/normal textures,
+  Cook-Torrance GGX shading, a linear HDR scene target and a separate tone-map
+  resolve pass exist; SM 6.6 bindless and metallic/roughness/AO/emissive maps do
+  not. See "Material System Status" below and `CLAUDE.md`.
 - Source lives in `src/`; runtime shaders live in `shaders/`.
 
 ## Build
@@ -149,9 +150,16 @@ Microsoft.Direct3D.DXC NuGet package.
 ## Material System Status
 
 Layer 4 is partially implemented. What exists is described below; SM 6.6
-bindless, an HDR render target, a separate tone-map pass, and
-metallic/roughness/AO/emissive maps do not exist yet. See `CLAUDE.md` for the
-full done/not-done split.
+bindless and metallic/roughness/AO/emissive maps do not exist yet. See
+`CLAUDE.md` for the full done/not-done split.
+
+Raster geometry and sky render into a linear `R16G16B16A16_FLOAT` scene target,
+and a fullscreen pass tone-maps that into the back buffer at the end of the
+frame. Tone mapping therefore happens exactly once, in `shaders/tonemap_ps.hlsl`,
+rather than inside each material shader. Post-process passes (bloom, exposure,
+TAA) belong between `Scene::RenderEntities` and `Renderer::ResolveToBackBuffer`;
+that insertion point is the reason the HDR intermediate exists. The debug overlay
+draws after the resolve, in display space, so it is deliberately not tone-mapped.
 
 Raster materials bind textures through descriptor indices stored on material
 constants. The demo scene resolves each texture from `assets\textures\`

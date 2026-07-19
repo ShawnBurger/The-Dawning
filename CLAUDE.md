@@ -96,13 +96,15 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
   Done:    KTX v1 / PNG (WIC) / DDS loaders with procedural fallbacks, CPU mip
            generation for RGBA sources, albedo + normal maps, Cook-Torrance GGX
            raster shading, indexed shader-visible texture tables in both the
-           raster and DXR paths
-  Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC at
-           renderer.cpp:218-219, 287-288), HDR render target and a real tone-map
-           pass (both raster PSOs hardcode R8G8B8A8_UNORM and tone map in the
-           pixel shader), metallic/roughness/AO/emissive maps, shadow maps, and
-           any real mesh file loading. `assets/textures/` ships only a README,
-           so a clean clone always takes the procedural fallback path
+           raster and DXR paths, and a linear R16G16B16A16_FLOAT scene target
+           resolved to the back buffer by a dedicated tone-map pass
+           (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
+           material shader; post-process passes insert between
+           Scene::RenderEntities and Renderer::ResolveToBackBuffer
+  Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC),
+           metallic/roughness/AO/emissive maps, shadow maps, and any real mesh
+           file loading. `assets/textures/` ships only a README, so a clean
+           clone always takes the procedural fallback path
 Layer 5: World Foundation — terrain, atmosphere shader, sky dome, camera-relative
 
 ## RT UPGRADE PATH (future)
