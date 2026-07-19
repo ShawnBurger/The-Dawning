@@ -13,6 +13,7 @@ Codex is taking a disjoint failure-recovery lane on
 - `src/render/d3d12_device.cpp`
 - `src/app.h`
 - `src/app.cpp`
+- `tools/smoke_test.ps1`
 - this handoff entry
 
 The goal is to make command-list reset/submission and fence failures explicit,
@@ -20,6 +21,37 @@ avoid waiting forever after device loss, and preserve or rebuild valid frame
 targets when swap-chain resize fails. Claude should not edit these files until
 this lane is integrated. Codex will not touch Claude's renderer,
 resource-manager, descriptor-allocator, shader, or allocator-test files.
+
+## Codex result
+
+Implementation commit: `8077366` (`Harden D3D12 frame lifecycle and resize
+recovery`).
+
+- command allocator/list reset, initial/list close, present, queue signal,
+  fence registration, and fence waits now propagate failure;
+- fence waits poll the documented `UINT64_MAX` device-removal sentinel instead
+  of remaining inside an unobservable infinite wait;
+- resize retries rebuild incomplete same-size targets, and a failed
+  `ResizeBuffers` call attempts to reacquire the previous frame targets while
+  leaving the window resize flag pending;
+- `--smoke-resize` / `-ResizeStress` deterministically exercises 1280x720,
+  1024x768, and 1920x1080 target recreation before capture.
+
+Validation:
+
+- Debug and Release builds: pass;
+- Debug and Release CPU suite: 51 cases / 408 checks, all pass;
+- Debug resize stress: raster 127.4, stable RT 136.4, full RT 130.9 mean
+  luminance; all 100% non-black and all three resize markers observed;
+- Release resize stress: raster 127.4, 100% non-black;
+- both RT logs recreate output/history textures at every requested size;
+- no warnings, errors, or overlap with Claude's descriptor allocator lane.
+
+Microsoft contracts checked:
+
+- https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12fence-getcompletedvalue
+- https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12fence-seteventoncompletion
+- https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiswapchain-resizebuffers
 
 ---
 

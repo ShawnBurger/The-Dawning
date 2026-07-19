@@ -50,6 +50,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeRT = HasOption(args, "--smoke-rt");
     options.smokeFullQuality = HasOption(args, "--smoke-full");
     options.smokeCapture = HasOption(args, "--smoke-capture");
+    options.smokeResize = HasOption(args, "--smoke-resize");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
@@ -177,17 +178,21 @@ bool App::Initialize()
 
     m_scene.Init();
     m_sceneReady = true;
-    InitializeScene();
+    if (!InitializeScene())
+    {
+        core::Log::Error("Failed to initialize scene GPU resources");
+        return false;
+    }
     InitializePathTracingState();
 
     m_timer.Init();
     return true;
 }
 
-void App::InitializeScene()
+bool App::InitializeScene()
 {
-    m_device.WaitForCurrentFrame();
-    m_device.ResetCommandList();
+    if (!m_device.WaitForCurrentFrame() || !m_device.ResetCommandList())
+        return false;
 
     ComPtr<ID3D12Resource> cubeVBUp, cubeIBUp;
     ComPtr<ID3D12Resource> planeVBUp, planeIBUp;
@@ -368,10 +373,16 @@ void App::InitializeScene()
     cubeNormalTexture.descriptorIndex =
         m_renderer.RegisterTexture(m_device.Device(), cubeNormalTexture);
 
-    m_device.CmdList()->Close();
+    const HRESULT closeHr = m_device.CmdList()->Close();
+    if (FAILED(closeHr))
+    {
+        core::Log::Errorf("Scene upload command list Close failed: 0x%08X", closeHr);
+        return false;
+    }
     ID3D12CommandList* uploadLists[] = { m_device.CmdList() };
     m_device.CmdQueue()->ExecuteCommandLists(1, uploadLists);
-    m_device.WaitForGpu();
+    if (!m_device.WaitForGpu())
+        return false;
 
     auto& resources = m_scene.GetResources();
     const auto cube = resources.AddMesh(std::move(cubeMesh), "Cube");
@@ -430,6 +441,7 @@ void App::InitializeScene()
     }
 
     core::Log::Infof("Scene populated: %u entities", m_scene.EntityCount());
+    return true;
 }
 
 void App::InitializePathTracingState()
@@ -463,14 +475,23 @@ bool App::EnsurePathTracing()
         return false;
     }
 
-    m_device.WaitForCurrentFrame();
-    m_device.ResetCommandList();
+    if (!m_device.WaitForCurrentFrame() || !m_device.ResetCommandList())
+    {
+        core::Log::Error("Unable to begin BLAS initialization command list");
+        return false;
+    }
     m_scene.EnsureBLAS(m_device);
 
-    m_device.CmdList()->Close();
+    const HRESULT closeHr = m_device.CmdList()->Close();
+    if (FAILED(closeHr))
+    {
+        core::Log::Errorf("BLAS command list Close failed: 0x%08X", closeHr);
+        return false;
+    }
     ID3D12CommandList* blasLists[] = { m_device.CmdList() };
     m_device.CmdQueue()->ExecuteCommandLists(1, blasLists);
-    m_device.WaitForGpu();
+    if (!m_device.WaitForGpu())
+        return false;
 
     m_rtAvailable = true;
     core::Log::Info("Path tracing initialized");
@@ -559,6 +580,13 @@ int App::RunMainLoop()
             timeStep.fps = 60.0f;
         }
 
+        if (!ApplySmokeResizeStep())
+        {
+            m_exitCode = 6;
+            m_running = false;
+            break;
+        }
+
         if (m_options.smoke)
         {
             if (m_options.smokeRT && !m_smokeRTStarted &&
@@ -596,6 +624,7 @@ int App::RunMainLoop()
                                  m_debugOverlayReady ? "ok" : "unavailable");
                 core::Log::Infof("[SMOKE] frames=%llu",
                                  static_cast<unsigned long long>(m_frameCount));
+                core::Log::Infof("[SMOKE] resize_requests=%u", m_smokeResizeRequests);
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }
@@ -618,7 +647,11 @@ int App::RunMainLoop()
         }
 
         m_scene.UpdateSystems(static_cast<float>(timeStep.dt));
-        RenderFrame(timeStep);
+        if (!RenderFrame(timeStep))
+        {
+            m_exitCode = m_device.IsDeviceLost() ? 3 : 5;
+            m_running = false;
+        }
     }
 
     return m_exitCode;
@@ -678,6 +711,14 @@ bool App::HandleResize()
 
     if (!m_device.Resize(m_window.GetWidth(), m_window.GetHeight()))
     {
+        if (m_device.IsDeviceLost())
+        {
+            core::Log::Error("Swap chain resize failed because the GPU device was lost");
+            m_exitCode = 3;
+            m_running = false;
+            return false;
+        }
+
         core::Log::Error("Swap chain resize failed; skipping frame and retrying");
         Sleep(10);
         return false;
@@ -707,6 +748,56 @@ bool App::HandleResize()
     return true;
 }
 
+bool App::ApplySmokeResizeStep()
+{
+    if (!m_options.smokeResize)
+        return true;
+
+    struct ResizeStep
+    {
+        uint64_t frame;
+        int clientWidth;
+        int clientHeight;
+    };
+
+    constexpr ResizeStep steps[] = {
+        { 15, 1280, 720 },
+        { 30, 1024, 768 },
+        { 45, 1920, 1080 },
+    };
+
+    if (m_smokeResizeRequests >= _countof(steps))
+        return true;
+
+    const ResizeStep& step = steps[m_smokeResizeRequests];
+    if (m_frameCount < step.frame)
+        return true;
+
+    const HWND hwnd = m_window.GetHWND();
+    RECT windowRect = { 0, 0, step.clientWidth, step.clientHeight };
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_STYLE));
+    const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_EXSTYLE));
+    if (!AdjustWindowRectEx(&windowRect, style, FALSE, exStyle))
+    {
+        core::Log::Errorf("Smoke resize AdjustWindowRectEx failed: %lu", GetLastError());
+        return false;
+    }
+
+    const int outerWidth = windowRect.right - windowRect.left;
+    const int outerHeight = windowRect.bottom - windowRect.top;
+    if (!SetWindowPos(hwnd, nullptr, 0, 0, outerWidth, outerHeight,
+                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+    {
+        core::Log::Errorf("Smoke resize SetWindowPos failed: %lu", GetLastError());
+        return false;
+    }
+
+    ++m_smokeResizeRequests;
+    core::Log::Infof("[SMOKE] resize_request=%u client=%dx%d",
+                     m_smokeResizeRequests, step.clientWidth, step.clientHeight);
+    return true;
+}
+
 render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep) const
 {
     render::DebugOverlayState state = {};
@@ -723,10 +814,13 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     return state;
 }
 
-void App::RenderFrame(const core::TimeStep& timeStep)
+bool App::RenderFrame(const core::TimeStep& timeStep)
 {
-    m_device.WaitForCurrentFrame();
-    m_device.ResetCommandList();
+    if (!m_device.WaitForCurrentFrame() || !m_device.ResetCommandList())
+    {
+        core::Log::Error("Unable to begin render command list");
+        return false;
+    }
     auto* commandList = m_device.CmdList();
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
 
@@ -808,12 +902,14 @@ void App::RenderFrame(const core::TimeStep& timeStep)
     if (m_captureThisFrame && !m_device.RecordBackBufferReadback())
         m_captureThisFrame = false;
 
-    m_device.ExecuteAndPresent(true);
+    if (!m_device.ExecuteAndPresent(true))
+        return false;
 
     if (m_captureThisFrame)
     {
         m_captureThisFrame = false;
-        m_device.WriteBackBufferCapture(kSmokeCaptureFile);
+        if (!m_device.WriteBackBufferCapture(kSmokeCaptureFile))
+            return false;
     }
 
     if (m_device.IsDeviceLost())
@@ -824,7 +920,12 @@ void App::RenderFrame(const core::TimeStep& timeStep)
     }
 
     if (renderedPathTracing && !m_device.IsDeviceLost())
-        m_device.WaitForGpu();
+    {
+        if (!m_device.WaitForGpu())
+            return false;
+    }
+
+    return !m_device.IsDeviceLost();
 }
 
 void App::Shutdown()
@@ -834,8 +935,8 @@ void App::Shutdown()
 
     core::Log::Info("=== Shutting down ===");
 
-    if (m_deviceReady)
-        m_device.WaitForGpu();
+    if (m_deviceReady && !m_device.IsDeviceLost() && !m_device.WaitForGpu())
+        core::Log::Error("GPU did not become idle before application resource shutdown");
     if (m_sceneReady)
     {
         m_scene.Shutdown();
