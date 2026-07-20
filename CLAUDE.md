@@ -117,6 +117,12 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            cbuffer, so each cascade costs one flat 256-byte upload and the four
            cascades share one set of object records. Ring peak is 1792 bytes,
            flat, in both smoke modes
+           Raster smoke validates draw records ON THE GPU: both vertex shaders
+           hash the ObjectData they loaded into a root UAV at u0/space4, and the
+           main vertex shader also hashes MaterialData. The CPU reads those
+           hashes back after queue retirement and compares them with the mapped
+           upload records. A third b3 constant gates all writes to the final
+           smoke frame, so ordinary frames pay no per-vertex witness cost
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
            and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a

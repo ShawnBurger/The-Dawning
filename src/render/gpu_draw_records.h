@@ -18,13 +18,10 @@
 // surface at a hard ceiling near 341 entities. They now live in growable,
 // kFrameCount-instanced upload buffers indexed by a per-draw root constant.
 //
-// NOTHING VALIDATES THESE LAYOUTS AT RUNTIME. A root SRV is a bare GPU virtual
-// address: SetGraphicsRootShaderResourceView takes no StructureByteStride and
-// there is no SRV descriptor for the debug layer to cross-check against the
-// shader's computed struct size. A one-byte disagreement between these structs
-// and their HLSL counterparts reads shifted garbage for every element after the
-// first, silently. The static_asserts below and the unit tests beside them are
-// the whole of the defence.
+// Root SRVs carry no StructureByteStride, so the runtime and debug layer cannot
+// validate these layouts. Static assertions pin the CPU side, a shared HLSL
+// include pins both raster stages to one declaration, and raster smoke hashes
+// every field the GPU consumed and compares it with the mapped upload records.
 // =============================================================================
 
 #include "../core/types.h"
@@ -167,6 +164,7 @@ static_assert(sizeof(CBPerPass) == 64,
 // row-major-storage / row-vector-semantics convention (core/types.h), so
 // column r of the source becomes row r of the record and the shader's
 // dot(row[r], p) reproduces the row-vector product p * M componentwise.
+//
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
                        const core::Mat4x4& normalMatrix);

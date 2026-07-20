@@ -1022,3 +1022,60 @@ remains flat at 1,792 / 262,144 bytes and the probe reported zero mismatches.
 Claude owns no conflicting lane for this work. The next lane after merge is the
 cooked-only `.tdmodel` runtime-to-GPU bridge; keep builds in separate worktree
 directories to avoid the PDB collision described above.
+
+# Historical checkpoint: Claude's initial GPU-side draw-index witness
+
+Main now carries both. Verified on the merge: 132 tests / 3205 checks, both smoke
+modes pass, `draw_index_identity=yes` with 18/18 distinct records in each pass.
+
+## The ring ceiling is gone
+
+Constant ring is now 1792 bytes FLAT, ~1% of capacity, and no longer scales with
+entity count. It was at 58% of a 75% gate on the 97-entity growth run once four
+cascades landed, so this was overdue rather than early. Per-object and
+per-material data live in kFrameCount-instanced structured buffers indexed by a
+root constant; viewProj moved to a per-PASS cbuffer, so each additional cascade
+costs one flat 256-byte buffer instead of 96 bytes per entity per cascade.
+Cascades are no longer a scaling decision.
+
+## A verification lesson worth keeping
+
+The exact-value capture gate was deleted, not recalibrated. It had been
+mis-calibrated twice in one round, and the cause is structural: capture statistics
+depend on which assets sit in `build/<Config>`, which is build output rather than
+tracked source. Even correctly calibrated it could not resolve one of the two
+failures it existed to catch - `shadow_vs` reading record 0 moves the bucket count
+by ONE and the mean by 0.7, below cross-checkout drift. It measured the right
+invariant through the wrong observable.
+
+Replaced with a direct witness: the vertex shaders write the object record id they
+ACTUALLY LOADED into a root UAV, read back fence-guarded, reduced to per-pass
+distinct counts and an identity check. The load-bearing detail is writing the
+LOADED value rather than the root constant - a witness of the constant is a
+witness of itself and would stay perfect while the shader read `objectBuffer[0]`.
+
+The proof it is environment-independent: main reports 18/18 because the corridor
+asset is loaded, a clean checkout reports 17/17, and both pass. That difference is
+exactly what broke the old gate.
+
+Both mutations were watched failing before merge: `basic_vs` reading
+`objectBuffer[0]` gives main 1/17 while shadow stays 17/17; `shadow_vs` reading it
+gives shadow 1/17 while main stays 17/17.
+
+## Gaps at this checkpoint, closed by the integration closure above
+
+- **Reallocation coverage is still opt-in.** The harness now prints
+  "Structured-buffer reallocations: 0" on a default run, which states the gap
+  plainly. `kMinObjectCapacity` is 256 while the scene needs `2 * maxDraws` = 36,
+  so growth never happens by default. Lower the floor so the first frame must grow
+  AND the growth test's +80 entities forces a second grow with frames in flight -
+  the dangerous case, not the easy startup one - then turn the existing `$reallocs`
+  note into a hard assertion. Note a reviewer found the floor's stated reason
+  (keeping the GPU VA non-null for DrawSky) unsupported: sky_vs.hlsl declares no
+  ObjectData and DrawSky binds nothing.
+- **The material index is not witnessed.** The b3 root constant carries two uints
+  and only the object half is proven; `basic_ps.hlsl` reading `materialBuffer[0]`
+  would pass everything. Same family of hole.
+- **The witness costs one uint store per vertex in every configuration**, not just
+  smoke builds, and ObjectData grew 96 -> 112 bytes. Worth gating behind a define
+  or explicitly accepting.

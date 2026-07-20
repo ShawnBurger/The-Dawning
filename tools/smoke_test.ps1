@@ -294,8 +294,8 @@ foreach ($k in @("shadow_records", "main_records", "object_records_peak", "objec
 $shadowRecords = [uint32]$markers["shadow_records"]
 $mainRecords   = [uint32]$markers["main_records"]
 if ($shadowRecords -ne $mainRecords) {
-    throw ("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
-           "The two scene walks no longer issue the same draws." -f $shadowRecords, $mainRecords)
+    throw (("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+            "The two scene walks no longer issue the same draws.") -f $shadowRecords, $mainRecords)
 }
 if ($shadowRecords -lt 1) {
     throw "No per-object records were written by either pass; the raster path drew nothing."
@@ -303,9 +303,9 @@ if ($shadowRecords -lt 1) {
 # The object buffer is shared by both passes at disjoint index ranges, so its
 # peak occupancy must be exactly the two counts summed, and must fit.
 if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
-    throw ("object_records_peak={0} is below shadow+main={1}; the two passes are " +
-           "overlapping in the object buffer rather than taking disjoint ranges." -f `
-           $markers["object_records_peak"], ($shadowRecords + $mainRecords))
+    throw (("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+            "overlapping in the object buffer rather than taking disjoint ranges.") -f `
+            $markers["object_records_peak"], ($shadowRecords + $mainRecords))
 }
 if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
     throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
@@ -441,6 +441,37 @@ if (!$NoCapture) {
     if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
 
+    # -------------------------------------------------------------------------
+    # There is DELIBERATELY no golden-value gate on these statistics.
+    # -------------------------------------------------------------------------
+    # One used to live here: exact mean luminance and an exact colour-bucket
+    # count, +/-0.5. It was deleted rather than repaired, and the reasoning is
+    # worth keeping so nobody reintroduces it.
+    #
+    # It was guarding a real invariant - that the per-draw root constant at b3
+    # reaches every draw path, so each draw reads its own object record, which a
+    # root SRV leaves completely unvalidated at runtime. But it guarded that
+    # invariant THROUGH THE RENDERED IMAGE, and the rendered image is a function
+    # of which assets happen to sit in build/<Config>. That is build output, not
+    # tracked source, so two checkouts of the same commit legitimately produce
+    # different numbers. The gate was mis-calibrated twice in a single round on
+    # exactly that: 128.3 measured before four-cascade shadows landed, then 122.9
+    # measured on a clean 17-entity clone, while the tree the harness actually
+    # runs in has a gitignored corridor GLB loaded and renders 64 buckets.
+    #
+    # It also could not do the job even when calibrated. Pinning shadow_vs.hlsl
+    # to record 0 was measured at mean 123.6 / 58 buckets against a correct
+    # 122.9 / 59 - one bucket and 0.7 luminance, well inside the cross-checkout
+    # drift that destabilised the gate. A tolerance loose enough to be stable
+    # could not see the failure; one tight enough to see it could not stay green.
+    #
+    # The invariant is now asserted directly and on the GPU side, by the
+    # draw_probe_* markers above. Those hashes and mismatch counts are produced
+    # from the records the shaders consumed and are independent of lighting.
+    # DO NOT put a golden-value gate back here. If you want appearance
+    # regression testing, the right tool is a reference-image comparison against
+    # a committed image, which is a different mechanism with different
+    # requirements.
 }
 
 if ($RasterOnly) {

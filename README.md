@@ -98,6 +98,39 @@ verifies proves the engine did not crash; only this proves it drew something. A
 black frame, inverted culling, a shader emitting nothing, or NaN-poisoned output
 would pass every other assertion.
 
+### The GPU draw-record probe
+
+In raster mode the harness asserts that every draw consumed the exact
+per-object and per-material records uploaded for it, via the `draw_probe_*`
+markers.
+
+The two record buffers are root SRVs: bare GPU virtual addresses without
+descriptors or `StructureByteStride`, so neither D3D12 nor the debug layer can
+detect a wrong index or CPU/HLSL layout drift. The CPU-side record counters only
+measure what was written and cannot prove what a shader read.
+
+On the final raster smoke frame, both vertex shaders hash every field of the
+`ObjectData` they loaded into a root UAV. The main vertex shader also hashes the
+loaded `MaterialData`. Index-plus-one markers distinguish an unwritten slot
+from a valid zero hash. After queue retirement the renderer reads the UAV back
+and compares each value with the mapped upload record. The shared
+`shaders/gpu_draw_records.hlsli` declaration prevents the raster stages from
+drifting apart, while the live GPU comparison covers the CPU-to-HLSL boundary.
+
+The probe is gated by the third `b3` root constant, so ordinary frames carry no
+UAV writes and `ObjectData` remains 96 bytes. It was verified by watching three
+mutations fail independently: `basic_vs` reading object record 0, `shadow_vs`
+reading object record 0, and `basic_vs` reading material record 0.
+
+This replaced a golden-value gate on the capture's mean luminance and
+colour-bucket count. That gate was measuring the same invariant *through the
+rendered image*, which made it depend on which assets happened to sit in
+`build\<Config>` — build output, not tracked source — and it was mis-calibrated
+twice in one round on exactly that. It also could not do the job: pinning
+`shadow_vs.hlsl` to record 0 moved the bucket count by one and the mean by 0.7,
+less than the legitimate drift between two checkouts of the same commit. The
+probe is independent of the scene's appearance, assets, and lighting.
+
 The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any
 legitimate lighting change. Pass `-NoCapture` to skip this section.
