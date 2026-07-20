@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace asset
@@ -38,14 +39,42 @@ struct GltfImportLimits
     uint32_t maxNodeDepth = 256;
 };
 
+enum class GltfDependencyKind : uint8_t
+{
+    Buffer,
+    Image
+};
+
+struct GltfSourceDependency
+{
+    std::string uri;
+    GltfDependencyKind kind = GltfDependencyKind::Buffer;
+};
+
+struct GltfDependencyScanResult
+{
+    GltfImportStatus status = GltfImportStatus::ParseError;
+    std::vector<GltfSourceDependency> dependencies;
+    std::string error;
+
+    bool Succeeded() const { return status == GltfImportStatus::Success; }
+};
+
 struct GltfImportResult
 {
     GltfImportStatus status = GltfImportStatus::ParseError;
     ImportedModel model;
+    std::vector<GltfSourceDependency> sourceDependencies;
     std::vector<std::string> warnings;
     std::string error;
 
     bool Succeeded() const { return status == GltfImportStatus::Success; }
+};
+
+struct GltfExternalBuffer
+{
+    std::string_view uri;
+    std::span<const std::byte> bytes;
 };
 
 GltfImportResult ImportGltfFile(
@@ -57,6 +86,18 @@ GltfImportResult ImportGltfFile(
 GltfImportResult ImportGltfMemory(
     std::span<const std::byte> bytes,
     const std::filesystem::path& virtualSourcePath = {},
+    const GltfImportLimits& limits = {});
+
+// Offline cooking uses this strict entry point so cgltf consumes the captured
+// dependency bytes instead of reopening mutable files from disk.
+GltfImportResult ImportGltfMemoryWithExternalBuffers(
+    std::span<const std::byte> bytes,
+    const std::filesystem::path& virtualSourcePath,
+    std::span<const GltfExternalBuffer> externalBuffers,
+    const GltfImportLimits& limits = {});
+
+GltfDependencyScanResult ScanGltfSourceDependencies(
+    std::span<const std::byte> bytes,
     const GltfImportLimits& limits = {});
 
 } // namespace asset

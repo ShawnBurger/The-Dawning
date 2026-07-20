@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -485,6 +487,90 @@ TEST_CASE(GltfImporter_RejectsUnsafeExternalDependencyUris)
         std::filesystem::path("C:/safe/model.gltf"));
     CHECK_FALSE(traversal.Succeeded());
     CHECK_EQ(traversal.status, asset::GltfImportStatus::ValidationError);
+}
+
+TEST_CASE(GltfImporter_ReportsDecodedExternalBufferDependencies)
+{
+    const asset::GltfDependencyScanResult scanned =
+        asset::ScanGltfSourceDependencies(BuildExternalBufferGltf("%6d%65sh.bin"));
+    CHECK(scanned.Succeeded());
+    CHECK_EQ(scanned.dependencies.size(), size_t{ 1 });
+    if (!scanned.dependencies.empty())
+    {
+        CHECK_EQ(scanned.dependencies[0].uri, std::string("mesh.bin"));
+        CHECK_EQ(scanned.dependencies[0].kind, asset::GltfDependencyKind::Buffer);
+    }
+
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "the_dawning_gltf_dependency_test";
+    std::error_code errorCode;
+    std::filesystem::remove_all(directory, errorCode);
+    std::filesystem::create_directories(directory, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (errorCode)
+        return;
+
+    const std::array<float, 9> positions = {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f
+    };
+    const std::filesystem::path bufferPath = directory / "mesh.bin";
+    {
+        std::ofstream stream(bufferPath, std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(positions.data()), sizeof(positions));
+        CHECK(static_cast<bool>(stream));
+    }
+
+    const asset::GltfImportResult result = asset::ImportGltfMemory(
+        BuildExternalBufferGltf("%6d%65sh.bin"), directory / "model.gltf");
+    CHECK(result.Succeeded());
+    if (result.Succeeded())
+    {
+        CHECK_EQ(result.sourceDependencies.size(), size_t{ 1 });
+        if (!result.sourceDependencies.empty())
+        {
+            CHECK_EQ(result.sourceDependencies[0].uri, std::string("mesh.bin"));
+            CHECK_EQ(result.sourceDependencies[0].kind, asset::GltfDependencyKind::Buffer);
+        }
+    }
+    std::filesystem::remove_all(directory, errorCode);
+}
+
+TEST_CASE(GltfImporter_UsesCapturedExternalBufferWithoutDiskRead)
+{
+    const std::array<float, 9> positions = {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f
+    };
+    const std::span<const std::byte> positionBytes =
+        std::as_bytes(std::span<const float>(positions));
+    const std::array<asset::GltfExternalBuffer, 1> snapshots = {{
+        "mesh.bin", positionBytes
+    }};
+    const std::filesystem::path missingDirectory =
+        std::filesystem::temp_directory_path() / "the_dawning_missing_buffer_snapshot";
+    std::error_code errorCode;
+    std::filesystem::remove_all(missingDirectory, errorCode);
+
+    const asset::GltfImportResult result = asset::ImportGltfMemoryWithExternalBuffers(
+        BuildExternalBufferGltf("%6d%65sh.bin"),
+        missingDirectory / "model.gltf",
+        snapshots);
+    CHECK(result.Succeeded());
+    if (result.Succeeded())
+    {
+        CHECK_EQ(result.model.VertexCount(), uint64_t{ 3 });
+        CHECK_APPROX(result.model.primitives[0].vertices[1].position.x, 1.0f);
+    }
+
+    const asset::GltfImportResult missing = asset::ImportGltfMemoryWithExternalBuffers(
+        BuildExternalBufferGltf("mesh.bin"),
+        missingDirectory / "model.gltf",
+        {});
+    CHECK_FALSE(missing.Succeeded());
+    CHECK_EQ(missing.status, asset::GltfImportStatus::BufferLoadError);
 }
 
 TEST_CASE(GltfImporter_RejectsOutOfRangeMaterialFactors)

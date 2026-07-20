@@ -1,3 +1,66 @@
+# Round: asset pipeline, Stage 3 cooked assets
+
+Integration baseline: `be224da`, containing the validated Stage 1 importer,
+Claude's Stage 2 Meshy authoring client, both generated interior-kit manifests,
+and the GLTF-to-GPU model bridge.
+
+Codex is taking `codex/asset-compiler` and owns:
+
+- new `src/asset/cooked_model.*`
+- new `src/asset/source_snapshot.*`
+- new `tools/asset_compiler.cpp`
+- new `tests/test_asset_compiler.cpp`
+- source-dependency identity additions in `src/asset/gltf_importer.*`
+- focused dependency test addition in `tests/test_gltf_importer.cpp`
+- CMake registration for those files and targets only
+- Stage 3 sections of `docs/research/ASSET_PIPELINE_SPEC.md`
+- this handoff entry
+
+The slice is CPU-only and disjoint from Claude's active
+`claude/shadow-cascades` write set. It compiles validated `ImportedModel` data to
+a versioned deterministic runtime binary, verifies integrity before allocation,
+loads it without JSON parsing, and records source/dependency identity. It does
+not touch `src/app.*`, `src/render/**`, `shaders/**`, or smoke tooling. The
+baseline GPU bridge consumes GLTF directly; loading `.tdmodel` into that bridge
+is the next runtime asset step.
+
+## Codex result
+
+Stage 3 now has a deterministic, versioned `.tdmodel` compiler and CPU loader.
+The binary contract uses explicit little-endian fields, 64-bit offsets and
+sizes, six versioned sections, whole-file CRC32, source/dependency SHA-256,
+canonical dependency ordering, configurable allocation limits, and atomic
+replacement after temporary-file verification. It hashes external buffers and
+images, embeds external images, blocks source and dependency path aliases, and
+uses unique temporary siblings with bounded Windows sharing retries. The standalone
+`TheDawningAssetCompiler` imports GLTF/GLB, cooks it, writes it, and
+reload-verifies the result without D3D12. Dependency bytes are snapshotted
+before import, external buffers are imported from that immutable snapshot, and
+the files are verified unchanged afterward. A concurrent source edit cannot pair
+geometry with a different dependency identity. Aggregate limits are also charged
+when repeated image references are materialized.
+
+Validation before integration:
+
+- Debug compiler and tests build: pass
+- Release app, compiler, inspector, and tests build: pass
+- Unit tests: 110 cases, 1,457 checks, zero failures
+- Corridor section: 15,562 vertices / 19,193 triangles / 9,533,104 bytes, pass
+- Corridor wall: 100,644 vertices / 71,843 triangles / 34,929,120 bytes, pass
+- repeated production compile: byte-identical SHA-256, pass
+- two-process same-output publication: both pass, byte-identical result
+- same-file case alias overwrite attempt: refused before source read
+- Release raster smoke: pass, model 15,562 vertices / 57,579 indices,
+  mean luminance 127.7
+- Release stable path-tracing smoke: pass, mean luminance 136.1
+- Release full path-tracing smoke: pass, mean luminance 131.8
+
+Source image bytes remain in engine-readable source formats. BC texture
+transcoding/mipmap generation and the direct `.tdmodel` D3D12 upload bridge are
+explicitly later work, not hidden inside this result.
+
+---
+
 # Round: glTF asset pipeline, Stage 1
 
 Integration baseline: `05679d9`, including Claude's binding additions for

@@ -112,6 +112,50 @@ bool IsControlledRelativeUri(const char* uri)
     return true;
 }
 
+std::string DecodeUri(const char* uri)
+{
+    std::string decoded(uri ? uri : "");
+    cgltf_decode_uri(decoded.data());
+    decoded.resize(std::strlen(decoded.c_str()));
+    return decoded;
+}
+
+void AddSourceDependency(
+    const char* uri,
+    GltfDependencyKind kind,
+    std::vector<GltfSourceDependency>& dependencies)
+{
+    if (!uri || IsDataUri(uri))
+        return;
+    dependencies.push_back({ DecodeUri(uri), kind });
+}
+
+bool CollectSourceDependencies(
+    const cgltf_data& data,
+    std::vector<GltfSourceDependency>& dependencies,
+    std::string& error)
+{
+    for (cgltf_size i = 0; i < data.buffers_count; ++i)
+    {
+        if (!IsControlledRelativeUri(data.buffers[i].uri))
+        {
+            error = "buffer URI escapes the controlled asset directory";
+            return false;
+        }
+        AddSourceDependency(data.buffers[i].uri, GltfDependencyKind::Buffer, dependencies);
+    }
+    for (cgltf_size i = 0; i < data.images_count; ++i)
+    {
+        if (!IsControlledRelativeUri(data.images[i].uri))
+        {
+            error = "image URI escapes the controlled asset directory";
+            return false;
+        }
+        AddSourceDependency(data.images[i].uri, GltfDependencyKind::Image, dependencies);
+    }
+    return true;
+}
+
 float Determinant3x3(const core::Mat4x4& matrix)
 {
     return matrix.m[0][0] * (matrix.m[1][1] * matrix.m[2][2] - matrix.m[1][2] * matrix.m[2][1])
@@ -936,15 +980,60 @@ bool ImportNode(
     return true;
 }
 
+bool BindExternalBufferSnapshots(
+    cgltf_data& data,
+    std::span<const GltfExternalBuffer> externalBuffers,
+    std::string& error)
+{
+    static const std::byte emptyBufferSentinel{};
+    for (cgltf_size i = 0; i < data.buffers_count; ++i)
+    {
+        cgltf_buffer& buffer = data.buffers[i];
+        if (!buffer.uri || IsDataUri(buffer.uri))
+            continue;
+
+        const std::string decodedUri = DecodeUri(buffer.uri);
+        const auto snapshot = std::find_if(
+            externalBuffers.begin(), externalBuffers.end(),
+            [&decodedUri](const GltfExternalBuffer& candidate) {
+                return candidate.uri == decodedUri;
+            });
+        if (snapshot == externalBuffers.end())
+        {
+            error = "external buffer snapshot is missing: " + decodedUri;
+            return false;
+        }
+        if (snapshot->bytes.size() < buffer.size)
+        {
+            error = "external buffer snapshot is shorter than its declared size: " + decodedUri;
+            return false;
+        }
+        buffer.data = snapshot->bytes.empty()
+            ? const_cast<std::byte*>(&emptyBufferSentinel)
+            : const_cast<std::byte*>(snapshot->bytes.data());
+        buffer.data_free_method = cgltf_data_free_method_none;
+    }
+    return true;
+}
+
 GltfImportResult ImportParsedData(
     CgltfDataPtr data,
     const std::filesystem::path& sourcePath,
-    const GltfImportLimits& limits)
+    const GltfImportLimits& limits,
+    std::span<const GltfExternalBuffer> externalBuffers = {},
+    bool requireExternalBufferSnapshots = false)
 {
     GltfImportStatus preflightStatus = GltfImportStatus::ValidationError;
     std::string preflightError;
     if (!PreflightParsedData(*data, sourcePath, limits, preflightStatus, preflightError))
         return Failure(preflightStatus, std::move(preflightError));
+
+    if (requireExternalBufferSnapshots)
+    {
+        std::string snapshotError;
+        if (!BindExternalBufferSnapshots(*data, externalBuffers, snapshotError))
+            return Failure(GltfImportStatus::BufferLoadError, std::move(snapshotError));
+    }
 
     cgltf_options options = {};
     const std::string pathString = sourcePath.empty() ? std::string() : sourcePath.string();
@@ -967,6 +1056,9 @@ GltfImportResult ImportParsedData(
     GltfImportResult result;
     result.status = GltfImportStatus::Success;
     result.model.name = sourcePath.empty() ? "memory" : sourcePath.stem().string();
+    std::string dependencyError;
+    if (!CollectSourceDependencies(*data, result.sourceDependencies, dependencyError))
+        return Failure(GltfImportStatus::ValidationError, std::move(dependencyError));
     ImportImages(*data, result.model);
     ImportSamplersAndTextures(*data, result.model);
     ImportMaterials(*data, result.model);
@@ -1010,6 +1102,33 @@ GltfImportResult ImportParsedData(
         return Failure(GltfImportStatus::InvalidGeometry, "glTF contains no importable mesh primitives");
 
     return result;
+}
+
+GltfImportResult ImportGltfMemoryInternal(
+    std::span<const std::byte> bytes,
+    const std::filesystem::path& virtualSourcePath,
+    const GltfImportLimits& limits,
+    std::span<const GltfExternalBuffer> externalBuffers,
+    bool requireExternalBufferSnapshots)
+{
+    if (bytes.empty())
+        return Failure(GltfImportStatus::ParseError, "glTF source is empty");
+    if (bytes.size() > limits.maxSourceBytes)
+        return Failure(GltfImportStatus::SourceTooLarge, "glTF source exceeds the configured size limit");
+
+    cgltf_options options = {};
+    cgltf_data* rawData = nullptr;
+    const cgltf_result parseResult =
+        cgltf_parse(&options, bytes.data(), bytes.size(), &rawData);
+    if (parseResult != cgltf_result_success)
+    {
+        return Failure(
+            GltfImportStatus::ParseError,
+            std::string("glTF parse failed: ") + CgltfResultName(parseResult));
+    }
+    return ImportParsedData(
+        CgltfDataPtr(rawData), virtualSourcePath, limits,
+        externalBuffers, requireExternalBufferSnapshots);
 }
 
 } // namespace
@@ -1065,10 +1184,35 @@ GltfImportResult ImportGltfMemory(
     const std::filesystem::path& virtualSourcePath,
     const GltfImportLimits& limits)
 {
+    return ImportGltfMemoryInternal(bytes, virtualSourcePath, limits, {}, false);
+}
+
+GltfImportResult ImportGltfMemoryWithExternalBuffers(
+    std::span<const std::byte> bytes,
+    const std::filesystem::path& virtualSourcePath,
+    std::span<const GltfExternalBuffer> externalBuffers,
+    const GltfImportLimits& limits)
+{
+    return ImportGltfMemoryInternal(
+        bytes, virtualSourcePath, limits, externalBuffers, true);
+}
+
+GltfDependencyScanResult ScanGltfSourceDependencies(
+    std::span<const std::byte> bytes,
+    const GltfImportLimits& limits)
+{
+    GltfDependencyScanResult result;
     if (bytes.empty())
-        return Failure(GltfImportStatus::ParseError, "glTF source is empty");
+    {
+        result.error = "glTF source is empty";
+        return result;
+    }
     if (bytes.size() > limits.maxSourceBytes)
-        return Failure(GltfImportStatus::SourceTooLarge, "glTF source exceeds the configured size limit");
+    {
+        result.status = GltfImportStatus::SourceTooLarge;
+        result.error = "glTF source exceeds the configured size limit";
+        return result;
+    }
 
     cgltf_options options = {};
     cgltf_data* rawData = nullptr;
@@ -1076,11 +1220,17 @@ GltfImportResult ImportGltfMemory(
         cgltf_parse(&options, bytes.data(), bytes.size(), &rawData);
     if (parseResult != cgltf_result_success)
     {
-        return Failure(
-            GltfImportStatus::ParseError,
-            std::string("glTF parse failed: ") + CgltfResultName(parseResult));
+        result.error = std::string("glTF parse failed: ") + CgltfResultName(parseResult);
+        return result;
     }
-    return ImportParsedData(CgltfDataPtr(rawData), virtualSourcePath, limits);
+    CgltfDataPtr data(rawData);
+    if (!CollectSourceDependencies(*data, result.dependencies, result.error))
+    {
+        result.status = GltfImportStatus::ValidationError;
+        return result;
+    }
+    result.status = GltfImportStatus::Success;
+    return result;
 }
 
 } // namespace asset
