@@ -158,9 +158,16 @@ struct MeshData
 // CW winding (front-facing in LH with FrontCounterClockwise=FALSE)
 MeshData GenerateCube(const core::Color& color = core::Color::White());
 
-// XZ plane centered at origin
+// XZ plane centered at origin.
+//
+// uvTiles is how many times the texture repeats across the plane. It defaults to
+// 1 for backward compatibility, but that couples texel density to plane SIZE:
+// enlarging a plane stretches its texture rather than covering more of it. Pass
+// width / <desired world units per tile> to keep density constant instead. The
+// static sampler wraps, so values above 1 tile correctly.
 MeshData GeneratePlane(float width, float depth, uint32_t subdivX, uint32_t subdivZ,
-                       const core::Color& color = core::Color::White());
+                       const core::Color& color = core::Color::White(),
+                       float uvTiles = 1.0f);
 
 // UV sphere centered at origin
 MeshData GenerateSphere(float radius, uint32_t slices, uint32_t stacks,

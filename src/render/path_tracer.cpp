@@ -3,6 +3,8 @@
 // =============================================================================
 
 #include "path_tracer.h"
+
+#include <cmath>   // std::tan for the camera FOV term
 #include "../core/log.h"
 #include <algorithm>
 #include <cstring>
@@ -648,6 +650,8 @@ void PathTracer::Dispatch(
     cb.renderHeight  = m_outputHeight;
     cb.samplesPerPixel = quality.samplesPerPixel;
     cb.stablePreview = quality.stablePreview;
+    // Sourced from the camera so the DXR frustum cannot drift from the raster one.
+    cb.tanHalfFovY   = std::tan(camera.GetFOV() * (3.14159265358979323846f / 180.0f) * 0.5f);
 
     memcpy(m_cbMapped[m_frameIndex], &cb, sizeof(cb));
 

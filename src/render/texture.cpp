@@ -907,6 +907,161 @@ Texture CreateTexture2DFromKTXFile(
     return texture;
 }
 
+// Shared WIC decode tail: turn a decoder's first frame into an RGBA8 texture.
+// Both the file and the in-memory entry points differ only in how they build the
+// decoder - from a filename versus a memory stream - so everything from the frame
+// onward lives here once. logLabel is used only for diagnostics.
+static Texture DecodeWICFrameToTexture(
+    IWICImagingFactory* factory,
+    IWICBitmapDecoder* decoder,
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name,
+    const char* logLabel)
+{
+    Texture texture;
+
+    ComPtr<IWICBitmapFrameDecode> frame;
+    HRESULT hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC GetFrame failed for %s: 0x%08X", logLabel, hr);
+        return texture;
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    hr = frame->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0)
+    {
+        core::Log::Errorf("WIC GetSize failed for %s: 0x%08X", logLabel, hr);
+        return texture;
+    }
+
+    ComPtr<IWICFormatConverter> converter;
+    hr = factory->CreateFormatConverter(&converter);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC format converter creation failed: 0x%08X", hr);
+        return texture;
+    }
+
+    hr = converter->Initialize(frame.Get(),
+                               GUID_WICPixelFormat32bppRGBA,
+                               WICBitmapDitherTypeNone,
+                               nullptr,
+                               0.0,
+                               WICBitmapPaletteTypeCustom);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC format conversion failed for %s: 0x%08X", logLabel, hr);
+        return texture;
+    }
+
+    const uint32_t rowBytes = width * 4u;
+    std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * height);
+    hr = converter->CopyPixels(nullptr, rowBytes, static_cast<UINT>(pixels.size()), pixels.data());
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC CopyPixels failed for %s: 0x%08X", logLabel, hr);
+        return texture;
+    }
+
+    std::vector<uint32_t> rgbaPixels(static_cast<size_t>(width) * height);
+    std::memcpy(rgbaPixels.data(), pixels.data(), pixels.size());
+
+    texture.Adopt(CreateTexture2DFromRGBA8(
+        device, cmdList, rgbaPixels.data(), width, height, outUpload, name));
+
+    if (texture.IsValid())
+        core::Log::Infof("WIC texture loaded: %s (%ux%u, mips=%u)",
+                         logLabel, texture.width, texture.height, texture.mipCount);
+
+    return texture;
+}
+
+// Decode a PNG/JPEG/etc. already in memory - the case for glTF embedded images,
+// whose bytes live in the GLB's BIN chunk and never touch the filesystem. The
+// only difference from the file path is building the decoder from an
+// InitializeFromMemory'd WIC stream instead of a filename.
+Texture CreateTexture2DFromWICMemory(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const uint8_t* bytes,
+    size_t byteCount,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name)
+{
+    Texture texture;
+    if (!bytes || byteCount == 0)
+        return texture;
+
+    // WIC's memory stream takes a 32-bit length. A single texture larger than 4
+    // GiB is not a real case, but rejecting it is cheaper than a silent truncation.
+    if (byteCount > 0xFFFFFFFFull)
+    {
+        core::Log::Errorf("WIC memory texture too large: %zu bytes", byteCount);
+        return texture;
+    }
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool comInitialized = false;
+    if (SUCCEEDED(hr))
+        comInitialized = true;
+    else if (hr != RPC_E_CHANGED_MODE)
+    {
+        core::Log::Errorf("CoInitializeEx failed for WIC memory texture: 0x%08X", hr);
+        return texture;
+    }
+
+    struct ComScope
+    {
+        bool initialized = false;
+        ~ComScope() { if (initialized) CoUninitialize(); }
+    } comScope{ comInitialized };
+
+    ComPtr<IWICImagingFactory> factory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(&factory));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC factory creation failed: 0x%08X", hr);
+        return texture;
+    }
+
+    ComPtr<IWICStream> stream;
+    hr = factory->CreateStream(&stream);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC CreateStream failed: 0x%08X", hr);
+        return texture;
+    }
+
+    // InitializeFromMemory does not copy - it references the caller's buffer, so
+    // bytes must stay alive until decode finishes. It does here: the whole decode
+    // completes before this function returns, while the caller still owns the data.
+    hr = stream->InitializeFromMemory(const_cast<BYTE*>(bytes),
+                                      static_cast<DWORD>(byteCount));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC InitializeFromMemory failed: 0x%08X", hr);
+        return texture;
+    }
+
+    ComPtr<IWICBitmapDecoder> decoder;
+    hr = factory->CreateDecoderFromStream(stream.Get(), nullptr,
+                                          WICDecodeMetadataCacheOnLoad, &decoder);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("WIC CreateDecoderFromStream failed: 0x%08X", hr);
+        return texture;
+    }
+
+    return DecodeWICFrameToTexture(factory.Get(), decoder.Get(), device, cmdList,
+                                   outUpload, name, "<embedded>");
+}
+
 Texture CreateTexture2DFromWICFile(
     ID3D12Device* device,
     ID3D12GraphicsCommandList* cmdList,
@@ -975,69 +1130,8 @@ Texture CreateTexture2DFromWICFile(
         return texture;
     }
 
-    ComPtr<IWICBitmapFrameDecode> frame;
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr))
-    {
-        core::Log::Errorf("WIC GetFrame failed for %s: 0x%08X", filePath, hr);
-        return texture;
-    }
-
-    UINT width = 0;
-    UINT height = 0;
-    hr = frame->GetSize(&width, &height);
-    if (FAILED(hr) || width == 0 || height == 0)
-    {
-        core::Log::Errorf("WIC GetSize failed for %s: 0x%08X", filePath, hr);
-        return texture;
-    }
-
-    ComPtr<IWICFormatConverter> converter;
-    hr = factory->CreateFormatConverter(&converter);
-    if (FAILED(hr))
-    {
-        core::Log::Errorf("WIC format converter creation failed: 0x%08X", hr);
-        return texture;
-    }
-
-    hr = converter->Initialize(frame.Get(),
-                               GUID_WICPixelFormat32bppRGBA,
-                               WICBitmapDitherTypeNone,
-                               nullptr,
-                               0.0,
-                               WICBitmapPaletteTypeCustom);
-    if (FAILED(hr))
-    {
-        core::Log::Errorf("WIC format conversion failed for %s: 0x%08X", filePath, hr);
-        return texture;
-    }
-
-    const uint32_t rowBytes = width * 4u;
-    std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * height);
-    hr = converter->CopyPixels(nullptr, rowBytes, static_cast<UINT>(pixels.size()), pixels.data());
-    if (FAILED(hr))
-    {
-        core::Log::Errorf("WIC CopyPixels failed for %s: 0x%08X", filePath, hr);
-        return texture;
-    }
-
-    std::vector<uint32_t> rgbaPixels(static_cast<size_t>(width) * height);
-    std::memcpy(rgbaPixels.data(), pixels.data(), pixels.size());
-
-    texture.Adopt(CreateTexture2DFromRGBA8(
-        device,
-        cmdList,
-        rgbaPixels.data(),
-        width,
-        height,
-        outUpload,
-        name));
-
-    if (texture.IsValid())
-        core::Log::Infof("WIC texture loaded: %s (%ux%u, mips=%u)",
-                         filePath, texture.width, texture.height, texture.mipCount);
-
-    return texture;
+    return DecodeWICFrameToTexture(factory.Get(), decoder.Get(), device, cmdList,
+                                   outUpload, name, filePath);
 }
 
 bool WriteCheckerDDSTextureRGBA8(

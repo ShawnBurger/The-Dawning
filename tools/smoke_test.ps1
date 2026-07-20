@@ -141,21 +141,96 @@ Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 # wrong" - so assert the slot, not just that shadows exist.
 Assert-Marker "shadow_map" "ok"
 Assert-Marker "shadow_map_slot" "1"
+# Four cascades on ONE Texture2DArray. The slice count is asserted separately
+# from the slot because they fail independently: the array can lose a slice
+# without the descriptor moving, and vice versa. %u on the C++ side, never
+# %.1f - this is a string compare, so "4.0" would not match "4".
+Assert-Marker "shadow_cascades" "4"
 # Raster only - the probe is skipped in path-tracing runs, which do not use the
 # shadow map at all. This is the assertion with teeth: shadow_map=ok only proves
 # the resource was created, and deleting the shadow pass entirely leaves the map
 # at its cleared value with every pixel reading fully lit, which nothing else
 # here would notice. Verified by deleting the caster draw and watching this flip
 # to "no".
-if ($RasterOnly) { Assert-Marker "shadow_map_written" "yes" }
+if ($RasterOnly) {
+    Assert-Marker "shadow_map_written" "yes"
+
+    # The pass began every cascade. This is asserted SEPARATELY from the
+    # per-slice coverage below because coverage cannot see a skipped cascade:
+    # measured, not assumed - changing the app's loop bound to c < N-1 leaves
+    # shadow_cascade_written_3 reading "yes", since an uncleared, never-rendered
+    # depth slice holds arbitrary values under the 1.0 clear and is
+    # indistinguishable from real depth. This counter is the only check here that
+    # flips when a cascade is skipped.
+    Assert-Marker "shadow_cascades_rendered" "4"
+
+    # EVERY cascade holds depth, not just cascade 0. The index is in the KEY on
+    # purpose: markers are stored in a hashtable, so a shared "cascade_written"
+    # key would be overwritten by each loop iteration and collapse to the last
+    # cascade - passing while cascades 0..2 were empty.
+    foreach ($c in 0..3) { Assert-Marker "shadow_cascade_written_$c" "yes" }
+
+    # Each cascade stored a DIFFERENT depth for the scene. Cascade c's slab is
+    # 120/325/875/2350 units deep, so the same geometry must normalise to a
+    # different NDC depth in every slice - four equal values mean the slices did
+    # not each get their own matrix. Structural, not a tuned threshold.
+    #
+    # Verified by pinning DrawMeshShadow to m_lightViewProj[0]: this flips to
+    # "no" while every shadow_cascade_written_* marker stays "yes".
+    #
+    # It does NOT catch a permutation of matrices across slices - all four stay
+    # distinct. Nothing here does; the CPU cases in tests/test_shadow_cascades.cpp
+    # are what constrain the matrices themselves.
+    #
+    # Deliberately NOT asserted: the coverage-fraction ordering. The probe window
+    # is 1/8 of each footprint, so even cascade 3's is 117 world units across and
+    # sits entirely on the 200x200 ground plane - all four fractions are 1.0. An
+    # assertion on them would pass unconditionally, which is worse than none.
+    Assert-Marker "shadow_cascade_depths_distinct" "yes"
+
+    # The live cascade fit, not a mirror of the constant table: strictly
+    # increasing texel size with consecutive ratios in (1, 8]. Catches the whole
+    # family of "all cascades ended up the same size" and "the table got
+    # reversed". Verified by setting the extents to {24,24,24,24} and watching
+    # this flip to "no".
+    Assert-Marker "shadow_cascade_texel_monotonic" "yes"
+}
+
+if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capacity")) {
+    $peak = [double]$markers["cb_ring_peak"]
+    $cap  = [double]$markers["cb_ring_capacity"]
+    $pct  = [int](100 * $peak / $cap)
+    Write-Host "Constant ring peak: $peak / $cap bytes ($pct%)"
+}
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
 # Constant-ring pressure. An early-warning gate, deliberately well below the
 # 100% point where UploadCB starts handing out GPU address zero to draws that
-# get recorded anyway. Per-object and per-material data live in structured
-# buffers, so this ring now carries only the 176-byte CBPerFrame and should read
-# ~0 regardless of entity count; anything approaching the gate means per-draw
-# traffic has leaked back into the ring.
+# get recorded anyway.
+#
+# THIS METRIC IS NOW FLAT IN THE ENTITY COUNT, and that is the whole point of
+# the structured-buffer change. The history is worth keeping because it is what
+# the gate is calibrated against:
+#
+#   before structured buffers, single cascade:  768 B per shadowed entity
+#                                               (256 per-object + 256 material
+#                                               + 256 shadow per-object)
+#   before structured buffers, four cascades:  1536 B per shadowed entity, since
+#                                               casters are walked once per
+#                                               cascade - 57% of the ring at 97
+#                                               entities, tripping this gate near
+#                                               127 entities
+#   after:                                      ZERO per entity
+#
+# Per-object and per-material data live in growable structured buffers indexed
+# by a root constant, so the ring now carries only the 416-byte CBPerFrame plus
+# one 256-byte CBPerPass per pass - four cascades plus the main pass, i.e. about
+# 1.8 KB total, independent of how many entities exist. Adding a fifth cascade
+# would cost 256 more bytes, not 96 more per entity.
+#
+# So this should read ~0. Anything approaching the gate means per-draw traffic
+# has leaked back into the ring, which is a design regression rather than a
+# capacity problem - do not fix it by raising kCBRingSize.
 if (-not $markers.ContainsKey("cb_ring_pct")) {
     throw "Smoke test did not emit the 'cb_ring_pct' marker."
 }
@@ -194,6 +269,33 @@ if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords))
 if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
     throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
            $markers["object_records_peak"], $markers["object_capacity"])
+}
+
+# All four cascades SHARE object range [0, N) rather than appending a private
+# range each. That is what keeps object_capacity at 2 x MeshInstanceCount() and
+# cb_ring_pct flat as cascades are added - without it the shadow range would be
+# 4N and capacity would have to be 5N.
+#
+# The sharing is only valid while every cascade draws the same casters in the
+# same order, so that draw i is the same entity in all four and each cascade
+# rewrites byte-identical records. Per-cascade frustum culling is the obvious
+# future change that breaks it, and it would break it SILENTLY: three cascades
+# would rasterise the fourth's transforms and the shadows would merely look
+# wrong. A record-count disagreement is the cheapest detectable symptom.
+#
+# Necessary, not sufficient - a reordering that preserved the count slips
+# through - but it catches every filter change, which is the realistic failure.
+if ($RasterOnly) {
+    Assert-Marker "shadow_cascade_records_uniform" "yes"
+
+    # With the range shared, shadow_records is ONE cascade's count, not the sum
+    # over four. Cross-checked against the parity assertion above: if a cascade
+    # ever started appending instead of rewinding, shadow_records would jump to
+    # 4x main_records and that assertion would fire first.
+    if ($shadowRecords -gt $mainRecords) {
+        throw ("shadow_records={0} exceeds main_records={1}; a cascade is appending " +
+               "object records instead of reusing range [0, N)." -f $shadowRecords, $mainRecords)
+    }
 }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
@@ -317,20 +419,50 @@ if (!$NoCapture) {
     # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
     # so the capture is deterministic (confirmed identical across repeated runs):
     #
-    #   correct                              mean 128.3   buckets 59
-    #   shadow_vs objectBuffer[0]            mean 129.0   buckets 58
-    #   basic_vs  objectBuffer[0]            mean 130.0   buckets 25
+    #   correct, clean-clone scene           mean 123.0   buckets 60
+    #   correct, generated asset loaded      mean 122.5   buckets 64
+    #   basic_vs objectBuffer[0] (clean)     mean 124.5   buckets 27
     #
-    # A +/-0.5 band on the mean catches both (0.7 and 1.7 off), and the bucket
-    # count catches both outright. Raster only: the path-traced capture depends
-    # on accumulation depth and is not a golden-value candidate.
+    # RE-MEASURED after the cascade merge, not carried over. A +/-0.5 band on the
+    # mean catches the mutation at 1.5 off, and the bucket count catches it
+    # outright at 27 against 60. Raster only: the path-traced capture depends on
+    # accumulation depth and is not a golden-value candidate.
+    #
+    # RE-BASELINED from 128.3/59 to 123.0/60 when four-cascade shadows merged.
+    # The move is attributable to CASCADES, not to the structured-buffer change:
+    # the four-cascade branch independently measured mean 123.0 / 60 buckets on
+    # this same scene BEFORE per-draw data moved out of the constant ring, and
+    # merging the two reproduces that number exactly. So the buffer refactor is
+    # image-neutral, which is what a pure data-plumbing change should be - had
+    # the mean landed anywhere else, that would itself have been the bug.
     #
     # This IS meant to trip on a deliberate lighting or scene change. When it
     # does, re-measure and update the two constants here - do not widen the band
     # until it stops failing, which would disarm exactly what it is for.
+    # TWO BASELINES, selected by the generated_asset marker. The demo loads
+    # assets/generated/.../model.glb when it is present, which adds an entity and
+    # legitimately changes the image. Only the MANIFEST of that asset is tracked
+    # in git - the .glb itself is not - so whether it loads is a property of the
+    # checkout rather than of the commit. A single baseline would therefore pass
+    # in a fresh worktree and fail in the canonical checkout, or vice versa, and
+    # the failure would look like a rendering regression rather than a missing
+    # file. Both values are measured; neither is a guess.
     if ($RasterOnly) {
-        $goldenMeanLum  = 128.3
-        $goldenBuckets  = 59
+        if (-not $markers.ContainsKey("generated_asset")) {
+            throw "Smoke test did not emit the 'generated_asset' marker; cannot select a raster baseline."
+        }
+        if ($markers["generated_asset"] -eq "failed") {
+            throw "The generated asset is present but failed to load; the raster baseline is undefined."
+        }
+        $withAsset = ($markers["generated_asset"] -eq "loaded")
+
+        if ($withAsset) {
+            $goldenMeanLum = 122.5
+            $goldenBuckets = 64
+        } else {
+            $goldenMeanLum = 123.0
+            $goldenBuckets = 60
+        }
         $meanTolerance  = 0.5
 
         $fixHint = "The rendered image changed. If that was intended, re-measure and update the golden values in this script."

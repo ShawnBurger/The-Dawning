@@ -123,9 +123,10 @@ cbuffer (`b4`), uploaded once per pass rather than premultiplied into every
 per-object record. One draw call per entity is unchanged; only where the data
 lives changed.
 
-The ring now carries `CBPerFrame` plus the two `CBPerPass` uploads: **768 bytes
-per frame, FLAT, independent of entity count** - measured at 0% on both smoke
-modes, down from 8,704 and 70,144 bytes. Ring occupancy has stopped being a
+The ring now carries `CBPerFrame` plus one `CBPerPass` per pass. With four
+cascades that is five passes - one per cascade plus the main pass - so
+512 (the 416-byte `CBPerFrame`, alignment-rounded) + 5 x 256 = **1,792 bytes per
+frame, FLAT, independent of entity count**. Ring occupancy has stopped being a
 function of scene size at all, which is why this is a removal rather than a
 raise.
 
@@ -139,9 +140,22 @@ slot, 3.9 MB total. That is not a constraint worth designing around, which is
 the point.
 
 Because the view-projection is per-pass rather than per-record, each additional
-shadow cascade now costs one more 256-byte cbuffer, FLAT, rather than another 96
+shadow cascade costs one more 256-byte cbuffer, FLAT, rather than another 96
 bytes per entity per cascade. The cascade upgrade has stopped being a scaling
-decision.
+decision, and the four-cascade pass that shipped alongside this change is the
+demonstration: it added 768 bytes per frame in total, where under the old
+constant-ring scheme it doubled per-entity cost from 768 to 1,536 bytes and
+halved the entity ceiling to roughly 170.
+
+The object record is written ONCE for the shadow pass and reused by all four
+cascades, at range [0, N), because an `ObjectData` holds only the
+camera-relative world matrix and its inverse-transpose - both cascade
+independent. Only the light matrix differs per cascade, and it lives in
+`CBPerPass`. That sharing is what keeps object capacity at `2 x maxDraws`
+instead of `5 x maxDraws`, and it is valid only while every cascade draws the
+same casters in the same order. Per-cascade frustum culling would break it
+silently, so the smoke harness asserts
+`shadow_cascade_records_uniform=yes` rather than trusting it.
 
 The remaining constraints are (1) CPU draw-call submission cost, since one
 `DrawIndexedInstanced` per entity is deliberately retained - instancing and
@@ -208,6 +222,68 @@ from the engine at runtime and never on the smoke path.
 **Stage 3 - Asset compiler.** Offline conversion from GLB to a runtime binary
 format that loads without parsing JSON. The master spec asks for this explicitly.
 Includes texture conversion into the formats the engine already loads.
+
+### Stage 3 cooked model contract
+
+The first runtime format is `.tdmodel`, magic `TDMODEL\0`, format version 1. It
+is deliberately an engine-owned format rather than serialized C++ structs. All
+integers are fixed-width little-endian values, all offsets and sizes are 64-bit,
+and sections begin at 8-byte-aligned offsets. This makes layout independent of
+compiler padding and gives the loader enough information to reject overflow,
+overlap, truncation, and unsupported versions before allocating model arrays.
+
+The header contains source SHA-256, file size, header size, section count, and a
+CRC32 over the entire file with the CRC field treated as zero. Its six required
+versioned sections are:
+
+1. metadata and canonical dependency identities
+2. primitives, vertices, indices, and bounds
+3. glTF PBR materials and texture bindings
+4. image metadata and embedded source bytes
+5. sampler state
+6. texture-to-image and texture-to-sampler references
+
+Dependencies are sorted by URI before serialization. Each records URI, byte
+size, and SHA-256; duplicate source references are canonicalized. External
+buffer and image URIs are percent-decoded and hashed, and external images are
+embedded from those same captured bytes so moving the cooked artifact does not
+sever its textures. Dependencies are snapshotted before import and hashed again
+after import. External buffers are imported directly from the immutable captured
+bytes, so even a change-and-restore race cannot pair model data with a different
+dependency identity. Repeated image references are charged each time their
+payload is materialized, while external buffer and image snapshots have separate
+aggregate budgets. The source file also has a SHA-256 in the header. The offline
+compiler rejects outputs that alias the source or any external dependency,
+validates memory, writes a process-unique temporary sibling, reloads that
+temporary file, and only then atomically replaces the destination. Concurrent
+publishers retry bounded Windows sharing conflicts. The loader has configurable caps for file and
+section sizes, strings, geometry, tables, dependencies, and embedded images;
+the builder enforces the same caps before constructing its sections.
+
+Texture bytes are currently preserved in their source PNG/JPEG/KTX/DDS form,
+which the existing engine loaders understand. GPU block compression and mipmap
+generation are intentionally not claimed by this slice; they belong in a later
+texture-cooking revision and must bump the relevant section version when added.
+The landed model bridge already uploads `ImportedModel` geometry imported from
+GLTF to D3D12. This stage deliberately does not change renderer-owned code, so a
+direct `.tdmodel` loader into that same GPU bridge remains the next runtime asset
+step.
+
+Production measurements on 2026-07-20:
+
+- corridor section: 15,562 vertices, 19,193 triangles, 9,533,104 cooked bytes
+- corridor wall prototype: 100,644 vertices, 71,843 triangles, 34,929,120 cooked bytes
+- repeated corridor compilation: byte-identical SHA-256 output
+
+CPU tests cover known SHA-256 vectors, deterministic canonical serialization,
+complete data round trip, whole-file corruption, truncation, bad magic,
+unsupported versions, symmetric builder/loader limits, CRC-correct allocation
+bombs, atomic preservation, external dependency identity, and invalid source
+models, aggregate external snapshot and materialization limits, immutable-buffer
+imports, dependency output aliases, and concurrent source changes.
+Both production Meshy GLBs compile and reload successfully without D3D12. A
+two-process publication stress test produced a valid byte-identical artifact
+with no orphan temporary files.
 
 **Stage 4 - Content directory and manifest.** Data-driven scene definition so
 adding an asset does not mean editing `app.cpp`. This is the "data-driven systems"

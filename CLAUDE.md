@@ -105,11 +105,16 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            (shaders/tonemap_ps.hlsl). Tone mapping happens exactly once, not per
            material shader; post-process passes insert between
            Scene::RenderEntities and Renderer::ResolveToBackBuffer
+           Directional shadows are CASCADED: 4 slices of one 2048x2048
+           Texture2DArray (64 MiB), fixed half-extents {24, 65, 175, 470},
+           selected radially in the pixel shader, with a world-anchored
+           double-precision texel snap so distant edges do not crawl as the
+           camera translates. Reach is ~448 world units, up from 24. Cascade 0 is
+           bit-identical to the old single cascade, so the near field is
+           unchanged. Costs 256 bytes of constant ring per entity per cascade;
+           see the ring note below
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
-           and any real mesh file loading. The shadow map is a SINGLE cascade
-           covering 24 world units around the camera - beyond that everything
-           reads as lit, which is correct-looking for the demo and wrong for a
-           planet. Cascades are the obvious next step. Emissive surfaces shade
+           and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a
            bright panel does not illuminate anything around it.
            `assets/textures/` ships only a README, so a clean clone always takes
@@ -148,6 +153,15 @@ Phase 7: Opacity Micro-Maps for alpha-tested geometry (foliage, fences)
    DXR. GPU camera position is local zero, while path-tracing history compares
    the full double-precision position. New world-space quantities must use
    `Vec3d`; never narrow an absolute world position before camera subtraction.
+   ONE SANCTIONED EXCEPTION: `core::BuildShadowCascadeMatrix` takes the absolute
+   `Vec3d` camera position. It uses it only to quantise the shadow texel lattice
+   onto a grid fixed to the world origin, entirely in double, and narrows only a
+   sub-texel RESIDUAL - never a position. The exception is necessary because
+   quantising a camera-relative coordinate quantises nothing: the lattice would
+   move with the thing being quantised, giving a snap that compiles, does not
+   crash, and shimmers exactly as much as no snap at all. Two unit cases pin
+   this, `Cascades_MatricesAreCameraPositionInvariant` (probed at 1e7) and
+   `Cascades_SnapIsStableUnderSubTexelCameraMotion`.
 2. Proper .h/.cpp split. No header-only implementations except tiny inlines/templates.
 3. No copyrighted terms. Rename map: Starfleet→Vanguard, LCARS→HELIX, Phaser→Arc Lance,
    Photon Torpedo→Fusion Torpedo, Dilithium→Helion, Federation→Commonwealth, etc.

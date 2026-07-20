@@ -759,6 +759,17 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 // The v1.0 branch has no per-descriptor flags and v1.0 semantics are volatile
 // by default, so the two branches stay behaviourally equivalent rather than
 // merely similar.
+//
+// Root SRVs and root CBVs cost 2 DWORDs each, descriptor tables 1. RECOMPUTE
+// the total when adding a parameter: two different wrong numbers were once
+// sitting in this file at once, which is what happens when a running total is
+// maintained by hand and never checked.
+//
+// Slot 4 binds the shadow map, which is now a Texture2DArray of
+// core::kShadowCascadeCount slices rather than a single Texture2D. That is one
+// SRV either way, so the root layout is unchanged by cascades - the cascade
+// count reaches the shader through CBPerFrame (b1) and the per-cascade light
+// matrix through CBPerPass (b4), never through the root layout.
 // =============================================================================
 bool Renderer::CreateRootSignature(ID3D12Device* device)
 {
@@ -774,7 +785,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
 
     // Static sampler (free — doesn't cost root signature space)
     D3D12_STATIC_SAMPLER_DESC staticSampler = {};
-    staticSampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    // ANISOTROPIC, not MIN_MAG_MIP_LINEAR. MaxAnisotropy below was already set to
+    // 16 and did nothing, because anisotropy is only consulted when the filter
+    // actually selects it - it read as a deliberate quality setting while being
+    // inert. It matters here: the ground plane is 200x200 world units, so most
+    // of it is viewed at a grazing angle where trilinear filtering blurs the
+    // texture into mush along the direction of anisotropy.
+    staticSampler.Filter           = D3D12_FILTER_ANISOTROPIC;
     staticSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     staticSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     staticSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -808,11 +825,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     shadowSampler.RegisterSpace    = 0;
     shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    // These two assignments used to sit BELOW the array initialiser, so they
-    // mutated a copy nothing ever read and s0 shipped as SHADER_VISIBILITY_ALL
-    // rather than the intended PIXEL. Benign - ALL is a superset and
-    // RegisterSpace 0 is the zero-init value - but the lines read as if they
-    // took effect.
+    // These two MUST be assigned before the array below copies the struct. They
+    // used to sit after it, which made them dead stores: the array captured
+    // staticSampler while ShaderVisibility was still its zero-initialised value,
+    // and zero is D3D12_SHADER_VISIBILITY_ALL, not PIXEL. Benign - ALL is a
+    // superset, and RegisterSpace's intended value is also 0 - which is exactly
+    // why it survived review. A dead store that happens to be harmless is still
+    // a lie about what the code does.
     staticSampler.RegisterSpace    = 0;
     staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
@@ -1019,7 +1038,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw-index constants + texture table + shadow table, 2 static samplers, 12 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw-index constants + texture table + shadow-array table, 2 static samplers, 12 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1037,10 +1056,21 @@ bool Renderer::CreatePSO(ID3D12Device* device)
     // (which already uses the constant), and the HLSL array declaration. The
     // third was a literal 128, so growing the heap would have produced a silent
     // C++/HLSL mismatch rather than a compile error. Now there is one source.
+    //
+    // The cascade count and shadow map size ride the same mechanism for the same
+    // reason. NOTE: this trick works here only because basic_ps goes through
+    // FXC - shader_utils.cpp silently DROPS the defines argument on the DXC
+    // path, so it is a no-op for anything compiled as SM 6.x.
     char maxRasterTexturesText[16];
     snprintf(maxRasterTexturesText, sizeof(maxRasterTexturesText), "%u", kMaxRasterTextures);
+    char cascadeCountText[16];
+    snprintf(cascadeCountText, sizeof(cascadeCountText), "%u", core::kShadowCascadeCount);
+    char shadowMapSizeText[24];
+    snprintf(shadowMapSizeText, sizeof(shadowMapSizeText), "%u.0", kShadowMapSize);
     const D3D_SHADER_MACRO psDefines[] = {
-        { "MAX_RASTER_TEXTURES", maxRasterTexturesText },
+        { "MAX_RASTER_TEXTURES",  maxRasterTexturesText },
+        { "SHADOW_CASCADE_COUNT", cascadeCountText },
+        { "SHADOW_MAP_SIZE",      shadowMapSizeText },
         { nullptr, nullptr }
     };
 
@@ -1334,12 +1364,39 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
 
     uint32_t alignedSize = AlignCBSize(dataSize);
 
-    // Check for overflow
+    // Check for overflow. Returning 0 here makes the draw read from address zero,
+    // so this is an error rather than a warning - it is caught by the smoke
+    // harness, which forces a nonzero exit when anything logs an error.
     if (m_cbOffset + alignedSize > kCBRingSize)
     {
-        core::Log::Error("CB upload ring overflow! Increase kCBRingSize.");
+        // Ring cost is now FLAT in the entity count, not linear in it. Per-object
+        // and per-material data live in structured buffers indexed by draw, so
+        // the only remaining uploads are 256 bytes of CBPerFrame plus 256 bytes
+        // of CBPerPass per pass: one main pass plus kShadowCascadeCount shadow
+        // cascades. That is the entire steady-state budget.
+        //
+        // So reaching this branch does NOT mean "too many entities" - adding
+        // entities cannot get you here. It means a new per-draw or per-cascade
+        // UploadCB caller was introduced, which is the regression this message
+        // exists to name. Do not respond by enlarging kCBRingSize.
+        constexpr uint32_t kSteadyStateBytes =
+            256u + 256u * (1u + core::kShadowCascadeCount);
+        core::Log::Errorf(
+            "CB upload ring overflow at %u/%u bytes. This ring is flat in the "
+            "entity count: steady state is %u bytes (256 CBPerFrame + 256 "
+            "CBPerPass x %u passes = 1 main + %u cascades). Per-object and "
+            "per-material data are in structured buffers, so entity growth "
+            "cannot cause this - a new per-draw UploadCB caller did. Find that "
+            "caller rather than enlarging kCBRingSize.",
+            m_cbOffset, kCBRingSize, kSteadyStateBytes,
+            1u + core::kShadowCascadeCount, core::kShadowCascadeCount);
         return 0;
     }
+
+    // Track the high-water mark across the whole run, not just this frame, so
+    // ring pressure is observable before it becomes an overflow.
+    if (m_cbOffset + alignedSize > m_cbPeak)
+        m_cbPeak = m_cbOffset + alignedSize;
 
     // Copy data to the mapped buffer
     uint8_t* dest = m_cbMappedPtrs[m_currentFrame] + m_cbOffset;
@@ -1497,6 +1554,10 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     assert(m_frameResourcesBegun &&
            "BeginFrameResources must run before BeginFrame");
 
+    // NOTE: the ring advance deliberately does NOT happen here any more - see
+    // BeginFrameResources. Passes that run earlier than this function (the
+    // shadow pass) allocate constants too, and resetting here would strand
+    // their allocations in the previous frame's buffer.
     auto* cmd = device.CmdList();
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
     cmd->SetDescriptorHeaps(1, heaps);
@@ -1544,7 +1605,16 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     const float fovYRad    = camera.GetFOV() * (3.14159265358979323846f / 180.0f);
     perFrame.tanHalfFovY   = std::tan(fovYRad * 0.5f);
     perFrame.aspect        = aspect;
-    memcpy(perFrame.lightViewProj, m_lightViewProj.Data(), sizeof(float) * 16);
+    // An explicit per-cascade loop rather than one 256-byte memcpy: that would
+    // assume core::Mat4x4 (float m[4][4]) is padding-free when stored in an
+    // array, which nothing here guarantees.
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+    {
+        memcpy(perFrame.lightViewProj[c], m_lightViewProj[c].Data(), sizeof(float) * 16);
+        perFrame.cascadeSplitRadius[c] = core::ShadowCascadeSplitRadius(c);
+        perFrame.cascadeTexelWorld[c]  = core::ShadowCascadeTexelWorld(c);
+        perFrame.cascadeFadeLo[c]      = core::ShadowCascadeFadeLo(c);
+    }
 
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
@@ -1703,37 +1773,51 @@ void Renderer::SetDirectionalLight(const core::Vec3f& direction,
     m_lightDir = direction.Normalized();
     m_lightColor = color;
     m_ambientColor = ambient;
-    UpdateLightMatrix();
+    // Deliberately does NOT rebuild the cascade matrices: it has no camera
+    // position to snap against, and BeginShadowPass rebuilds them every frame
+    // anyway. Building them here from a default-constructed Vec3d would silently
+    // produce an unsnapped set on any frame that skipped the shadow pass.
 }
 
 // =============================================================================
 // Shadow map
 // =============================================================================
 
-void Renderer::UpdateLightMatrix()
+void Renderer::UpdateShadowCascades(const core::Vec3d& cameraPosition)
 {
     // Everything the raster path draws is already camera-relative, so the camera
-    // sits at the origin of the space these matrices operate in. The light
-    // frustum is therefore centred on the origin and the map follows the viewer
-    // for free - no camera position enters this calculation, and none should.
+    // sits at the origin of the space these matrices operate in. Every cascade
+    // is therefore CENTRED on the origin and the whole set follows the viewer
+    // for free, with no refit and no shimmer when the camera merely rotates.
     //
-    // m_lightDir points TOWARD the light, so the light is up that direction and
-    // looks back down it at the origin.
-    const core::Vec3f eye = m_lightDir * (kShadowDepthRange * 0.5f);
+    // The camera position DOES enter, and this is the one place in the raster
+    // path where an absolute world position legitimately appears. It is used for
+    // exactly one thing - quantising the texel lattice onto a grid fixed to the
+    // world origin, entirely in double, narrowing only a sub-texel residual.
+    // Without that the snap would be quantising a camera-relative coordinate,
+    // i.e. quantising a value that is identically zero: a no-op that looks like
+    // it works. See core::BuildShadowCascadeMatrix; the invariant is pinned by
+    // Cascades_MatricesAreCameraPositionInvariant and
+    // Cascades_SnapIsStableUnderSubTexelCameraMotion.
+    //
+    // Narrowing anything here other than that residual is the bug this comment
+    // exists to prevent.
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+        m_lightViewProj[c] =
+            core::BuildShadowCascadeMatrix(m_lightDir, c, cameraPosition);
+}
 
-    // Any up vector works except one parallel to the view direction, which would
-    // make the cross product in LookAt degenerate.
-    core::Vec3f up = core::Vec3f(0.0f, 1.0f, 0.0f);
-    if (std::fabs(m_lightDir.y) > 0.99f)
-        up = core::Vec3f(0.0f, 0.0f, 1.0f);
-
-    const core::Mat4x4 lightView =
-        core::Mat4x4::LookAt(eye, core::Vec3f(0.0f, 0.0f, 0.0f), up);
-    const core::Mat4x4 lightProj =
-        core::Mat4x4::OrthoLH(kShadowExtent * 2.0f, kShadowExtent * 2.0f,
-                              0.1f, kShadowDepthRange);
-
-    m_lightViewProj = lightView * lightProj;
+bool Renderer::ShadowCascadeTexelSizesAreMonotonic() const
+{
+    for (uint32_t c = 1; c < core::kShadowCascadeCount; ++c)
+    {
+        const float prev = core::ShadowCascadeTexelWorld(c - 1);
+        const float cur  = core::ShadowCascadeTexelWorld(c);
+        if (!(cur > prev)) return false;
+        const float ratio = cur / prev;
+        if (!(ratio > 1.0f) || !(ratio <= 8.0f)) return false;
+    }
+    return true;
 }
 
 bool Renderer::CreateShadowResources(ID3D12Device* device)
@@ -1745,7 +1829,10 @@ bool Renderer::CreateShadowResources(ID3D12Device* device)
     desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     desc.Width            = kShadowMapSize;
     desc.Height           = kShadowMapSize;
-    desc.DepthOrArraySize = 1;
+    // One slice per cascade. This single field is the whole storage change:
+    // the SRV stays one descriptor, so nothing about the root signature or the
+    // heap layout moves.
+    desc.DepthOrArraySize = static_cast<UINT16>(core::kShadowCascadeCount);
     desc.MipLevels        = 1;
     desc.Format           = DXGI_FORMAT_R32_TYPELESS;
     desc.SampleDesc       = { 1, 0 };
@@ -1772,8 +1859,10 @@ bool Renderer::CreateShadowResources(ID3D12Device* device)
     m_shadowMap->SetName(L"ShadowMap");
     m_shadowIsDepthTarget = false;
 
+    // One DSV per slice. Non-shader-visible, so this heap never competes with
+    // the material heap for descriptors.
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.NumDescriptors = core::kShadowCascadeCount;
     dsvHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
     hr = device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_shadowDsvHeap));
     if (FAILED(hr))
@@ -1783,35 +1872,71 @@ bool Renderer::CreateShadowResources(ID3D12Device* device)
         return false;
     }
     m_shadowDsvHeap->SetName(L"ShadowDsvHeap");
+    m_shadowDsvDescSize =
+        device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
-    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format        = DXGI_FORMAT_D32_FLOAT;
-    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    device->CreateDepthStencilView(m_shadowMap.Get(), &dsvDesc,
-        m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart());
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvCpu =
+            m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+        {
+            D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+            dsvDesc.Format                         = DXGI_FORMAT_D32_FLOAT;
+            dsvDesc.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+            dsvDesc.Texture2DArray.MipSlice        = 0;
+            dsvDesc.Texture2DArray.FirstArraySlice = c;
+            dsvDesc.Texture2DArray.ArraySize       = 1;
+            dsvDesc.Flags                          = D3D12_DSV_FLAG_NONE;
+
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = dsvCpu;
+            handle.ptr += static_cast<SIZE_T>(c) * m_shadowDsvDescSize;
+            device->CreateDepthStencilView(m_shadowMap.Get(), &dsvDesc, handle);
+        }
+    }
 
     // SRV into the reserved slot of the shared material heap. Only one
     // shader-visible CBV_SRV_UAV heap can be bound at a time, so anything the
     // material pass samples has to live here. The allocator was initialised to
     // start past this index, so nothing else can claim it.
+    // Still exactly ONE descriptor - a Texture2DArray SRV covers every slice.
+    // That is why kShadowDescriptorIndex stays 1, the allocator still starts
+    // handing out at 2, and the root signature is not touched.
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;
-    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels     = 1;
+    srvDesc.Format                             = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension                      = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Shader4ComponentMapping            = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2DArray.MostDetailedMip     = 0;
+    srvDesc.Texture2DArray.MipLevels           = 1;
+    srvDesc.Texture2DArray.FirstArraySlice     = 0;
+    srvDesc.Texture2DArray.ArraySize           = core::kShadowCascadeCount;
+    srvDesc.Texture2DArray.PlaneSlice          = 0;
+    srvDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
 
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
     srvCpu.ptr += static_cast<SIZE_T>(kShadowDescriptorIndex) * m_textureDescSize;
     device->CreateShaderResourceView(m_shadowMap.Get(), &srvDesc, srvCpu);
 
-    UpdateLightMatrix();
+    // Seed valid matrices so the first BeginFrame has something to upload even
+    // if it runs before the first shadow pass. Unsnapped, which is correct: at
+    // camera zero the residual is zero anyway.
+    UpdateShadowCascades(core::Vec3d{});
 
     // Structured marker rather than prose: the smoke harness asserts on this,
     // so rewording the human-readable line above cannot silently disarm it.
-    core::Log::Infof("[SMOKE] shadow_map=ok shadow_map_size=%u shadow_map_slot=%u",
-                     kShadowMapSize, kShadowDescriptorIndex);
-    core::Log::Infof("Shadow map created (%ux%u D32_FLOAT, descriptor slot %u)",
-                     kShadowMapSize, kShadowMapSize, kShadowDescriptorIndex);
+    // shadow_cascades is %u, never %.1f - Assert-Marker is a PowerShell string
+    // compare, so "4.0" would not match "4".
+    core::Log::Infof("[SMOKE] shadow_map=ok shadow_map_size=%u shadow_map_slot=%u shadow_cascades=%u",
+                     kShadowMapSize, kShadowDescriptorIndex, core::kShadowCascadeCount);
+    core::Log::Infof("Shadow map created (%ux%u D32_FLOAT x%u cascades, descriptor slot %u)",
+                     kShadowMapSize, kShadowMapSize, core::kShadowCascadeCount,
+                     kShadowDescriptorIndex);
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+        core::Log::Infof("  cascade %u: half-extent %.1f, split radius %.3f, "
+                         "texel %.6f world units, depth range %.1f",
+                         c, core::kShadowCascadeExtent[c],
+                         core::ShadowCascadeSplitRadius(c),
+                         core::ShadowCascadeTexelWorld(c),
+                         core::ShadowCascadeDepthRange(c));
     return true;
 }
 
@@ -1869,16 +1994,19 @@ bool Renderer::CreateShadowPSO(ID3D12Device* device)
     return true;
 }
 
-void Renderer::BeginShadowPass(D3D12Device& device)
+void Renderer::BeginShadowPass(D3D12Device& device, const core::Vec3d& cameraPosition)
 {
     if (!m_shadowMap || !m_shadowPSO) return;
 
     auto* cmd = device.CmdList();
 
-    // Rebuild every frame: the light can move, and the frustum is anchored to
+    // Rebuild every frame: the light can move, and the frustums are anchored to
     // the camera, which certainly does.
-    UpdateLightMatrix();
+    UpdateShadowCascades(cameraPosition);
 
+    // ONE whole-resource transition for all slices, matched by exactly one in
+    // EndShadowPass. m_shadowIsDepthTarget therefore describes the entire
+    // resource; per-slice barriers would desync it from reality.
     if (!m_shadowIsDepthTarget)
     {
         D3D12_RESOURCE_BARRIER barrier = {};
@@ -1891,10 +2019,8 @@ void Renderer::BeginShadowPass(D3D12Device& device)
         m_shadowIsDepthTarget = true;
     }
 
-    auto dsv = m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
-    cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
+    // Every slice is the same size, so viewport and scissor are set once for the
+    // whole pass rather than per cascade.
     D3D12_VIEWPORT vp = { 0.0f, 0.0f,
                           static_cast<float>(kShadowMapSize),
                           static_cast<float>(kShadowMapSize), 0.0f, 1.0f };
@@ -1908,12 +2034,17 @@ void Renderer::BeginShadowPass(D3D12Device& device)
     cmd->SetPipelineState(m_shadowPSO.Get());
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // Per-object records and the LIGHT view-projection. No SetDescriptorHeaps
+    // Per-object records, bound ONCE for the whole pass. No SetDescriptorHeaps
     // here and none needed: root parameter 0 is a root SRV, a bare GPU virtual
     // address, and root parameter 6 is a root CBV. Routing per-object data
     // through a descriptor table instead would break this pass with a
     // debug-layer error about binding a table with no heap set, because no
     // shader-visible CBV_SRV_UAV heap is bound anywhere in the shadow pass.
+    //
+    // Binding here rather than per cascade is safe because the buffer cannot be
+    // reallocated mid-pass: EnsureFrameStructuredBuffer runs only in
+    // BeginFrameResources, above this pass, so the address stays valid for
+    // every cascade's draws.
     //
     // Root params 1, 2, 3 and 4 stay unbound, exactly as before this change.
     // Still legal: the shadow PSO has no pixel shader and all four are
@@ -1922,8 +2053,69 @@ void Renderer::BeginShadowPass(D3D12Device& device)
         cmd->SetGraphicsRootShaderResourceView(
             0, m_objectBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
 
+    // The LIGHT view-projection is NOT uploaded here: with four cascades there
+    // are four of them, and each is uploaded by BeginShadowCascade.
+    m_activeCascade = 0;
+    m_cascadesBegunThisPass = 0;
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+        m_shadowCascadeRecords[c] = 0;
+}
+
+void Renderer::BeginShadowCascade(D3D12Device& device, uint32_t cascade)
+{
+    if (!m_shadowMap || !m_shadowPSO) return;
+    if (cascade >= core::kShadowCascadeCount) return;
+
+    // Latch the record count the cascade we are LEAVING produced, before the
+    // cursor rewinds. See ShadowCascadeRecordsUniform for why this is checked.
+    if (m_cascadesBegunThisPass > 0)
+        m_shadowCascadeRecords[m_activeCascade] = m_objectCursor;
+
+    m_activeCascade = cascade;
+    ++m_cascadesBegunThisPass;
+
+    // ALL FOUR CASCADES REUSE OBJECT RECORDS [0, N), rather than appending a
+    // private range each. Rewinding the cursor here is what makes that happen,
+    // and it is the whole reason cascades cost 256 flat bytes per pass instead
+    // of 96 bytes per entity per cascade - i.e. why object capacity stays
+    // 2 x maxDraws rather than growing to 5 x maxDraws.
+    //
+    // Safe because an ObjectData record is CASCADE-INDEPENDENT: it holds the
+    // camera-relative world matrix and its inverse-transpose, and nothing
+    // else. The view-projection - the one quantity that does differ per
+    // cascade - lives in CBPerPass (b4), uploaded below. So each cascade
+    // rewrites byte-identical bytes over the previous cascade's, and the
+    // command list, which is not submitted until long after all four cascades
+    // have recorded, reads one consistent copy.
+    //
+    // THE PRECONDITION IS THAT EVERY CASCADE DRAWS THE SAME CASTERS IN THE SAME
+    // ORDER. That holds today because App's cascade loop walks one pool with
+    // one filter. It would NOT survive per-cascade frustum culling or a
+    // castsShadow test applied to some cascades and not others - draw i would
+    // then be a different entity per cascade, and every cascade but the last
+    // would rasterise the last cascade's transforms. That is the exact failure
+    // this file's shadow-vs-main disjointness comment exists to avoid, so the
+    // precondition is CHECKED rather than trusted: see
+    // ShadowCascadeRecordsUniform, surfaced as a smoke marker.
+    m_objectCursor = 0;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv =
+        m_shadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+    dsv.ptr += static_cast<SIZE_T>(cascade) * m_shadowDsvDescSize;
+
+    auto* cmd = device.CmdList();
+    cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+    // UNCONDITIONAL, and ahead of any per-cascade decision. See the header: an
+    // uncleared slice holds undefined values, not 1.0, and would read as
+    // "written" while never having been rendered into.
+    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    // THIS cascade's light matrix. One 256-byte constant-ring slice per
+    // cascade, per frame - four in total, flat in the entity count. This is the
+    // per-pass upload that replaced the per-object worldViewProj the shadow
+    // pass used to write once per entity per cascade.
     CBPerPass perPass = {};
-    memcpy(perPass.viewProj, m_lightViewProj.Data(), sizeof(float) * 16);
+    memcpy(perPass.viewProj, m_lightViewProj[cascade].Data(), sizeof(float) * 16);
     cmd->SetGraphicsRootConstantBufferView(6, UploadCB(&perPass, sizeof(perPass)));
 }
 
@@ -1932,6 +2124,13 @@ void Renderer::EndShadowPass(D3D12Device& device)
     // The shadow pass owns object elements [0, m_objectCursor); the main pass
     // takes it from here. Latched at the boundary so the smoke parity marker
     // can compare the two passes' record counts.
+    //
+    // m_objectCursor is the count ONE cascade wrote, not the sum over four,
+    // because BeginShadowCascade rewinds it per cascade. That is the point: the
+    // main pass starts at N rather than 4N, and object capacity stays
+    // 2 x maxDraws no matter how many cascades are added.
+    if (m_cascadesBegunThisPass > 0)
+        m_shadowCascadeRecords[m_activeCascade] = m_objectCursor;
     m_shadowRecords = m_objectCursor;
 
     if (!m_shadowMap || !m_shadowIsDepthTarget) return;
@@ -1955,18 +2154,24 @@ bool Renderer::RecordShadowMapReadback(D3D12Device& device)
 
     // The copy destination describes the REGION, not the resource: a placed
     // footprint whose row pitch is 256-byte aligned as the API requires.
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
-    footprint.Offset                    = 0;
-    footprint.Footprint.Format          = DXGI_FORMAT_R32_FLOAT;
-    footprint.Footprint.Width           = kShadowProbeSize;
-    footprint.Footprint.Height          = kShadowProbeSize;
-    footprint.Footprint.Depth           = 1;
-    footprint.Footprint.RowPitch        =
+    const UINT rowPitch =
         (kShadowProbeSize * 4u + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u) &
         ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
 
-    const UINT64 totalBytes =
-        static_cast<UINT64>(footprint.Footprint.RowPitch) * kShadowProbeSize;
+    // One probe window per cascade, packed back to back. The slice stride is
+    // 256 * 1024 = 262144, a multiple of D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
+    // (512), so every slice's PlacedFootprint.Offset is legal.
+    const UINT64 sliceBytes = static_cast<UINT64>(rowPitch) * kShadowProbeSize;
+    const UINT64 totalBytes = sliceBytes * core::kShadowCascadeCount;
+
+    // RECREATE whenever the required size differs, not merely when the pointer
+    // is null. The previous lazy-once shape would Map an undersized buffer
+    // successfully and read past the copied region.
+    if (m_shadowReadback && m_shadowReadbackBytes != totalBytes)
+    {
+        m_shadowReadback.Reset();
+        m_shadowReadbackBytes = 0;
+    }
 
     if (!m_shadowReadback)
     {
@@ -1993,6 +2198,7 @@ bool Renderer::RecordShadowMapReadback(D3D12Device& device)
             return false;
         }
         m_shadowReadback->SetName(L"ShadowMapReadback");
+        m_shadowReadbackBytes = totalBytes;
     }
 
     // EndShadowPass left the map in PIXEL_SHADER_RESOURCE; hand it back that way.
@@ -2004,16 +2210,6 @@ bool Renderer::RecordShadowMapReadback(D3D12Device& device)
     barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
     cmd->ResourceBarrier(1, &barrier);
 
-    D3D12_TEXTURE_COPY_LOCATION dst = {};
-    dst.pResource       = m_shadowReadback.Get();
-    dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    dst.PlacedFootprint = footprint;
-
-    D3D12_TEXTURE_COPY_LOCATION src = {};
-    src.pResource        = m_shadowMap.Get();
-    src.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    src.SubresourceIndex = 0;
-
     const UINT half = kShadowProbeSize / 2u;
     D3D12_BOX box = {};
     box.left   = kShadowMapSize / 2u - half;
@@ -2022,7 +2218,30 @@ bool Renderer::RecordShadowMapReadback(D3D12Device& device)
     box.right  = kShadowMapSize / 2u + half;
     box.bottom = kShadowMapSize / 2u + half;
     box.back   = 1;
-    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, &box);
+
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+    {
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+        footprint.Offset             = sliceBytes * c;
+        footprint.Footprint.Format   = DXGI_FORMAT_R32_FLOAT;
+        footprint.Footprint.Width    = kShadowProbeSize;
+        footprint.Footprint.Height   = kShadowProbeSize;
+        footprint.Footprint.Depth    = 1;
+        footprint.Footprint.RowPitch = rowPitch;
+
+        D3D12_TEXTURE_COPY_LOCATION dst = {};
+        dst.pResource       = m_shadowReadback.Get();
+        dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dst.PlacedFootprint = footprint;
+
+        D3D12_TEXTURE_COPY_LOCATION src = {};
+        src.pResource = m_shadowMap.Get();
+        src.Type      = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        // One mip level, so the subresource index IS the array slice.
+        src.SubresourceIndex = c;
+
+        cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, &box);
+    }
 
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
     barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -2030,18 +2249,22 @@ bool Renderer::RecordShadowMapReadback(D3D12Device& device)
     return true;
 }
 
-bool Renderer::ReadShadowMapCoverage(float& writtenFraction, float& minDepth) const
+bool Renderer::ReadShadowMapCoverage(uint32_t cascade,
+                                     float& writtenFraction,
+                                     float& minDepth) const
 {
     writtenFraction = 0.0f;
     minDepth        = 1.0f;
     if (!m_shadowReadback) return false;
+    if (cascade >= core::kShadowCascadeCount) return false;
 
     void* mapped = nullptr;
     D3D12_RANGE readRange = { 0, 0 };  // size filled below
     const UINT rowPitch =
         (kShadowProbeSize * 4u + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u) &
         ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
-    readRange.End = static_cast<SIZE_T>(rowPitch) * kShadowProbeSize;
+    const SIZE_T sliceBytes = static_cast<SIZE_T>(rowPitch) * kShadowProbeSize;
+    readRange.End = sliceBytes * core::kShadowCascadeCount;
 
     HRESULT hr = m_shadowReadback->Map(0, &readRange, &mapped);
     if (FAILED(hr) || !mapped)
@@ -2051,7 +2274,8 @@ bool Renderer::ReadShadowMapCoverage(float& writtenFraction, float& minDepth) co
     }
 
     uint64_t written = 0;
-    const auto* bytes = static_cast<const uint8_t*>(mapped);
+    const auto* bytes =
+        static_cast<const uint8_t*>(mapped) + sliceBytes * cascade;
     for (uint32_t y = 0; y < kShadowProbeSize; ++y)
     {
         const auto* row = reinterpret_cast<const float*>(bytes + static_cast<size_t>(y) * rowPitch);
@@ -2104,10 +2328,11 @@ void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
     // The SAME ObjectData record shape the main pass writes, into the same
     // buffer, at this pass's own disjoint index range. The light matrix is no
     // longer substituted per object: it lives in CBPerPass (b4), uploaded once
-    // in BeginShadowPass. That is what deletes the shadow pass's second copy of
-    // the view-projection rather than merely relocating it, and what makes a
-    // future fourth cascade cost one more 256-byte cbuffer instead of one more
-    // record per entity.
+    // per cascade by BeginShadowCascade. That is what deletes the shadow pass's
+    // second copy of the view-projection rather than merely relocating it, and
+    // it is why the fourth cascade costs one more 256-byte cbuffer rather than
+    // one more record per entity. The record written here is cascade
+    // independent, which is what lets all four cascades share [0, N).
     //
     // normalMatrix is filled even though shadow_vs.hlsl ignores it: the struct
     // is shared, and leaving stale bytes in a persistently mapped buffer that is

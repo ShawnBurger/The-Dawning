@@ -7,30 +7,65 @@
 
 #include "display_common.hlsli"
 
+// Supplied by Renderer::CreatePSO from core::kShadowCascadeCount and
+// Renderer::kShadowMapSize. The fallbacks exist only for compiling this file
+// standalone with fxc when checking syntax; the engine always defines both.
+#ifndef SHADOW_CASCADE_COUNT
+#define SHADOW_CASCADE_COUNT 4
+#endif
+#if SHADOW_CASCADE_COUNT != 4
+#error "SHADOW_CASCADE_COUNT must be 4: the cascade tables below are float4."
+#endif
+#ifndef SHADOW_MAP_SIZE
+#define SHADOW_MAP_SIZE 2048.0
+#endif
+
+// Mirrors struct CBPerFrame in src/render/renderer.h, which is static_assert'd
+// at 416 bytes with four offsetof checks. sky_ps.hlsl declares ONLY the first
+// 112 bytes of this layout and reads them by offset, so fields may only ever be
+// APPENDED below lightViewProj.
+//
+// WHY packoffset IS ON EVERY MEMBER, AND WHY IT IS THE MOST VALUABLE LINE HERE.
+// HLSL places every element of a cbuffer ARRAY on its own 16-byte register, so
+// `float cascadeSplitRadius[4]` would be 64 bytes in HLSL against 16 in C++. That
+// mismatch compiles, the member names still match, the C++ static_asserts still
+// pass, and the shader silently reads 48 bytes of neighbouring data as splits
+// 1..3 - meaning selection is correct only for cascade 0, the one cascade that
+// already worked before cascades existed. Nothing in the build or the smoke
+// harness would notice.
+//
+// packoffset converts that into a compile error: an overlapping register
+// assignment is rejected with X4019. VERIFIED, not assumed - fxc /T ps_5_1 /WX
+// /Od rejects both `float cascadeSplitRadius[4] : packoffset(c23)` (it would
+// span c23..c26 and collide with cascadeTexelWorld at c24) and any field
+// inserted into the frozen prefix. Zero bytes, zero runtime cost.
+//
+// Do NOT add `row_major`. Correctness depends on the CPU's row-major upload
+// being reinterpreted by HLSL's default column-major packing, with mul(M, v)
+// cancelling both transposes. `row_major` would silently transpose all four
+// cascade matrices with no compile error.
 cbuffer CBPerFrame : register(b1)
 {
-    float3 lightDir;       // Normalized direction TO the light
-    float  pad0;
-    float3 lightColor;
-    float  pad1;
-    float3 ambientColor;
-    float  pad2;
-    float3 eyePos;         // Camera world position
-    float  pad3;
-    // Camera basis; used by sky_ps.hlsl. Declared here too because both shaders
-    // bind the same b1 and the layouts must agree. Keep in sync with
-    // struct CBPerFrame in src/render/renderer.h, which is static_assert'd at
-    // 176 bytes - not 112, as this comment used to claim. 112 is the length of
-    // the PREFIX sky_ps.hlsl declares, and that prefix is the real constraint:
-    // CBPerFrame fields may only ever be APPENDED, never inserted, or sky_ps
-    // silently reads the wrong offsets.
-    float3 camRight;
-    float  tanHalfFovY;
-    float3 camUp;
-    float  aspect;
-    float3 camForward;
-    float  pad4;
-    float4x4 lightViewProj;
+    float3   lightDir           : packoffset(c0);    // Normalized direction TO the light
+    float    pad0               : packoffset(c0.w);
+    float3   lightColor         : packoffset(c1);
+    float    pad1               : packoffset(c1.w);
+    float3   ambientColor       : packoffset(c2);
+    float    pad2               : packoffset(c2.w);
+    float3   eyePos             : packoffset(c3);    // Camera world position
+    float    pad3               : packoffset(c3.w);
+    // Camera basis; used by sky_ps.hlsl, which binds the same b1.
+    float3   camRight           : packoffset(c4);
+    float    tanHalfFovY        : packoffset(c4.w);
+    float3   camUp              : packoffset(c5);
+    float    aspect             : packoffset(c5.w);
+    float3   camForward         : packoffset(c6);
+    float    pad4               : packoffset(c6.w);
+    // ---- frozen prefix ends at c7 / byte 112 -------------------------------
+    float4x4 lightViewProj[SHADOW_CASCADE_COUNT] : packoffset(c7);   // 112..367
+    float4   cascadeSplitRadius : packoffset(c23);                   // 368..383
+    float4   cascadeTexelWorld  : packoffset(c24);                   // 384..399
+    float4   cascadeFadeLo      : packoffset(c25);                   // 400..415 (reserved)
 };
 
 // Per-draw material record. Keep byte-identical with struct MaterialData in
@@ -96,7 +131,11 @@ SamplerState linearSampler : register(s0);
 // compares each of four texels against the reference depth and bilinearly
 // filters the four boolean results, so one SampleCmpLevelZero is already 2x2
 // percentage-closer filtering.
-Texture2D<float>          shadowMap     : register(t0, space1);
+// A Texture2DArray with one slice per cascade. This is the SM 5.1-compatible
+// cascade indexing form: the slice is a texture COORDINATE, not an addressed
+// dimension, so s1's OPAQUE_WHITE border still applies per-slice and an
+// out-of-footprint tap still reads as lit with no branch.
+Texture2DArray<float>     shadowMap     : register(t0, space1);
 SamplerComparisonState    shadowSampler : register(s1);
 
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
@@ -111,18 +150,45 @@ SamplerComparisonState    shadowSampler : register(s1);
 // the shadows visibly detaching from their casters.
 float ComputeShadow(float3 positionWS, float3 N, float NdotL)
 {
-    // World units per shadow texel: the frustum is kShadowExtent*2 wide across
-    // kShadowMapSize texels. Kept in sync with renderer.h by the numbers below
-    // being the only place either appears in this shader.
-    const float shadowExtent  = 24.0f;
-    const float shadowMapSize = 2048.0f;
-    const float texelWorld    = (shadowExtent * 2.0f) / shadowMapSize;
+    // Radial view distance. positionWS is camera-relative (RULE 1), so the
+    // camera IS the origin of this space and length() is the exact radial
+    // distance. Deliberately NOT distance(positionWS, eyePos): eyePos is
+    // hardwired to zero on the C++ side, so that form is correct only by
+    // accident and would break silently the moment a real camera position were
+    // written there. Also not input.positionCS.w, which the rasteriser has
+    // already reciprocated by the time a pixel shader sees it.
+    const float viewDist = length(positionWS);
+
+    // Select the tightest cascade containing this point, defaulting to the
+    // outermost. Written as three literal-indexed `if` statements rather than an
+    // [unroll] loop for two reasons: every cbuffer access stays a literal index
+    // and every table access a static swizzle (no dynamic subscript for FXC to
+    // reject), and selecting the MATRIX before the PCF kernel rather than
+    // duplicating the kernel per cascade keeps this at exactly 9
+    // SampleCmpLevelZero instructions. `[unroll] for(i) if (cascade==i) { 9 taps }`
+    // flattens to 36 with no warning. VERIFIED: fxc /Fc reports 9 sample_c_lz.
+    //
+    // Descending order with strict `<` and plain assignment (never `break`)
+    // means the tightest containing cascade wins, and the single exit FXC's
+    // X4000 analysis requires is preserved. core::SelectShadowCascade has the
+    // identical structure so the unit tests constrain this arithmetic.
+    float4x4 cascadeVP  = lightViewProj[SHADOW_CASCADE_COUNT - 1];
+    float    texelWorld = cascadeTexelWorld.w;
+    float    slice      = 3.0f;
+    if (viewDist < cascadeSplitRadius.z) { cascadeVP = lightViewProj[2]; texelWorld = cascadeTexelWorld.z; slice = 2.0f; }
+    if (viewDist < cascadeSplitRadius.y) { cascadeVP = lightViewProj[1]; texelWorld = cascadeTexelWorld.y; slice = 1.0f; }
+    if (viewDist < cascadeSplitRadius.x) { cascadeVP = lightViewProj[0]; texelWorld = cascadeTexelWorld.x; slice = 0.0f; }
+
+    // Beyond the last split this keeps cascade 3 and the border sampler returns
+    // lit. No early-out on viewDist: that would add a second, SPHERICAL cutoff
+    // alongside the square footprint boundary, and the two disagreeing is
+    // exactly the ring artifact that reads as a bug.
 
     const float slope  = saturate(1.0f - NdotL);
     const float offset = texelWorld * (1.0f + 3.0f * slope);
     float3 offsetPos   = positionWS + N * offset;
 
-    float4 lightClip = mul(lightViewProj, float4(offsetPos, 1.0f));
+    float4 lightClip = mul(cascadeVP, float4(offsetPos, 1.0f));
 
     // Single exit rather than early returns. FXC's flow analysis reports X4000
     // "potentially uninitialized" for a function whose returns sit inside
@@ -139,6 +205,12 @@ float ComputeShadow(float3 positionWS, float3 N, float NdotL)
         // Outside the frustum along Z there is no depth information; treat as
         // lit rather than shadowed. The XY case is handled by the sampler's
         // white border, so it needs no branch here.
+        //
+        // Because radial selection never hands a point to a cascade that does
+        // not contain it, this z-guard provably never trips for a selected
+        // point: light-space z lands in [1.546E, 3.454E] inside the [0.1, 5E]
+        // slab, i.e. ndc [0.309, 0.691]. It is retained purely as defence
+        // against a future perspective (spot/point) light.
         if (lightClip.z >= 0.0f && lightClip.z <= 1.0f)
         {
             // Clip space to texture space. Y flips because clip space is +Y up
@@ -149,7 +221,7 @@ float ComputeShadow(float3 positionWS, float3 N, float NdotL)
             // 3x3 grid of hardware-PCF taps: 9 taps, each already 2x2 filtered,
             // so the effective kernel is 4x4 texels. Enough to hide the texel
             // grid at this resolution without a separate blur pass.
-            const float texel = 1.0f / shadowMapSize;
+            const float texel = 1.0f / SHADOW_MAP_SIZE;
             float sum = 0.0f;
             [unroll]
             for (int y = -1; y <= 1; ++y)
@@ -158,7 +230,9 @@ float ComputeShadow(float3 positionWS, float3 N, float NdotL)
                 for (int x = -1; x <= 1; ++x)
                 {
                     sum += shadowMap.SampleCmpLevelZero(
-                        shadowSampler, shadowUV + float2(x, y) * texel, lightClip.z);
+                        shadowSampler,
+                        float3(shadowUV + float2(x, y) * texel, slice),
+                        lightClip.z);
                 }
             }
             result = sum / 9.0f;

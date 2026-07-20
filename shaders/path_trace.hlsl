@@ -39,7 +39,7 @@ cbuffer PerFrameConstants : register(b0, space0)
     uint     g_SamplesPerPixel;
     uint     g_StablePreview;
     uint     g_SeedIndex;       // Wall-clock dispatch counter — RNG decorrelation only
-    uint     g_Pad;
+    float    g_TanHalfFovY;     // tan(fovY/2) from the camera; see RTPerFrameConstants
 };
 
 struct MaterialData
@@ -102,6 +102,26 @@ Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
 Texture2D<float4> g_NormalTextures[64] : register(t0, space5);
 Texture2D<float4> g_OrmTextures[64]    : register(t0, space6);
 Texture2D<float4> g_EmissiveTextures[64] : register(t0, space7);
+// KNOWN DEFECT - no texture LOD. Every sample in this file uses
+// SampleLevel(..., 0), i.e. mip 0 regardless of distance, because a ray has no
+// screen-space derivatives to derive a mip from.
+//
+// Consequences, in order of how much they matter:
+//   1. Minified textures alias badly. Temporal accumulation partially hides it
+//      by averaging many samples per pixel, which means the cost shows up as
+//      slower convergence rather than as visible shimmer in a settled image.
+//   2. It diverges from the raster path, which uses anisotropic filtering over a
+//      full mip chain. Raster and DXR therefore disagree on texture appearance at
+//      distance, and by the project's own rule DXR is supposed to be the
+//      reference.
+//   3. It got materially worse when the ground plane grew to 200x200 world units,
+//      because far more of the scene is now minified.
+//
+// The fix is NOT to make this sampler anisotropic - anisotropy is selected across
+// mips, and mip 0 is forced here, so it would be inert. It needs an actual LOD:
+// ray cones or ray differentials, using the per-triangle UV area the engine
+// already uploads (g_TriangleUVs) to derive texel density per hit. That is its
+// own piece of work, tracked in ASSET_PIPELINE_SPEC.md.
 SamplerState g_TextureSampler : register(s0, space0);
 
 // =============================================================================
@@ -319,9 +339,12 @@ void RayGen()
     // Use inverse view-proj to unproject near and far points
     // Since we're passing viewProj (not inverse), we reconstruct differently:
     // Simple camera ray construction from position + screen UV
-    float fovRad = 70.0f * PI / 180.0f; // Must match camera FOV
+    // From the camera via the constant buffer, NOT a literal. This was
+    // 70 degrees hardcoded with a comment saying it must match the camera; it
+    // did match, so any future divergence would have been silent - the DXR path
+    // tracing one frustum while raster rasterises another.
     float aspect = float(g_RenderWidth) / float(g_RenderHeight);
-    float tanHalfFov = tan(fovRad * 0.5f);
+    float tanHalfFov = g_TanHalfFovY;
 
     // We need the view direction in world space. Since we don't have the
     // inverse VP easily, reconstruct from camera basis vectors encoded

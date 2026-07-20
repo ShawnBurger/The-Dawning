@@ -47,7 +47,15 @@ struct RTPerFrameConstants
     uint32_t samplesPerPixel;    // Camera/path samples per pixel per frame
     uint32_t stablePreview;      // Non-zero enables deterministic preview fill
     uint32_t seedIndex;          // Wall-clock dispatch counter — RNG decorrelation only
-    uint32_t pad;                // 16-byte cbuffer alignment
+    // tan(fovY/2), supplied by the camera rather than hardcoded in the shader.
+    // path_trace.hlsl used to compute this from a literal 70 degrees with a
+    // comment reading "Must match camera FOV" - a duplicated constant with
+    // nothing enforcing it. They did match, which is exactly why the drift would
+    // have been silent: change Camera::SetFOV and the DXR path keeps tracing the
+    // old frustum while raster follows the new one, so the two paths disagree
+    // about which pixels see what. Occupies the former alignment pad, so the
+    // layout is unchanged.
+    float tanHalfFovY;
 };
 
 // Must stay byte-identical to cbuffer PerFrameConstants in shaders/path_trace.hlsl.
