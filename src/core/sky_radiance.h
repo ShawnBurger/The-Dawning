@@ -45,11 +45,32 @@
 //
 // CLOSING IT COMPLETELY needs a GPU probe: evaluate DawningSkyRadiance in HLSL
 // for a fixed direction set, read the results back, and compare against
-// SkyRadiance here. That is specified as assertion 1.3 in IBL_DESIGN.md section
-// 11 Stage 1, it belongs in tools/smoke_test.ps1 rather than in a CPU-only unit
-// test, and it is NOT built yet. Until it is, the guarantee is the one stated
-// above and no stronger. Do not describe this file as verified against the
-// shader.
+// SkyRadiance here.
+//
+// THAT PROBE IS NOW BUILT. IBL_DESIGN.md section 11 Stage 1 assertion 1.3 ships
+// in render/environment_ibl.cpp: on every launch, in every mode, the engine
+// evaluates the SHIPPED HLSL for 64 directions on the GPU, reads the results
+// back, and compares them against SkyRadiance() below within 1e-4. The verdict
+// is the [SMOKE] ibl_sky_agreement marker and tools/smoke_test.ps1 asserts it.
+// Measured agreement on the reference machine is 3e-8.
+//
+// So the guarantee is now VALUE agreement, not merely agreement in time, and the
+// two mechanisms cover different failures:
+//
+//   the hash tripwire  catches "the HLSL changed and nobody looked at this file"
+//   the GPU probe      catches "the two compute different numbers", for ANY
+//                      reason - including the specific mistake of re-pinning the
+//                      hash by reflex and forgetting to mirror the twin
+//
+// WATCHED: with sky_common.hlsli edited and kPinnedHash re-pinned to match while
+// this twin was left alone, all 156 CPU unit tests PASS - including
+// Sky_TwinIsInStepWithShaderSource - and the GPU probe is the only thing that
+// fails. That is the hole this paragraph used to describe, demonstrated and then
+// closed.
+//
+// STILL NOT COVERED, so do not over-claim: the probe compares 64 directions, not
+// the whole sphere, and it runs only where a D3D12 device exists. The CPU-only
+// unit tests in tests/test_sky_energy.cpp remain the dense-sphere evidence.
 //
 // This translation unit is GPU-free on purpose (core/types.h and <cmath> only),
 // on the same sanctioned footing as core/shadow_cascades.cpp. Do not add a D3D12

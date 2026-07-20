@@ -25,6 +25,7 @@
 #include "d3d12_device.h"
 #include "gpu_draw_records.h"   // ObjectData / MaterialData / CBPerPass layouts
 #include "descriptor_allocator.h"
+#include "environment_ibl.h"
 #include "mesh.h"
 #include "camera.h"
 #include "texture.h"
@@ -163,6 +164,17 @@ class Renderer
 public:
     bool Init(D3D12Device& device);
     void Shutdown();
+
+    // Bakes the prefiltered environment cubemap if the sky revision has moved,
+    // publishes its SRV at kEnvCubeDescriptorIndex, and runs the Stage 1 GPU
+    // assertions. Opens and flushes its own command list, so it must be called
+    // OUTSIDE any ResetCommandList/ExecuteCommandLists pair - the App calls it
+    // beside InitializeScene, in the same style.
+    //
+    // Called from Init today. When the sky becomes dynamic this moves into
+    // BeginFrameResources, where the revision compare makes the static case one
+    // integer test per frame. Returns false when a Stage 1 assertion failed.
+    bool EnsureEnvironmentIBL(D3D12Device& device);
 
     // Call once per frame BEFORE any pass records anything - above the shadow
     // pass, and above the raster/path-tracing branch so an F1 toggle also lands
@@ -667,8 +679,38 @@ private:
     ComPtr<ID3D12Resource>       m_shadowReadback;
     UINT64                       m_shadowReadbackBytes = 0;
 
+    // ---- Environment IBL ---------------------------------------------------
+    // The prefiltered environment cubemap. Its SRV takes ONE reserved slot in
+    // m_textureHeap, immediately after the shadow map and by the identical
+    // mechanism: a fixed index below the allocator's firstIndex, so it is valid
+    // before any material exists and can never be recycled.
+    //
+    // COST, PLAINLY: usable material slots drop 126 -> 125. That is ~0.25 of a
+    // four-map PBR material, taking the practical ceiling from ~31.5 materials
+    // to ~31.25. It is the smallest possible bite out of the scarcest budget in
+    // the renderer, and it buys the largest missing piece of the lighting model.
+    // It does not change the ceiling's character or bring the bindless work
+    // forward.
+    //
+    // NOTHING SAMPLES IT YET. Stage 1 of docs/research/IBL_DESIGN.md builds and
+    // proves the resource; Stages 2-4 consume it. See environment_ibl.h.
+    static constexpr uint32_t kEnvCubeDescriptorIndex = 2;
+    EnvironmentIBL m_environmentIBL;
+
+    // Bumped whenever the sky changes; EnsureEnvironmentIBL rebakes when the
+    // cube's baked revision no longer matches. A COUNTER, not a bool, so a
+    // dynamic sky is an edit rather than a redesign (IBL_DESIGN.md section 5).
+    //
+    // NOTE FOR THE DAY THE SKY READS THE LIGHT: Renderer::Init runs before
+    // SetDirectionalLight, so prefiltering at Init is correct only while the sky
+    // is independent of the light - which it is today, because it has no sun
+    // disc. The moment DawningSkyRadiance consults the light direction,
+    // SetDirectionalLight MUST bump this counter, or the cube silently bakes the
+    // default light direction forever.
+    uint32_t m_skyRevision = 0;
+
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
-    // slot 1 the shadow map.
+    // slot 1 the shadow map, slot 2 the environment cube.
     static constexpr uint32_t kMaxRasterTextures = 128;
     ComPtr<ID3D12DescriptorHeap> m_textureHeap;
     uint32_t m_textureDescSize = 0;

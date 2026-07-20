@@ -27,6 +27,7 @@ set(CORE_SOURCES
     src/core/timer.cpp
     src/core/window.cpp
     src/core/shadow_cascades.cpp
+    src/core/sky_radiance.cpp
 )
 
 set(CORE_HEADERS
@@ -36,6 +37,7 @@ set(CORE_HEADERS
     src/core/timer.h
     src/core/window.h
     src/core/shadow_cascades.h
+    src/core/sky_radiance.h
 )
 
 set(ASSET_SOURCES
@@ -58,6 +60,7 @@ set(RENDER_SOURCES
     src/render/texture.cpp
     src/render/camera.cpp
     src/render/renderer.cpp
+    src/render/environment_ibl.cpp
     src/render/gpu_draw_records.cpp
     src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
@@ -81,6 +84,7 @@ set(RENDER_HEADERS
     src/render/rt_pipeline.h
     src/render/rt_texture_lod.h
     src/render/path_tracer.h
+    src/render/environment_ibl.h
 )
 
 set(SHADER_FILES
@@ -101,6 +105,9 @@ set(SHADER_FILES
     shaders/brdf_common.hlsli
     shaders/display_common.hlsli
     shaders/sky_common.hlsli
+    shaders/ibl_environment.hlsli
+    shaders/ibl_prefilter_ps.hlsl
+    shaders/ibl_probe_ps.hlsl
 )
 
 set(ECS_HEADERS

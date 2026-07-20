@@ -174,6 +174,52 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            opaque pass keeps early-Z in Release and the probe is still compiled
            into shipping builds; the cost is one extra PSO. The vertex shaders
            are not permuted - early-Z is a pixel-stage property
+           IMAGE-BASED LIGHTING IS AT STAGE 1 OF SIX
+           (docs/research/IBL_DESIGN.md section 11). Stage 1 builds the
+           prefiltered environment cubemap and proves it correct. It changes
+           NOTHING about the image, by design: no shader samples the cube yet,
+           and both smoke captures are statistically identical to the pre-IBL
+           run. The near-black metallic asset is NOT fixed yet - that lands in
+           Stages 2 and 3, which add the SH diffuse and split-sum specular terms
+           that replace basic_ps.hlsl's hemisphere ambient.
+           Built: a 128x128x6 R16G16B16A16_FLOAT cube, 8 mips, roughness =
+           mip/7, prefiltered from the PROCEDURAL sky. The source is closed-form,
+           so the prefilter pass takes NO SRV INPUT - every mip is an independent
+           integral of ground truth rather than of a downsampled copy of the one
+           above it, which removes the ping-pong and one descriptor. Baked at
+           startup behind a REVISION COUNTER, not a bool, so a day/night cycle is
+           an edit rather than a redesign.
+           Cost: ONE descriptor. The cube's SRV takes raster heap slot 2 and the
+           material allocator's firstIndex moved 2 -> 3, so usable material slots
+           are 126 -> 125. The raster root signature is UNCHANGED at 15 DWORDs -
+           nothing binds the cube yet; the +1 DWORD the design specifies belongs
+           to Stage 3. The prefilter has its own separate root signature.
+           CBPerFrame is untouched and the constant ring peak is still 1792.
+           VERIFICATION RUNS ON EVERY LAUNCH IN EVERY MODE, gated on nothing.
+           The prefilter happens once at startup, before the raster/RT branch
+           exists, so there is no frame to arm it on and no mode that can skip
+           it - which is the cheapest possible answer to the failure the shadow
+           and draw probes were both fixed for. Five GPU assertions, each
+           watched failing: the descriptor reservation (reported from the
+           allocator's LIVE firstIndex, since nothing samples the cube yet and a
+           slipped reservation would otherwise surface two stages later); a
+           direction ROUND TRIP that catches any permutation, sign flip or
+           v-flip in the cube face table; a SKY AGREEMENT probe comparing the
+           shipped HLSL against core::SkyRadiance; per-mip mean luminance; and
+           per-mip variance falling with roughness.
+           The sky-agreement probe is the one that mattered most. It closes the
+           gap src/core/sky_radiance.h documents in its own header - that the
+           hash tripwire "pins agreement in TIME, not in VALUE". WATCHED: edit
+           sky_common.hlsli, re-pin kPinnedHash to match, leave the twin alone,
+           and all 156 CPU tests pass while the HLSL and the twin genuinely
+           disagree. Only this probe fails.
+           Two vacuity guards, because a comparison neither side reached is not a
+           comparison: the probe target is cleared to a -1 poison and the shaders
+           write w=+1, so the written-slot count is asserted before the values
+           are; and the 64 query directions are asserted to cover all six
+           (dominant axis, sign) buckets, because a direction set degenerated to
+           64 copies of one direction round-trips PERFECTLY while testing one
+           sixth of the face table. Both were watched failing.
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
            and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a
