@@ -1008,19 +1008,22 @@ mutations in `basic_vs` object indexing, `shadow_vs` object indexing, and
 `basic_vs` material indexing each failed the harness with the expected mismatch;
 all mutations were reverted before validation.
 
-Reallocation stress is now part of the default raster smoke. The draw hint ramps
-during the run and capacity grows geometrically, producing 12 live replacements
-in the four-second Debug and Release checks, with the first replacement after
-frame 3. There is no `-ForceGrow` escape hatch left.
+Claude's default-path entity churn and in-flight counter are now combined with
+Codex's exact-first/geometric-repeated capacity growth. Both raster and RT smoke
+add 80 real renderables at frame 8, so each default run reports four structured-
+buffer replacements, including two while frames are in flight. The synthetic
+draw-hint ramp and `-ForceGrow` escape hatch are gone.
 
-Validated in the isolated Codex worktree with the real ignored Meshy corridor
-asset present: Debug and Release builds, 132 tests / 3,242 checks in each
-configuration, Debug stable/full, Release raster/stable/full, raster under GPU
-validation, and the three shader-mutation negative controls. The constant ring
-remains flat at 1,792 / 262,144 bytes and the probe reported zero mismatches.
+Validated after the combined merge in canonical `main`: Debug and Release
+builds, 134 tests / 3,256 checks in each configuration, Debug and Release raster,
+stable RT, and full RT, plus Debug raster under GPU validation. The constant ring
+remains flat at 1,792 / 262,144 bytes. Every mode reported four replacements,
+two in flight; raster reported `draw_probe=ok` with zero field-hash mismatches.
+The three shader-mutation negative controls had already failed as intended in
+the isolated integration worktree before this merge.
 
-Claude owns no conflicting lane for this work. The next lane after merge is the
-cooked-only `.tdmodel` runtime-to-GPU bridge; keep builds in separate worktree
+The next non-conflicting lanes are the cooked-only `.tdmodel` runtime-to-GPU
+bridge and Claude's RT texture-LOD work. Keep builds in separate worktree
 directories to avoid the PDB collision described above.
 
 # Historical checkpoint: Claude's initial GPU-side draw-index witness
