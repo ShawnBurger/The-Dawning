@@ -860,6 +860,17 @@ int App::RunMainLoop()
                 core::Log::Infof("[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u",
                                  m_renderer.ConstantRingPeakBytes(),
                                  m_renderer.ConstantRingCapacity());
+                // The number of ring bytes ONE CBPerFrame upload costs, aligned
+                // exactly the way UploadCB aligns it. The harness computes its
+                // flat ring budget from this instead of mirroring 512 as a
+                // literal, so growing CBPerFrame moves the budget with it
+                // rather than eating the budget's slack. What the gate is for is
+                // per-DRAW traffic leaking back into the ring; CBPerFrame's own
+                // size is already pinned by the static_asserts in renderer.h and
+                // does not need a second, silently-consumed guard.
+                core::Log::Infof("[SMOKE] cb_per_frame_bytes=%u",
+                                 render::AlignCBSize(
+                                     static_cast<uint32_t>(sizeof(render::CBPerFrame))));
                 core::Log::Infof("[SMOKE] rt_available=%s", m_rtAvailable ? "yes" : "no");
                 core::Log::Infof("[SMOKE] rt_active=%s",
                                  (m_usePathTracing && m_rtAvailable) ? "yes" : "no");
