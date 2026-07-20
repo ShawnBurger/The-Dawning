@@ -632,6 +632,36 @@ void RayGen()
         mat.roughness = clamp(mat.roughness, 0.04f, 1.0f);
         mat.metallic  = saturate(mat.metallic);
 
+        // Toksvig normal-variance widening, at the SINGLE POINT OF TRUTH for this
+        // path's roughness (IBL_DESIGN 9.5): mat.roughness below feeds NEE, the
+        // VNDF sample, and the stable-preview IBL mip. The filtered normal length
+        // is re-read from the SAME resource, uv and ray-cone LOD that ClosestHit's
+        // ApplyNormalMap already filtered through, so it is the exact filtered
+        // normal the shading normal came from - one extra tap rather than a second
+        // schedule, and it keeps the 32-byte payload untouched. length < 1 is the
+        // sub-pixel variance the filtering discarded; DawningToksvigRoughness folds
+        // it back and is the identity at length 1.
+        //
+        // THIS APPLIES TO THE FULL PATH TRACER TOO, deliberately: it runs this
+        // same material setup and filters the normal map through the same ray
+        // cone, so it has the identical roughness-understatement defect, and
+        // correcting it here keeps all three paths agreeing on the roughness a
+        // minified normal-mapped surface actually has rather than diverging. It
+        // does NOT touch the full tracer's ENVIRONMENT sampling - the miss-shader
+        // sky integral is untouched; only the BRDF roughness moves. The reference's
+        // movement from this is reported rather than hidden.
+        float preToksvigRoughness = mat.roughness;
+        if (mat.useNormalTexture != 0 && mat.normalTextureIndex < 64)
+        {
+            uint tvIndex = NonUniformResourceIndex(mat.normalTextureIndex);
+            uint tvWidth, tvHeight;
+            g_NormalTextures[tvIndex].GetDimensions(tvWidth, tvHeight);
+            float tvLod = RayConeTextureLod(lodBase, tvWidth, tvHeight);
+            float3 tvNormal = g_NormalTextures[tvIndex]
+                                  .SampleLevel(g_TextureSampler, payload.uv, tvLod).xyz * 2.0f - 1.0f;
+            mat.roughness = DawningToksvigRoughness(mat.roughness, length(tvNormal));
+        }
+
         // Emission is added along the current throughput and terminates nothing:
         // a ray that lands on an emitter still continues, it just deposits this
         // first. Matches basic_ps.hlsl. Emitters are NOT sampled by NEE, so they
@@ -754,10 +784,14 @@ void RayGen()
             }
 
             // ORM occlusion multiplies the environment only, never direct light -
-            // the same rule basic_ps.hlsl states, inherited unchanged, including
-            // the same known imprecision about applying diffuse AO to specular.
-            envDiffuse  *= ambientOcclusion * g_IblParams.y;
-            envSpecular *= ambientOcclusion * g_IblParams.y;
+            // the same rule basic_ps.hlsl states, inherited unchanged. Diffuse
+            // takes the raw hemispherical AO; SPECULAR takes the Lagarde remap of
+            // the same AO by NdotV and roughness, identical to the raster path, so
+            // the two renderers apply the same visibility to the same lobe. It is
+            // an identity (== ao) at roughness 1 and where no AO map ships.
+            float specularOcclusion = DawningSpecularOcclusion(envNdotV, mat.roughness, ambientOcclusion);
+            envDiffuse  *= ambientOcclusion   * g_IblParams.y;
+            envSpecular *= specularOcclusion  * g_IblParams.y;
 
             // The (bounce == 0 ? 1 : 0.25) damper is KEPT, on purpose. It is a
             // preview heuristic rather than a magic constant standing in for a
@@ -804,8 +838,18 @@ void RayGen()
                 DawningWriteIBLConsumption(g_IBLProbe, envDiffuse, envSpecular,
                                            radiance - radianceBeforeEnv, sampledCube);
                 if (sampledCube)
+                {
                     DawningWriteIBLIdentity(g_IBLProbe, g_EnvCube, g_EnvSampler,
                                             envR, envRadiance);
+                    // The specular-fidelity witnesses, from the EXACT scalars this
+                    // path applied: specularOcclusion multiplied envSpecular and
+                    // mat.roughness (post-Toksvig) fed the env mip, with
+                    // preToksvigRoughness its value before the widening. Same
+                    // writer, same reduction, same floors as the raster probe.
+                    DawningWriteIBLSpecFidelity(g_IBLProbe,
+                                                specularOcclusion, ambientOcclusion,
+                                                mat.roughness, preToksvigRoughness);
+                }
             }
         }
         // Full path tracing adds no ad-hoc ambient. BSDF rays that escape the scene

@@ -78,7 +78,9 @@ struct IBLConsumeProbeBlock
     uint32_t mirrorLuminanceMaxQ = 0;   // 24  the mip-0 fetch, identity witness
     uint32_t envZeroPixels       = 0;   // 28  invocations that got no environment light
     uint32_t envInFinalMaxQ      = 0;   // 32  finalColor - direct - emission
-    uint32_t reserved[7]         = {};  // 36..63
+    uint32_t specOccAboveAoQ     = 0;   // 36  max(specularOcclusion - ambientOcclusion)
+    uint32_t toksvigRoughIncQ    = 0;   // 40  max(shadingRoughness - preToksvigRoughness)
+    uint32_t reserved[5]         = {};  // 44..63
 };
 static_assert(sizeof(IBLConsumeProbeBlock) == 64,
               "IBLConsumeProbeBlock must match DAWNING_IBL_PROBE_BYTES in "
@@ -147,6 +149,34 @@ constexpr float kIBLConsumeEnvFloor = 0.001f;
 constexpr float kIBLConsumeZeroCeiling = 0.001f;
 
 // -----------------------------------------------------------------------------
+// The specular-fidelity floors. LIVENESS bounds on the two fixes added in this
+// stage: a floor the live frame must clear and the control frame must not, so
+// "the fix is present" cannot be satisfied by a value that rounds to nothing.
+// -----------------------------------------------------------------------------
+
+// max(specularOcclusion - ambientOcclusion) over the live frame. This is > 0
+// only where a surface carries an AO map (ambientOcclusion < 1) AND a specular
+// lobe narrower than a hemisphere (roughness < 1); the Lagarde remap lifts the
+// occlusion above raw AO there. The scene's ground and cube checker-ORM textures
+// supply the AO variation; the Meshy corridor does NOT (it ships no AO map, so
+// its ambientOcclusion is 1 and its specularOcclusion is exactly 1, contributing
+// zero to this maximum - the honest statement that the remap is an identity on an
+// asset with no occlusion data).
+//
+// MEASURED, and set below the measurement, NOT tightened until green.
+constexpr float kIBLSpecOccFloor = 0.005f;
+
+// max(shadingRoughness - preToksvigRoughness) over the live frame. This is > 0
+// wherever a normal-mapped surface is minified enough that the filtered tangent
+// normal has length < 1 - the discarded sub-pixel variance the widening folds
+// back in. The scene's ground, cube and corridor all carry normal maps and all
+// minify toward the horizon, so the maximum is dominated by whichever is both
+// low-roughness and steeply minified on the probe frame.
+//
+// MEASURED, and set below the measurement, NOT tightened until green.
+constexpr float kIBLToksvigFloor = 0.005f;
+
+// -----------------------------------------------------------------------------
 // The reduction's output. One struct per probed frame.
 // -----------------------------------------------------------------------------
 struct IBLConsumeValidation
@@ -166,12 +196,15 @@ struct IBLConsumeValidation
     float radianceMax        = 0.0f;
     float mirrorLuminanceMax = 0.0f;
     float skyRelError        = 0.0f;
+    float specOccAboveAo     = 0.0f;   // the specular-occlusion remap's departure from AO
+    float toksvigRoughInc    = 0.0f;   // the Toksvig roughness widening
 
     // Per-claim verdicts, so a marker names which one broke rather than making
     // the reader diff eight numbers.
     bool reachedOk    = false;   // the pixel counts - the vacuity guard
     bool consumptionOk = false;  // the three environment terms
     bool identityOk   = false;   // the cube really is the environment cube
+    bool occlusionOk  = false;   // the two specular-fidelity fixes are present
     bool ok           = false;
 };
 

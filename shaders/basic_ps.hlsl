@@ -294,7 +294,15 @@ struct PSInput
     float2 uv         : TEXCOORD2;
 };
 
-float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textureIndex)
+// `outFilteredLength` reports the length of the FILTERED tangent-space normal
+// BEFORE it is normalised - the Toksvig variance signal. A flat texel reads back
+// a unit vector (length 1); a minified texel where the hardware aniso mip has
+// averaged disagreeing normals reads back a SHORT vector, and 1 - length is the
+// sub-pixel variance the filtering discarded. It is measured on the decoded
+// normal before the z >= 0 clamp, because that clamp lengthens the vector and
+// would mask the very shortening being measured. See DawningToksvigRoughness.
+float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textureIndex,
+                      out float outFilteredLength)
 {
     float3 N = normalize(normalWS);
     float3 dpdx = ddx(positionWS);
@@ -324,6 +332,7 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
     }
 
     float3 tangentNormal = materialTextures[textureIndex].Sample(linearSampler, uv).xyz * 2.0 - 1.0;
+    outFilteredLength = length(tangentNormal);
     tangentNormal.z = max(tangentNormal.z, 0.0);
     float3 mappedNormal = tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N;
     return dot(mappedNormal, mappedNormal) > 1e-8 ? normalize(mappedNormal) : N;
@@ -344,8 +353,12 @@ float4 main(PSInput input) : SV_TARGET
 #endif
 
     float3 N = normalize(input.normalWS);
+    // 1.0 = a flat surface with no filtered variance, so Toksvig is the identity
+    // for a surface with no normal map. Set by ApplyNormalMap when there is one.
+    float filteredNormalLength = 1.0;
     if (mat.useNormalTexture != 0)
-        N = ApplyNormalMap(N, input.positionWS, input.uv, mat.normalTextureIndex);
+        N = ApplyNormalMap(N, input.positionWS, input.uv, mat.normalTextureIndex,
+                           filteredNormalLength);
 
     float3 V = normalize(eyePos - input.positionWS);
     float3 L = normalize(lightDir);
@@ -379,6 +392,15 @@ float4 main(PSInput input) : SV_TARGET
     // drive roughness below the value the GGX denominator is conditioned for.
     materialRoughness = clamp(materialRoughness, 0.04, 1.0);
     materialMetallic  = saturate(materialMetallic);
+
+    // Toksvig normal-variance widening, at the SINGLE POINT OF TRUTH (IBL_DESIGN
+    // 9.5): this is the one named roughness local, and both the direct BRDF below
+    // and the IBL mip selection read it. Folding the lost normal variance in HERE
+    // is what makes an understated roughness stop sampling too sharp a mip and
+    // too tight a specular lobe. Identity when filteredNormalLength == 1, so a
+    // surface with no normal map or a perfectly flat one is untouched.
+    float preToksvigRoughness = materialRoughness;
+    materialRoughness = DawningToksvigRoughness(materialRoughness, filteredNormalLength);
 
     // Cook-Torrance direct lighting
     float3 F0 = DawningF0(baseColor, materialMetallic);
@@ -445,18 +467,21 @@ float4 main(PSInput input) : SV_TARGET
     }
 
     // ORM occlusion multiplies ENVIRONMENT terms only and never direct light -
-    // occluding NEE would double-count the shadow ray. That is today's rule and
-    // IBL inherits it unchanged.
+    // occluding NEE would double-count the shadow ray. That rule predates IBL and
+    // is preserved: `direct` above is already gated by ComputeShadow and receives
+    // no occlusion here.
     //
-    // Known imprecision, kept DELIBERATELY: applying the diffuse AO map to
-    // envSpecular is not physically correct - specular occlusion depends on
-    // roughness and view direction, and reusing diffuse AO over-darkens smooth
-    // surfaces. The principled fix is a specular-occlusion term. It is not done
-    // here because the term it replaces already multiplied by ambientOcclusion,
-    // and changing that in the same stage that changes everything else would make
-    // any luminance shift unattributable.
-    envDiffuse  *= ambientOcclusion * iblParams.y;
-    envSpecular *= ambientOcclusion * iblParams.y;
+    // Diffuse takes the raw AO map: irradiance is a hemispherical integral, and a
+    // hemispherical occlusion factor is the right visibility for it. SPECULAR does
+    // NOT - its lobe is narrower than a hemisphere at low roughness, so raw AO
+    // over-darkens a reflection that is very likely unoccluded. specularOcclusion
+    // is the Lagarde remap of the SAME AO by NdotV and roughness, and it is an
+    // identity (== ao) at roughness 1 where the two lobes coincide. On an asset
+    // that ships no AO map, ambientOcclusion is 1 and this is exactly 1 - the fix
+    // changes nothing there. See DawningSpecularOcclusion.
+    float specularOcclusion = DawningSpecularOcclusion(NdotV, materialRoughness, ambientOcclusion);
+    envDiffuse  *= ambientOcclusion   * iblParams.y;
+    envSpecular *= specularOcclusion  * iblParams.y;
 
     // Emission is added last and is unaffected by lighting, occlusion or the
     // Fresnel split: it is radiance the surface produces, not radiance it
@@ -496,8 +521,17 @@ float4 main(PSInput input) : SV_TARGET
         DawningWriteIBLConsumption(iblConsumeProbe, envDiffuse, envSpecular,
                                    finalColor - direct - emission, sampledCube);
         if (sampledCube)
+        {
             DawningWriteIBLIdentity(iblConsumeProbe, envCube, envSampler,
                                     envR, envRadiance);
+            // The specular-fidelity witnesses, from the EXACT scalars the shading
+            // above applied: specularOcclusion multiplied envSpecular and
+            // materialRoughness fed both the direct BRDF and the IBL mip. Gated
+            // on sampledCube so the control frame leaves both words at zero.
+            DawningWriteIBLSpecFidelity(iblConsumeProbe,
+                                        specularOcclusion, ambientOcclusion,
+                                        materialRoughness, preToksvigRoughness);
+        }
     }
 #endif
 

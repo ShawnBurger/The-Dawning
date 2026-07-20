@@ -82,7 +82,27 @@
 #define DAWNING_IBL_PROBE_MIRROR_LUM_MAX    24u
 #define DAWNING_IBL_PROBE_ENV_ZERO_PIXELS   28u
 #define DAWNING_IBL_PROBE_ENV_IN_FINAL_MAX  32u
-// 36..63 reserved. The block is a fixed 64 bytes so a word appended later does
+// The specular-fidelity words, claimed by the two fixes in this same stage. Each
+// is a MAX over the live-frame pixels of a quantity that is EXACTLY ZERO when its
+// fix is absent, so the negative control asserts them zero and a "simplification"
+// that reverts either fix sends its word to zero on the live frame too.
+//
+//   SPEC_OCC_ABOVE_AO  max(specularOcclusion - ambientOcclusion). The old code
+//                      multiplied envSpecular by the diffuse AO; the remap
+//                      departs from it upward wherever the specular lobe is
+//                      narrower than a hemisphere. Reverting to `* ao` makes the
+//                      applied occlusion equal AO, so this difference is 0.
+//   TOKSVIG_ROUGH_INC  max(shadingRoughness - preToksvigRoughness). The widening
+//                      the filtered-normal length drives into the roughness the
+//                      BRDF and the IBL mip both read. Deleting the widening makes
+//                      the shading roughness equal its pre-Toksvig value, so this
+//                      difference is 0.
+//
+// Both are written ONLY inside the cube-sampled branch, so they are untouched on
+// the control frame exactly like the identity words - see DawningWriteIBLSpecFidelity.
+#define DAWNING_IBL_PROBE_SPEC_OCC_ABOVE_AO 36u
+#define DAWNING_IBL_PROBE_TOKSVIG_ROUGH_INC 40u
+// 44..63 reserved. The block is a fixed 64 bytes so a word appended later does
 // not change the resource size, the zero-fill, or the readback footprint.
 #define DAWNING_IBL_PROBE_BYTES             64u
 
@@ -171,6 +191,29 @@ void DawningWriteIBLIdentity(RWByteAddressBuffer probe,
                          DawningIBLProbeQuantise(DawningIBLProbeLuminance(mirror)), ignored);
     probe.InterlockedMax(DAWNING_IBL_PROBE_RADIANCE_MAX,
                          DawningIBLProbeQuantise(DawningIBLProbeLuminance(radiance)), ignored);
+}
+
+// The specular-fidelity half. `specOcclusion` MUST be the exact scalar the caller
+// multiplied envSpecular by, and `ambientOcclusion` the scalar it multiplied
+// envDiffuse by, so their difference witnesses the remap the shipped shading
+// applied - not a second evaluation done for the probe. `shadingRoughness` MUST
+// be the roughness the direct BRDF and the IBL mip both read, and
+// `preToksvigRoughness` the value it held before the widening, so their
+// difference witnesses the roughness the shading consumed.
+//
+// Called only where the cube was sampled, so the control frame - which does not
+// sample - leaves both words at their zero-fill, and the reduction asserts that.
+void DawningWriteIBLSpecFidelity(RWByteAddressBuffer probe,
+                                 float specOcclusion, float ambientOcclusion,
+                                 float shadingRoughness, float preToksvigRoughness)
+{
+    uint ignored;
+    probe.InterlockedMax(DAWNING_IBL_PROBE_SPEC_OCC_ABOVE_AO,
+                         DawningIBLProbeQuantise(max(specOcclusion - ambientOcclusion, 0.0f)),
+                         ignored);
+    probe.InterlockedMax(DAWNING_IBL_PROBE_TOKSVIG_ROUGH_INC,
+                         DawningIBLProbeQuantise(max(shadingRoughness - preToksvigRoughness, 0.0f)),
+                         ignored);
 }
 
 #endif // DAWNING_IBL_CONSUME_PROBE_HLSLI

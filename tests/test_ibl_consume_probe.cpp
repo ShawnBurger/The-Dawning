@@ -40,6 +40,12 @@ render::IBLConsumeProbeBlock HealthyLiveBlock()
     b.radianceMaxQ        = q(0.420258f);
     b.mirrorLuminanceMaxQ = q(0.421326f);
     b.skyRelErrMaxQ       = q(0.000977f);
+    // The two specular-fidelity words, MEASURED on the raster live probe frame:
+    // the specular-occlusion remap departed from raw AO by up to 0.192459, and
+    // Toksvig widened the shading roughness by up to 0.791718 on the most steeply
+    // minified normal-mapped texel. Both are exactly zero on the control frame.
+    b.specOccAboveAoQ     = q(0.192459f);
+    b.toksvigRoughIncQ    = q(0.791718f);
     b.shadedPixels        = 1491649;
     b.cubeSamples         = 1491649;
     // MEASURED 0, but the fixture uses a nonzero value on purpose: the verdict
@@ -75,6 +81,7 @@ TEST_CASE(IBLConsume_MeasuredLiveBlockPasses)
     CHECK(v.reachedOk);
     CHECK(v.consumptionOk);
     CHECK(v.identityOk);
+    CHECK(v.occlusionOk);
     CHECK(v.ok);
 }
 
@@ -84,6 +91,7 @@ TEST_CASE(IBLConsume_MeasuredControlBlockPasses)
     CHECK(v.reachedOk);
     CHECK(v.consumptionOk);
     CHECK(v.identityOk);
+    CHECK(v.occlusionOk);
     CHECK(v.ok);
 }
 
@@ -262,4 +270,66 @@ TEST_CASE(IBLConsume_ALiveFrameWhereNoPixelGotEnvironmentLightFails)
     auto b = HealthyLiveBlock();
     b.envZeroPixels = b.shadedPixels;
     CHECK(!render::ReduceIBLConsumeProbe(b, true).reachedOk);
+}
+
+// =============================================================================
+// The two specular-fidelity fixes are independent claims, each with teeth
+// =============================================================================
+// Zeroing either word must fail the live verdict, because each is the exact
+// witness of one fix reverting to the code it replaced:
+//   specOccAboveAo   -> envSpecular *= specularOcclusion reverted to *= AO, so
+//                       the remap no longer departs from raw AO anywhere
+//   toksvigRoughInc  -> the roughness widening deleted, so shading roughness
+//                       equals its pre-Toksvig value everywhere
+// A verdict that dropped either clause would pass with that fix absent, which is
+// the failure this whole file exists to prevent - here for the two new fixes.
+TEST_CASE(IBLConsume_EachSpecularFidelityFixIsCheckedSeparately)
+{
+    {
+        auto b = HealthyLiveBlock();
+        b.specOccAboveAoQ = 0;   // specular occlusion reverted to raw AO
+        const auto v = render::ReduceIBLConsumeProbe(b, true);
+        CHECK(!v.occlusionOk);
+        CHECK(!v.ok);
+        // The other claims are untouched: reverting the occlusion remap does not
+        // change which cube was sampled or how much energy reached the image.
+        CHECK(v.consumptionOk);
+        CHECK(v.identityOk);
+    }
+    {
+        auto b = HealthyLiveBlock();
+        b.toksvigRoughIncQ = 0;   // Toksvig widening deleted
+        const auto v = render::ReduceIBLConsumeProbe(b, true);
+        CHECK(!v.occlusionOk);
+        CHECK(!v.ok);
+        CHECK(v.consumptionOk);
+        CHECK(v.identityOk);
+    }
+}
+
+// =============================================================================
+// The control frame must leave the specular-fidelity words untouched
+// =============================================================================
+// The two words are written only inside the cube-sampled branch, which the
+// control frame does not take. So on the control they must read exactly zero -
+// not merely small. A control block that carried a nonzero spec-fidelity word
+// would mean the writer ran outside the branch it is gated on, which would make
+// the live floors beside it prove nothing. Judged as the control, a live block
+// (nonzero words) must therefore be rejected.
+TEST_CASE(IBLConsume_ControlRejectsNonZeroSpecularFidelityWords)
+{
+    // A clean control block passes.
+    CHECK(render::ReduceIBLConsumeProbe(HealthyControlBlock(), false).occlusionOk);
+
+    // One with a stray spec-occlusion word does not - the branch leaked.
+    {
+        auto b = HealthyControlBlock();
+        b.specOccAboveAoQ = 1;   // a single quantised step is enough
+        CHECK(!render::ReduceIBLConsumeProbe(b, false).occlusionOk);
+    }
+    {
+        auto b = HealthyControlBlock();
+        b.toksvigRoughIncQ = 1;
+        CHECK(!render::ReduceIBLConsumeProbe(b, false).occlusionOk);
+    }
 }

@@ -26,6 +26,8 @@ IBLConsumeValidation ReduceIBLConsumeProbe(const IBLConsumeProbeBlock& block,
     v.radianceMax        = IBLProbeDequantise(block.radianceMaxQ);
     v.mirrorLuminanceMax = IBLProbeDequantise(block.mirrorLuminanceMaxQ);
     v.skyRelError        = IBLProbeDequantise(block.skyRelErrMaxQ);
+    v.specOccAboveAo     = IBLProbeDequantise(block.specOccAboveAoQ);
+    v.toksvigRoughInc    = IBLProbeDequantise(block.toksvigRoughIncQ);
 
     if (iblExpectedActive)
     {
@@ -68,6 +70,20 @@ IBLConsumeValidation ReduceIBLConsumeProbe(const IBLConsumeProbeBlock& block,
         v.identityOk = (v.skyRelError < kIBLConsumeSkyTolerance) &&
                        (v.mirrorLuminanceMax > kIBLConsumeEnvFloor) &&
                        (v.radianceMax        > kIBLConsumeEnvFloor);
+
+        // The two specular-fidelity fixes. Each word is a maximum over the live
+        // frame of a quantity that is EXACTLY ZERO when its fix is reverted:
+        //   specOccAboveAo  -> reverting envSpecular *= specularOcclusion back to
+        //                      *= ambientOcclusion makes the applied occlusion
+        //                      equal AO, so the departure collapses to 0
+        //   toksvigRoughInc -> deleting the roughness widening makes the shading
+        //                      roughness equal its pre-Toksvig value, so the
+        //                      increase collapses to 0
+        // Both are witnessed from the exact scalars the shipped shading applied,
+        // so a probe that stayed green with the fix absent is not possible here -
+        // which is the failure this whole file exists to prevent.
+        v.occlusionOk = (v.specOccAboveAo  > kIBLSpecOccFloor) &&
+                        (v.toksvigRoughInc > kIBLToksvigFloor);
     }
     else
     {
@@ -93,9 +109,17 @@ IBLConsumeValidation ReduceIBLConsumeProbe(const IBLConsumeProbeBlock& block,
         v.identityOk = (block.skyRelErrMaxQ == 0) &&
                        (block.mirrorLuminanceMaxQ == 0) &&
                        (block.radianceMaxQ == 0);
+
+        // The specular-fidelity words are written only inside the cube-sampled
+        // branch, which the control frame does not take, so they must be
+        // untouched at their zero-fill. Asserting the raw Q == 0 rather than a
+        // dequantised bound proves the writer was skipped, not merely small -
+        // the same shape the identity words use one line up.
+        v.occlusionOk = (block.specOccAboveAoQ == 0) &&
+                        (block.toksvigRoughIncQ == 0);
     }
 
-    v.ok = v.reachedOk && v.consumptionOk && v.identityOk;
+    v.ok = v.reachedOk && v.consumptionOk && v.identityOk && v.occlusionOk;
     return v;
 }
 
