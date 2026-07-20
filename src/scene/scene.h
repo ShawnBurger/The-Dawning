@@ -106,6 +106,7 @@ private:
     // System implementations
     void SystemVelocity(double dt);
     void SystemRotation(double dt);
+    void SystemFlightPhysics(double dt);
 
     ecs::Registry        m_registry;
     ResourceManager      m_resources;
