@@ -30,6 +30,21 @@ Build a seamless space simulation inspired by Star Citizen and Starfield while r
 12. Tooling
 13. Production Infrastructure
 
+## Goal Additions (2026-07-19)
+
+- **Generated content via Meshy AI.** Assets are produced through the Meshy API
+  rather than hand-authored. Credentials come from `MESHY_API_KEY` in the
+  environment; the repository is public and must never contain the key.
+- **Fully realized interiors.** Every boardable ship and station has a walkable
+  interior continuous with its exterior, in the same double-precision world. No
+  loading screens, no separate interior origin.
+- **Realistic graphics.** Photorealism is binding, not aspirational. The DXR path
+  is the reference; raster/DXR divergence is a defect.
+
+See `ASSET_PIPELINE_SPEC.md` for the staged plan. Phase 2 is the current phase
+and it blocks every phase after it, because the engine cannot load a mesh from
+disk today.
+
 ## Scope Improvements
 - Ship physicalization with modular subsystems.
 - Complete station-to-space-to-station gameplay loop.

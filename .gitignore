@@ -41,3 +41,24 @@ CTestTestfile.cmake
 # Smoke-test capture output
 smoke_capture.ppm
 *.ppm
+
+# Secrets. NEVER commit API keys - this repository is PUBLIC.
+# Meshy and any other service credentials live in a local .env that git ignores;
+# tools read them from the environment, never from a tracked file.
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+
+# Generated assets: binaries stay OUT of git history.
+# This repository is public and git history is permanent, so committing many-MB
+# AI-generated GLBs and 4K textures is a decision that cannot be walked back.
+# Manifests ARE tracked, so what was generated and with which parameters stays
+# reproducible and reviewable. Revisit with Git LFS if binaries need to ship.
+assets/generated/**/*.glb
+assets/generated/**/*.fbx
+assets/generated/**/*.png
+
+# Workflow scratch worktrees and agent session state
+.claude/

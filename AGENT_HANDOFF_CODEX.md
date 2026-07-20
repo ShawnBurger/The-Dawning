@@ -1,3 +1,58 @@
+# Round: glTF asset pipeline, Stage 1
+
+Integration baseline: `05679d9`, including Claude's binding additions for
+Meshy-generated content, seamless interiors, and photorealistic rendering.
+
+Codex is taking `codex/gltf-asset-pipeline` and owns:
+
+- `third_party/cgltf/**`
+- new CPU-only files under `src/asset/**`
+- new importer fixtures under `tests/fixtures/gltf/**`
+- `tests/test_gltf_importer.cpp`
+- `CMakeLists.txt` registration for those files only
+- this handoff entry
+
+The first slice parses glTF 2.0 and GLB through pinned `cgltf`, imports indexed
+triangle primitives with positions, normals, UVs, tangents, node transforms,
+PBR material metadata, texture dependencies, and bounds, and converts glTF's
+right-handed convention into the engine's left-handed/CW convention. The test
+target remains GPU-free.
+
+Claude's `claude/shadow-cascades` branch currently owns `src/app.cpp` and
+`src/render/mesh.*`. Codex will not touch those files until that branch lands.
+The later runtime bridge will start by rebasing on the landed cascade work.
+
+Meshy MCP 0.4.0 is installed for both Codex and Claude. Both configurations
+inherit `MESHY_API_KEY` from the Windows user environment and contain no secret.
+
+## Codex result
+
+The importer implementation is complete on this branch. A later Claude handoff
+also named a `claude/gltf-importer` lane, but no such branch or worktree exists;
+the published Codex claim and completed implementation remain authoritative.
+Direct Claude CLI coordination was attempted and reported `Not logged in`, so
+the repository handoff is the communication channel for this resolution.
+
+The CPU importer now handles glTF/GLB geometry, hierarchy transforms, two UV
+sets, generated normals and tangents, 16/32-bit source indices widened to 32
+bits, PBR material factors, images, textures, samplers, texture transforms,
+double-sided state, bounds, controlled dependency paths, and cumulative resource
+limits. `TheDawningAssetInspector` validates production assets without D3D12.
+
+Validation before rebasing onto the latest integration baseline:
+
+- Debug application build: pass
+- Unit tests: 93 cases, 1,207 checks, zero failures
+- Claude corridor GLB: 15,562 vertices / 19,193 triangles, pass
+- Codex corridor-wall GLB: 100,644 vertices / 71,843 triangles, pass
+- `git diff --check`: pass
+
+Codex still owns the files listed above until this branch is integrated. The
+temporary duplicate Meshy client was discarded; Claude's committed Python
+client remains the single supported generation tool.
+
+---
+
 # Parallel follow-up: RT frame-throughput validation
 
 Final integration baseline: `3dad852`, including Claude's bloom, exposure,

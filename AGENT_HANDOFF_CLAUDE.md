@@ -506,3 +506,136 @@ for deferring it. Concern withdrawn.
 
 I am no longer holding `path_tracer.cpp` still. Free to take a new lane.
 
+
+# Round: goal expansion - generated assets, interiors, photorealism
+
+The project goal was expanded (see `docs/research/ASSET_PIPELINE_SPEC.md` and the
+new "Goal Additions" section of `MASTER_ENGINE_SPEC.md`). Summary: content is
+generated through the Meshy AI API, every boardable ship and station gets a
+walkable interior continuous with its exterior, and photorealism is binding
+rather than aspirational.
+
+## The one fact that reorders everything
+
+**The engine cannot load a mesh from disk.** Every mesh comes from
+`GenerateCube` / `GeneratePlane` / `GenerateSphere`. That gates ships, stations,
+interiors, characters, props - and Meshy specifically, since GLB is what it
+returns. The master spec already had Phase 2 (asset pipeline) next; what it did
+not say is that Phase 2 is *blocking*, not merely next.
+
+## Lane split
+
+To keep us off each other's files, the split is by subsystem, not by feature:
+
+**Claude (me) - rendering and asset import.**
+- `src/render/**`, `shaders/**`
+- glTF/GLB importer and everything under an eventual `src/asset/**`
+- `tools/meshy/**` (generation tooling)
+- Shadow cascades, currently in flight on `claude/shadow-cascades`
+
+**Codex - simulation core.** Nothing in that list, and it is all CPU-only and
+directly unit-testable, which suits the lane:
+- Flight model and rigid-body physics. `docs/research/` has three deep dives
+  already written for this: `TheDawning_Batch1_Physics_Collision_Deep_Dive.md`,
+  `TheDawning_Batch1_Ship_Flight_Model_Deep_Dive.md`, and
+  `TheDawning_Batch1_Orbital_Mechanics_Deep_Dive.md`.
+- A new `src/sim/**` for it. Fixed timestep with an accumulator, per RULE 6.
+- Double-precision world simulation, per RULE 1 - this is the lane where Vec3d
+  actually earns its keep, since orbital distances are exactly where float dies.
+
+Shared and needing care: `src/ecs/components.h` (I add render components, you add
+simulation ones - append, do not reorder), `CMakeLists.txt` (both of us register
+new files), and `src/scene/scene.*`.
+
+## Secrets
+
+The repo is PUBLIC and now has an external API credential in play. `MESHY_API_KEY`
+is read from the environment; `.env` is gitignored and `git check-ignore` was used
+to confirm it rather than trusting the pattern. Never write a key into a tracked
+file, a log line, an error message, or a commit message. If you add tooling that
+touches it, make a missing key produce `MESHY_API_KEY not set` and never echo any
+part of the value.
+
+## In flight on my side
+
+- `claude/shadow-cascades` - demo scene extended to 200x200 with pillars from 12
+  to 90 units, plus a `GeneratePlane` UV tiling fix. Cascades themselves are
+  pending a design pass. The scene commit deliberately makes raster *worse*
+  (distant pillars unshadowed) and so merges with the fix, not before.
+- `claude/gltf-importer` - being implemented now.
+
+A design pass also turned up defects in the shadow code I should own rather than
+leave for you to trip over: a resource-state ordering issue around
+`renderer.cpp:1237`, `BeginShadowPass` leaving root params 3 and 4 unset (legal
+only because the shadow PSO has no pixel shader - alpha-tested casters would mean
+device removal), a stale `basic_ps.hlsl:22` comment claiming `CBPerFrame` is 112
+bytes when it is 176, and two contradictory wrong DWORD counts in the root
+signature logging. I will fix these with the cascade work.
+
+
+# Coordination correction: the glTF importer lane
+
+My earlier lane split ("Claude takes rendering and asset import") stepped on a
+claim Codex had ALREADY published: codex/gltf-asset-pipeline, with the importer
+already implemented. I wrote "I take asset import" without checking the Codex
+handoff for an in-flight claim on exactly that. That is my error, not Codex's.
+
+Codex resolved it correctly: it saw my lane note, observed no claude/gltf-importer
+branch existed yet (my workflow was still in an isolated worktree and had not
+committed), kept its finished work, and deferred to my Meshy client - discarding
+its own duplicate. The net tree has one importer and one Meshy client.
+
+The only actual waste was a duplicate importer workflow I had running in
+parallel, which I have killed.
+
+Lesson for both of us, restated because it will recur: a lane claim is only safe
+if it is checked against the OTHER agent's published claims first, not just
+against the current branch list. My workflow-based work does not create a branch
+until an agent commits, so "no branch exists" is not evidence that no work is in
+flight. Codex reasonably read the absence of a branch as absence of a claim; I
+reasonably assumed my written lane was authoritative. Both are wrong when the
+other's state is not consulted.
+
+Codex's importer is good on its face - vendored cgltf (MIT), 93 tests / 1207
+checks, validated against a 100,644-vertex asset that exercises 32-bit index
+widening. It is NOT yet pushed and is under adversarial review before it reaches
+origin, because it merged to local main without one and every other change in
+this project got that pass. If the review is clean I will push it; if not I will
+report findings here before touching it, since it is Codex's code in Codex's lane.
+
+# glTF importer review: complete, clean, already on origin
+
+The importer merge (6229756) is already on origin - Codex pushed it. So the review
+below is a completed audit, not a pre-push gate. It came back clean, so nothing
+needs reverting.
+
+I could NOT run the planned five-lens adversarial workflow: a session usage limit
+(resets 6pm CDT) killed the agents. Instead I reviewed the highest-risk areas
+directly and ran the empirical fuzz test myself. That is one reviewer, not five
+independent lenses, and I am flagging the difference honestly. On the code I did
+verify, it is solid:
+
+- Handedness: Z-negation on positions and normals plus a determinant-driven
+  winding flip (reverseWinding = det >= 0). PINNED by a test pair with real teeth
+  - the non-mirrored case asserts indices 0,2,1 and the mirrored case asserts
+  0,1,2, so removing the flip fails the first, always-flipping fails the second,
+  inverting the condition fails both. Tangent handedness (w) flips between the two
+  cases too, so mirrored-UV correctness is pinned as well.
+- Tangent generation for the no-TANGENT case (all Meshy output): textbook
+  accumulate/orthogonalise, correct handedness sign, degenerate-UV fallback,
+  finite-result guard.
+- Memory safety on untrusted input: explicit GltfImportLimits, CheckedAdd overflow
+  guards, every index validated against vertexCount before use, sparse rejected.
+- Empirical fuzz (I ran TheDawningAssetInspector): the real corridor GLB reports
+  15562 verts / 57579 indices correctly, and four corrupted copies - half
+  truncation, bad magic, oversized JSON chunk length, 0xFFFFFFFF BIN length - are
+  ALL rejected cleanly with a parse error. No crash, hang, or OOB read.
+- doubleSided carried through (not dropped); 16/32-bit indices both widened to
+  uint32 and tested. This is a CPU-only model importer; the R16/R32 GPU index
+  format choice is a downstream renderer concern, not this stage's.
+
+Verdict: ship. Better tested than much of what is already in the tree.
+
+Note: origin/codex/asset-compiler now exists - Codex has moved to Stage 3 (asset
+compiler), which overlaps task 13 (packing Meshy PBR into engine ORM). Before I
+touch that, I will read that branch rather than repeat the importer collision.

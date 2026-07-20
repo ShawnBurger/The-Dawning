@@ -36,6 +36,15 @@ set(CORE_HEADERS
     src/core/window.h
 )
 
+set(ASSET_SOURCES
+    src/asset/gltf_importer.cpp
+)
+
+set(ASSET_HEADERS
+    src/asset/model_data.h
+    src/asset/gltf_importer.h
+)
+
 set(RENDER_SOURCES
     src/render/d3d12_device.cpp
     src/render/shader_utils.cpp
@@ -93,6 +102,7 @@ set(ECS_HEADERS
 set(SCENE_SOURCES
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
+    src/scene/model_loader.cpp
 )
 
 set(SCENE_HEADERS
@@ -109,6 +119,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_gltf_importer.cpp
 )
 
 set(TEST_HEADERS
@@ -123,12 +134,26 @@ add_executable(TheDawningV3 WIN32
     ${APP_HEADERS}
     ${CORE_SOURCES}
     ${CORE_HEADERS}
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
     ${RENDER_SOURCES}
     ${RENDER_HEADERS}
     ${ECS_HEADERS}
     ${SCENE_SOURCES}
     ${SCENE_HEADERS}
     ${SHADER_FILES}
+)
+
+add_executable(TheDawningAssetInspector
+    tools/asset_inspector.cpp
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
+)
+
+target_include_directories(TheDawningAssetInspector PRIVATE src)
+
+set_target_properties(TheDawningAssetInspector PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
 )
 
 set_target_properties(TheDawningV3 PROPERTIES
@@ -172,6 +197,7 @@ add_custom_command(TARGET TheDawningV3 POST_BUILD
 # Source groups for Visual Studio
 # =============================================================================
 source_group("Core"    FILES ${CORE_SOURCES} ${CORE_HEADERS})
+source_group("Asset"   FILES ${ASSET_SOURCES} ${ASSET_HEADERS})
 source_group("Render"  FILES ${RENDER_SOURCES} ${RENDER_HEADERS})
 source_group("ECS"     FILES ${ECS_HEADERS})
 source_group("Scene"   FILES ${SCENE_SOURCES} ${SCENE_HEADERS})
@@ -195,6 +221,12 @@ if(MSVC)
         /Zi           # Debug info
         /permissive-  # Strict conformance
     )
+
+    target_compile_options(TheDawningAssetInspector PRIVATE
+        /W4
+        /WX
+        /permissive-
+    )
 endif()
 
 # =============================================================================
@@ -202,7 +234,8 @@ endif()
 # =============================================================================
 # CPU-only by construction. This target links NO graphics libraries and creates
 # no device, so it runs on any machine (including a GPU-less CI runner). It
-# covers only the GPU-independent headers: src/core/types.h and src/ecs/*.h.
+# covers only GPU-independent code: src/core/types.h, src/ecs/*.h, and the
+# CPU-side asset importer.
 #
 # Do NOT add src/render/* or src/scene/* here — scene/ holds a render::PathTracer
 # by value and would drag D3D12 into the test binary.
@@ -219,6 +252,8 @@ add_executable(TheDawningTests
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
 )
 
 set_target_properties(TheDawningTests PROPERTIES

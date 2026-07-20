@@ -1,0 +1,62 @@
+{
+    "schema_version":  1,
+    "provider":  "Meshy",
+    "endpoint":  "/openapi/v2/text-to-3d",
+    "generated_at_utc":  "2026-07-19T21:04:25.2998408Z",
+    "request_hash":  "71225a5151f5a83de00a5966b7d593c7e0616a393fd4e03f96ee50ace18a1a1d",
+    "parameters":  {
+                       "prompt":  "Photorealistic hard-surface modular spaceship corridor wall panel, rectangular three meters wide by 2.8 meters tall, realistic aerospace aluminum and composite construction, recessed maintenance panels, cable conduits, subtle industrial wear, PBR-ready, straight planar back and clean tileable edges, no floor, no ceiling, no doorway, no text, no logos, no floating parts",
+                       "model_type":  "standard",
+                       "ai_model":  "latest",
+                       "target_polycount":  80000,
+                       "should_remesh":  true,
+                       "refine":  true,
+                       "texture_prompt":  "Photorealistic brushed aerospace aluminum and dark carbon composite, physically plausible roughness and metallic variation, subtle edge wear and maintenance grime, neutral studio lighting baked out, no text or logos",
+                       "hd_texture":  true,
+                       "auto_size":  false,
+                       "origin_at":  "bottom"
+                   },
+    "preview_task":  {
+                         "id":  "019f7c2b-e3e7-7019-8e47-716c0ac440b0",
+                         "type":  "text-to-3d-preview",
+                         "status":  "SUCCEEDED",
+                         "progress":  100,
+                         "created_at":  1784494680849,
+                         "started_at":  1784494680873,
+                         "finished_at":  1784494851481,
+                         "consumed_credits":  20
+                     },
+    "final_task":  {
+                       "id":  "019f7c2e-9678-7081-918d-7e18e88c3056",
+                       "type":  "text-to-3d-refine",
+                       "status":  "SUCCEEDED",
+                       "progress":  100,
+                       "created_at":  1784494857205,
+                       "started_at":  1784494857246,
+                       "finished_at":  1784495049132,
+                       "consumed_credits":  10
+                   },
+    "validation":  {
+                       "importer":  "TheDawningAssetInspector",
+                       "status":  "passed",
+                       "primitives":  1,
+                       "vertices":  100644,
+                       "triangles":  71843,
+                       "materials":  1,
+                       "textures":  4,
+                       "images":  4,
+                       "samplers":  4,
+                       "bounds_min":  [ -0.9507, -0.5579, -0.9553 ],
+                       "bounds_max":  [ 0.9489, 0.5542, 0.9568 ],
+                       "art_status":  "prototype",
+                       "art_notes":  "Usable modular wall silhouette and panel breakup; material variation and authored functional detail remain below the final photoreal target."
+                   },
+    "files":  {
+                  "model":  "model.glb",
+                  "model_sha256":  "c52c0cb067a96ed9625c2d1dda89b049970c3f0c5e47c460d0802842c92bcccb",
+                  "preview":  "preview.glb",
+                  "preview_sha256":  "4a3e0a40461940a86bb536f9d58c81ca3165bbc7a215ccfedfb822b748137473",
+                  "thumbnail":  "thumbnail.png",
+                  "thumbnail_sha256":  "b374965f43d8ee982eeaefb8fdba3b5d9ddcecca0c69bc01b8c37f1eee617f51"
+              }
+}
