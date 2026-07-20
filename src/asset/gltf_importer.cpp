@@ -112,6 +112,19 @@ bool IsControlledRelativeUri(const char* uri)
     return true;
 }
 
+void AddSourceDependency(
+    const char* uri,
+    GltfDependencyKind kind,
+    std::vector<GltfSourceDependency>& dependencies)
+{
+    if (!uri || IsDataUri(uri))
+        return;
+    std::string decoded(uri);
+    cgltf_decode_uri(decoded.data());
+    decoded.resize(std::strlen(decoded.c_str()));
+    dependencies.push_back({ std::move(decoded), kind });
+}
+
 float Determinant3x3(const core::Mat4x4& matrix)
 {
     return matrix.m[0][0] * (matrix.m[1][1] * matrix.m[2][2] - matrix.m[1][2] * matrix.m[2][1])
@@ -967,6 +980,16 @@ GltfImportResult ImportParsedData(
     GltfImportResult result;
     result.status = GltfImportStatus::Success;
     result.model.name = sourcePath.empty() ? "memory" : sourcePath.stem().string();
+    for (cgltf_size i = 0; i < data->buffers_count; ++i)
+    {
+        AddSourceDependency(data->buffers[i].uri, GltfDependencyKind::Buffer,
+                            result.sourceDependencies);
+    }
+    for (cgltf_size i = 0; i < data->images_count; ++i)
+    {
+        AddSourceDependency(data->images[i].uri, GltfDependencyKind::Image,
+                            result.sourceDependencies);
+    }
     ImportImages(*data, result.model);
     ImportSamplersAndTextures(*data, result.model);
     ImportMaterials(*data, result.model);

@@ -176,6 +176,59 @@ from the engine at runtime and never on the smoke path.
 format that loads without parsing JSON. The master spec asks for this explicitly.
 Includes texture conversion into the formats the engine already loads.
 
+### Stage 3 cooked model contract
+
+The first runtime format is `.tdmodel`, magic `TDMODEL\0`, format version 1. It
+is deliberately an engine-owned format rather than serialized C++ structs. All
+integers are fixed-width little-endian values, all offsets and sizes are 64-bit,
+and sections begin at 8-byte-aligned offsets. This makes layout independent of
+compiler padding and gives the loader enough information to reject overflow,
+overlap, truncation, and unsupported versions before allocating model arrays.
+
+The header contains source SHA-256, file size, header size, section count, and a
+CRC32 over the entire file with the CRC field treated as zero. Its six required
+versioned sections are:
+
+1. metadata and canonical dependency identities
+2. primitives, vertices, indices, and bounds
+3. glTF PBR materials and texture bindings
+4. image metadata and embedded source bytes
+5. sampler state
+6. texture-to-image and texture-to-sampler references
+
+Dependencies are sorted by URI before serialization. Each records URI, byte
+size, and SHA-256; duplicate source references are canonicalized. External
+buffer and image URIs are percent-decoded and hashed, and external images are
+embedded so moving the cooked artifact does not sever its textures. The source
+file also has a SHA-256 in the header. The offline compiler validates memory,
+writes a process-unique temporary sibling, reloads that temporary file, and only
+then atomically replaces the destination. Concurrent publishers retry bounded
+Windows sharing conflicts. The loader has configurable caps for file and
+section sizes, strings, geometry, tables, dependencies, and embedded images;
+the builder enforces the same caps before constructing its sections.
+
+Texture bytes are currently preserved in their source PNG/JPEG/KTX/DDS form,
+which the existing engine loaders understand. GPU block compression and mipmap
+generation are intentionally not claimed by this slice; they belong in a later
+texture-cooking revision and must bump the relevant section version when added.
+Likewise, this stage produces and validates CPU `ImportedModel` data but does not
+yet upload cooked geometry to D3D12. That runtime bridge follows after the active
+renderer ownership lane lands.
+
+Production measurements on 2026-07-20:
+
+- corridor section: 15,562 vertices, 19,193 triangles, 9,533,104 cooked bytes
+- corridor wall prototype: 100,644 vertices, 71,843 triangles, 34,929,120 cooked bytes
+- repeated corridor compilation: byte-identical SHA-256 output
+
+CPU tests cover known SHA-256 vectors, deterministic canonical serialization,
+complete data round trip, whole-file corruption, truncation, bad magic,
+unsupported versions, symmetric builder/loader limits, CRC-correct allocation
+bombs, atomic preservation, external dependency identity, and invalid source
+models. Both production Meshy GLBs compile and reload successfully without
+D3D12. A two-process publication stress test produced a valid byte-identical
+artifact with no orphan temporary files.
+
 **Stage 4 - Content directory and manifest.** Data-driven scene definition so
 adding an asset does not mean editing `app.cpp`. This is the "data-driven systems"
 principle the master spec lists and the point at which the demo scene stops being

@@ -38,10 +38,23 @@ struct GltfImportLimits
     uint32_t maxNodeDepth = 256;
 };
 
+enum class GltfDependencyKind : uint8_t
+{
+    Buffer,
+    Image
+};
+
+struct GltfSourceDependency
+{
+    std::string uri;
+    GltfDependencyKind kind = GltfDependencyKind::Buffer;
+};
+
 struct GltfImportResult
 {
     GltfImportStatus status = GltfImportStatus::ParseError;
     ImportedModel model;
+    std::vector<GltfSourceDependency> sourceDependencies;
     std::vector<std::string> warnings;
     std::string error;
 

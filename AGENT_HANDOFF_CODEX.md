@@ -9,6 +9,8 @@ Codex is taking `codex/asset-compiler` and owns:
 - new `src/asset/cooked_model.*`
 - new `tools/asset_compiler.cpp`
 - new `tests/test_asset_compiler.cpp`
+- source-dependency identity additions in `src/asset/gltf_importer.*`
+- focused dependency test addition in `tests/test_gltf_importer.cpp`
 - CMake registration for those files and targets only
 - Stage 3 sections of `docs/research/ASSET_PIPELINE_SPEC.md`
 - this handoff entry
@@ -19,6 +21,32 @@ a versioned deterministic runtime binary, verifies integrity before allocation,
 loads it without JSON parsing, and records source/dependency identity. It will
 not touch `src/app.*`, `src/render/**`, `shaders/**`, or smoke tooling. Runtime
 GPU upload remains deferred until the cascade lane is integrated.
+
+## Codex result
+
+Stage 3 now has a deterministic, versioned `.tdmodel` compiler and CPU loader.
+The binary contract uses explicit little-endian fields, 64-bit offsets and
+sizes, six versioned sections, whole-file CRC32, source/dependency SHA-256,
+canonical dependency ordering, configurable allocation limits, and atomic
+replacement after temporary-file verification. It hashes external buffers and
+images, embeds external images, blocks source-path aliases, and uses unique
+temporary siblings with bounded Windows sharing retries. The standalone
+`TheDawningAssetCompiler` imports GLTF/GLB, cooks it, writes it, and
+reload-verifies the result without D3D12.
+
+Validation before integration:
+
+- Debug compiler and tests build: pass
+- Unit tests: 104 cases, 1,425 checks, zero failures
+- Corridor section: 15,562 vertices / 19,193 triangles / 9,533,104 bytes, pass
+- Corridor wall: 100,644 vertices / 71,843 triangles / 34,929,120 bytes, pass
+- repeated production compile: byte-identical SHA-256, pass
+- two-process same-output publication: both pass, byte-identical result
+- same-file case alias overwrite attempt: refused before source read
+
+Source image bytes remain in engine-readable source formats. BC texture
+transcoding/mipmap generation and the D3D12 upload bridge are explicitly later
+work, not hidden inside this result.
 
 ---
 

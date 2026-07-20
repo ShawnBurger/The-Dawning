@@ -37,10 +37,12 @@ set(CORE_HEADERS
 )
 
 set(ASSET_SOURCES
+    src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
 )
 
 set(ASSET_HEADERS
+    src/asset/cooked_model.h
     src/asset/model_data.h
     src/asset/gltf_importer.h
 )
@@ -119,6 +121,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_asset_compiler.cpp
     tests/test_gltf_importer.cpp
 )
 
@@ -150,9 +153,20 @@ add_executable(TheDawningAssetInspector
     ${ASSET_HEADERS}
 )
 
+add_executable(TheDawningAssetCompiler
+    tools/asset_compiler.cpp
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
+)
+
 target_include_directories(TheDawningAssetInspector PRIVATE src)
+target_include_directories(TheDawningAssetCompiler PRIVATE src)
 
 set_target_properties(TheDawningAssetInspector PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
+)
+
+set_target_properties(TheDawningAssetCompiler PROPERTIES
     VS_GLOBAL_VcpkgApplocalDeps false
 )
 
@@ -223,6 +237,12 @@ if(MSVC)
     )
 
     target_compile_options(TheDawningAssetInspector PRIVATE
+        /W4
+        /WX
+        /permissive-
+    )
+
+    target_compile_options(TheDawningAssetCompiler PRIVATE
         /W4
         /WX
         /permissive-
