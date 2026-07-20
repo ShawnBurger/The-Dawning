@@ -143,6 +143,12 @@ void Scene::SystemRotation(double dt)
 // Iterates all entities with Transform + MeshInstance + Material and issues
 // draw calls through the renderer. Checks mesh handle validity and visibility.
 // =============================================================================
+uint32_t Scene::MeshInstanceCount() const
+{
+    auto* meshPool = m_registry.GetPool<ecs::MeshInstance>();
+    return meshPool ? meshPool->Count() : 0u;
+}
+
 void Scene::RenderShadowCasters(render::D3D12Device& device,
                                render::Renderer& renderer,
                                const core::Vec3d& cameraPosition)

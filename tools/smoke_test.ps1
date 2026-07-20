@@ -164,6 +164,38 @@ if ([uint32]$markers["cb_ring_pct"] -ge 75) {
            $markers["cb_ring_pct"], $markers["cb_ring_peak"], $markers["cb_ring_capacity"])
 }
 
+# Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
+# walk the same MeshInstance pool in the same order with identical
+# visible/Transform/Material filters, so they issue the same number of draws.
+# That is what makes 2 x MeshInstanceCount() sufficient capacity for the shared
+# object buffer - and it is enforced nowhere in the code. Asserting the
+# INVARIANT rather than a magic entity count means it survives the demo scene
+# changing, and a future divergence (frustum culling, a castsShadow flag, an LOD
+# cut) surfaces here as a test failure instead of as a wrong-looking frame.
+foreach ($k in @("shadow_records", "main_records", "object_records_peak", "object_capacity")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+$shadowRecords = [uint32]$markers["shadow_records"]
+$mainRecords   = [uint32]$markers["main_records"]
+if ($shadowRecords -ne $mainRecords) {
+    throw ("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+           "The two scene walks no longer issue the same draws." -f $shadowRecords, $mainRecords)
+}
+if ($shadowRecords -lt 1) {
+    throw "No per-object records were written by either pass; the raster path drew nothing."
+}
+# The object buffer is shared by both passes at disjoint index ranges, so its
+# peak occupancy must be exactly the two counts summed, and must fit.
+if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
+    throw ("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+           "overlapping in the object buffer rather than taking disjoint ranges." -f `
+           $markers["object_records_peak"], ($shadowRecords + $mainRecords))
+}
+if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
+    throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
+           $markers["object_records_peak"], $markers["object_capacity"])
+}
+
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
     throw "Scene shutdown did not retire any raster texture descriptors."
 }
@@ -270,6 +302,50 @@ if (!$NoCapture) {
     if ($meanLum -gt 245)     { throw "Capture is blown out (mean luminance $([math]::Round($meanLum,1)))." }
     if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
+
+    # -------------------------------------------------------------------------
+    # Golden-value gate for the RASTER capture
+    # -------------------------------------------------------------------------
+    # The loose thresholds above catch catastrophic failure and nothing else.
+    # They are not enough: forcing every draw to read per-object record 0 - the
+    # single highest-prior failure mode of per-draw structured-buffer indexing,
+    # and precisely what happens if someone "simplifies" the root constant to
+    # SV_InstanceID at SM 5.1 - renders the whole scene with the first entity's
+    # transform, and STILL passes every check above. That was verified, not
+    # assumed, by building both mutations and watching the harness pass.
+    #
+    # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
+    # so the capture is deterministic (confirmed identical across repeated runs):
+    #
+    #   correct                              mean 128.3   buckets 59
+    #   shadow_vs objectBuffer[0]            mean 129.0   buckets 58
+    #   basic_vs  objectBuffer[0]            mean 130.0   buckets 25
+    #
+    # A +/-0.5 band on the mean catches both (0.7 and 1.7 off), and the bucket
+    # count catches both outright. Raster only: the path-traced capture depends
+    # on accumulation depth and is not a golden-value candidate.
+    #
+    # This IS meant to trip on a deliberate lighting or scene change. When it
+    # does, re-measure and update the two constants here - do not widen the band
+    # until it stops failing, which would disarm exactly what it is for.
+    if ($RasterOnly) {
+        $goldenMeanLum  = 128.3
+        $goldenBuckets  = 59
+        $meanTolerance  = 0.5
+
+        $fixHint = "The rendered image changed. If that was intended, re-measure and update the golden values in this script."
+
+        if ([math]::Abs($meanLum - $goldenMeanLum) -gt $meanTolerance) {
+            $msg = "Raster capture mean luminance is {0:N1}, expected {1:N1} +/- {2:N1}. {3}" -f `
+                   $meanLum, $goldenMeanLum, $meanTolerance, $fixHint
+            throw $msg
+        }
+        if ($distinct -ne $goldenBuckets) {
+            $msg = "Raster capture has {0} distinct colour buckets, expected {1}. {2}" -f `
+                   $distinct, $goldenBuckets, $fixHint
+            throw $msg
+        }
+    }
 }
 
 if ($RasterOnly) {

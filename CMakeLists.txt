@@ -52,6 +52,7 @@ set(RENDER_SOURCES
     src/render/texture.cpp
     src/render/camera.cpp
     src/render/renderer.cpp
+    src/render/gpu_draw_records.cpp
     src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
@@ -67,6 +68,7 @@ set(RENDER_HEADERS
     src/render/texture.h
     src/render/camera.h
     src/render/renderer.h
+    src/render/gpu_draw_records.h
     src/render/debug_overlay.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
@@ -120,6 +122,7 @@ set(TEST_SOURCES
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
     tests/test_gltf_importer.cpp
+    tests/test_gpu_draw_records.cpp
 )
 
 set(TEST_HEADERS
@@ -252,6 +255,12 @@ add_executable(TheDawningTests
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
+    # GPU-facing per-draw record layouts and their sizing arithmetic. Safe here
+    # despite living under src/render: gpu_draw_records.h deliberately includes
+    # no D3D12 header, precisely so these layouts can be tested on a machine
+    # with no device. Do NOT add renderer.cpp or anything else from src/render.
+    src/render/gpu_draw_records.cpp
+    src/render/gpu_draw_records.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

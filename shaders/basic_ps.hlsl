@@ -33,7 +33,19 @@ cbuffer CBPerFrame : register(b1)
     float4x4 lightViewProj;
 };
 
-cbuffer CBMaterial : register(b2)
+// Per-draw material record. Keep byte-identical with struct MaterialData in
+// src/render/gpu_draw_records.h, which static_asserts the size and every
+// offset. A root SRV is a bare GPU virtual address with no descriptor, so there
+// is no StructureByteStride for the runtime to check against the 80 bytes FXC
+// computes here - these two declarations are the only thing keeping the layouts
+// together.
+//
+// Field for field the old CBMaterial (b2). No member straddles a 16-byte
+// boundary, so cbuffer packing and StructuredBuffer tight packing agree
+// exactly: the bytes did not move when this left the constant buffer, only the
+// register did. The DXR path already carries the same 80-byte shape as a
+// StructuredBuffer element in path_trace.hlsl.
+struct MaterialData
 {
     float4 albedo;         // Base color (RGB) + alpha
     float  roughness;      // 0 = mirror, 1 = matte
@@ -48,7 +60,23 @@ cbuffer CBMaterial : register(b2)
     float  emissiveStrength;
     uint   useEmissiveTexture;
     uint   emissiveTextureIndex;
-    uint2  cbMaterialPad;
+    uint2  materialPad;
+};
+StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
+
+// Which record this draw owns. Declared identically in basic_vs.hlsl and
+// shadow_vs.hlsl; the vertex stage reads objectIndex, this stage reads
+// materialIndex. Both arrive in one root parameter, set by a single
+// SetGraphicsRoot32BitConstants per draw.
+//
+// The index is a root constant and therefore wave-uniform BY CONSTRUCTION,
+// which matters below: FXC at SM 5.1 has no NonUniformResourceIndex, so
+// materialTextures[mat.albedoTextureIndex] must be uniform across the wave.
+// One draw call per entity keeps it that way for free.
+cbuffer CBDrawIndex : register(b3)
+{
+    uint objectIndex;
+    uint materialIndex;
 };
 
 // Size comes from Renderer::kMaxRasterTextures, passed as a define at compile
@@ -186,9 +214,11 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
 
 float4 main(PSInput input) : SV_TARGET
 {
+    MaterialData mat = materialBuffer[materialIndex];
+
     float3 N = normalize(input.normalWS);
-    if (useNormalTexture != 0)
-        N = ApplyNormalMap(N, input.positionWS, input.uv, normalTextureIndex);
+    if (mat.useNormalTexture != 0)
+        N = ApplyNormalMap(N, input.positionWS, input.uv, mat.normalTextureIndex);
 
     float3 V = normalize(eyePos - input.positionWS);
     float3 L = normalize(lightDir);
@@ -200,19 +230,19 @@ float4 main(PSInput input) : SV_TARGET
     float VdotH = saturate(dot(V, H));
 
     // Base color from material albedo * vertex color * optional albedo texture
-    float3 baseColor = albedo.rgb * input.color.rgb;
-    if (useAlbedoTexture != 0)
-        baseColor *= materialTextures[albedoTextureIndex].Sample(linearSampler, input.uv).rgb;
+    float3 baseColor = mat.albedo.rgb * input.color.rgb;
+    if (mat.useAlbedoTexture != 0)
+        baseColor *= materialTextures[mat.albedoTextureIndex].Sample(linearSampler, input.uv).rgb;
 
     // Packed occlusion / roughness / metallic (glTF: AO=R, rough=G, metal=B).
     // MODULATES the material scalars rather than replacing them, so those stay
     // usable as per-instance tints - which is what glTF specifies.
-    float materialRoughness = roughness;
-    float materialMetallic  = metallic;
+    float materialRoughness = mat.roughness;
+    float materialMetallic  = mat.metallic;
     float ambientOcclusion  = 1.0;
-    if (useOrmTexture != 0)
+    if (mat.useOrmTexture != 0)
     {
-        float3 orm = materialTextures[ormTextureIndex].Sample(linearSampler, input.uv).rgb;
+        float3 orm = materialTextures[mat.ormTextureIndex].Sample(linearSampler, input.uv).rgb;
         ambientOcclusion  = orm.r;
         materialRoughness *= orm.g;
         materialMetallic  *= orm.b;
@@ -254,9 +284,9 @@ float4 main(PSInput input) : SV_TARGET
     // Fresnel split: it is radiance the surface produces, not radiance it
     // reflects. It is also NOT a light source - nothing else in the scene is
     // brightened by it.
-    float3 emission = emissive * emissiveStrength;
-    if (useEmissiveTexture != 0)
-        emission *= materialTextures[emissiveTextureIndex].Sample(linearSampler, input.uv).rgb;
+    float3 emission = mat.emissive * mat.emissiveStrength;
+    if (mat.useEmissiveTexture != 0)
+        emission *= materialTextures[mat.emissiveTextureIndex].Sample(linearSampler, input.uv).rgb;
 
     // Combine
     float3 finalColor = direct + ambientDiffuse + ambientSpecular + emission;
@@ -276,5 +306,5 @@ float4 main(PSInput input) : SV_TARGET
     // to 255 by ~1000, so nothing visible is lost.
     finalColor = min(finalColor, 65504.0);
 
-    return float4(finalColor, albedo.a * input.color.a);
+    return float4(finalColor, mat.albedo.a * input.color.a);
 }

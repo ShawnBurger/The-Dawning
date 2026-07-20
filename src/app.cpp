@@ -790,6 +790,25 @@ int App::RunMainLoop()
                         "[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u cb_ring_pct=%u",
                         ringPeak, ringCap, ringPct);
                 }
+
+                // Per-draw structured-buffer occupancy. shadow_records and
+                // main_records are the two passes' disjoint slices of the object
+                // buffer; they must be equal, because RenderShadowCasters and
+                // RenderEntities walk the same pool with identical filters. That
+                // parity is what makes 2 x MeshInstanceCount() sufficient object
+                // capacity, and it is enforced nowhere else - so assert the
+                // invariant rather than a magic entity count that breaks when the
+                // demo scene changes.
+                core::Log::Infof(
+                    "[SMOKE] object_records_peak=%u material_records_peak=%u "
+                    "object_capacity=%u material_capacity=%u "
+                    "shadow_records=%u main_records=%u",
+                    m_renderer.ObjectRecordsPeak(),
+                    m_renderer.MaterialRecordsPeak(),
+                    m_renderer.ObjectBufferCapacity(),
+                    m_renderer.MaterialBufferCapacity(),
+                    m_renderer.ShadowRecords(),
+                    m_renderer.MainRecords());
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }
@@ -1124,7 +1143,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // path-tracing branch never calls BeginFrame at all, so the slot also went
     // stale across RT frames and the first shadow pass after an F1 toggle back
     // to raster wrote at whatever offset the last raster frame left behind.
-    m_renderer.BeginFrameResources(m_device);
+    m_renderer.BeginFrameResources(m_device, m_scene.MeshInstanceCount());
 
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
 
