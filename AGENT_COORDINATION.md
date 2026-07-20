@@ -580,13 +580,13 @@ Claude already owns Stage 0; Codex owns the playable ship and the next sequentia
 asset/render lanes. The current order is:
 
 1. Merge this coordination contract.
-2. In parallel: Claude completes Stage 0 coordinate/reference-frame work while
-   Codex builds the first playable-ship vertical slice.
+2. In parallel: Claude builds the active-system N-body core on the merged Stage 0
+   foundation while Codex builds the first playable-ship vertical slice.
 3. Codex closes the remaining glTF/content-pipeline gap after the playable ship
    reaches review; do not run two Codex implementation lanes at once.
 4. Codex takes the next scoped shadow/rendering improvement after the glTF lane.
-5. Claude proceeds from Stage 0 into the conservative active-system N-body core
-   and its numerical gates.
+5. Claude continues the later relativistic, dilation, atmosphere, and FTL stages
+   after the N-body core reaches review.
 6. Route flight assist through real actuator limits and expose thruster state.
 7. Add collision/close-encounter policy before production N-body activation.
 
@@ -605,7 +605,8 @@ asset/render lanes. The current order is:
 - Interface contract: Claude reviewed the committed document read-only
 - Acceptance gates: diff check, exact staged inventory, and Claude approval passed
 - Negative controls: confirm canonical `main` staged files remain untouched
-- Latest commit: `333786e`, acknowledged and approved by Claude
+- Latest commit: branch head; Claude approved the content at pre-rebase
+  `333786e` (content-equivalent review commit `3252025` after rebasing)
 - Next action: maintain this document as the active authority for every new lane
 
 ### WS-002: Atmospheric-flight research
@@ -632,7 +633,7 @@ asset/render lanes. The current order is:
 
 ### WS-003: Coordinate/rebase Stage 0
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: validate hierarchical frames and camera-relative narrowing before
   gravity, orbital LOD, or relativistic systems depend on frame identity
 - Primary: Claude
@@ -643,19 +644,45 @@ asset/render lanes. The current order is:
 - Owned paths: `src/sim/reference_frame.h`, `src/sim/reference_frame.cpp`,
   `tests/test_reference_frame.cpp`
 - Excluded paths: `src/render/**`, `shaders/**`, asset pipeline
-- Shared-file locks: WS-003 carries a proposed `CMakeLists.txt` patch. The file
-  remains `INTEGRATION_ONLY`: no other active branch edits it, and Codex reconciles
-  the final registration change during integration.
+- Shared-file locks: released; the proposed `CMakeLists.txt` registration was
+  reconciled and merged with the feature
 - Interface contract: simulation exposes camera-relative transforms without
   renderer ownership of world coordinates
 - Dependencies: architecture and physics research already merged
 - Acceptance gates: precision negative control, rebase continuity, deterministic
   replay, Debug/Release tests, raster/stable/full smoke after integration
 - Negative controls: naive narrow-before-subtract must fail at planetary scale
-- Latest commit: `98ec517` (`Sim Stage 0: galactic world position + hierarchical
-  reference frames`), based on `b197701`; the worktree remains Claude-owned
-- Next action: Claude hands off the committed Stage 0 range for Codex review; do
-  not enter or edit the worktree
+- Latest commit: integration commit `b2b2976` on `main`; feature commit `98ec517`
+- Next action: `98ec517` is reachable from `origin/main`; the clean `simcoord`
+  worktree is eligible for audited retirement
+
+### WS-007: Active-system N-body core
+
+- Status: ACTIVE
+- Outcome: conservative active-system N-body gravity with deterministic pair
+  order, bounded long-run error, close-encounter detection, and inactive-system
+  Kepler LOD boundaries
+- Primary: Claude
+- Reviewer: Codex
+- Branch: `claude/sim-nbody`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\nbody`
+- Base commit: `b2b2976`
+- Owned paths: new N-body/orbit modules under `src/sim/**` and focused simulation
+  tests
+- Excluded paths: playable-ship input/scene/render integration and Codex worktrees
+- Shared-file locks: any `CMakeLists.txt` change is a proposed patch;
+  `CMakeLists.txt` remains `INTEGRATION_ONLY`
+- Interface contract: expose gravity/orbital state through simulation interfaces;
+  do not take ownership of player input, camera, or thruster feedback
+- Dependencies: merged Stage 0 reference-frame foundation
+- Acceptance gates: pairwise equal/opposite force, stable-ID summation,
+  deterministic replay, two-body closure, bounded conservative energy error,
+  timestep convergence, and active/on-rails continuity
+- Negative controls: unstable/naive integration or double-applied primary gravity
+  must fail; close encounters must not silently pass through softening
+- Latest commit: branch currently starts at `b2b2976`
+- Next action: Claude scopes and implements the first committed N-body slice;
+  Codex does not enter or edit the worktree
 
 ### WS-004: Playable-ship vertical slice
 
