@@ -985,3 +985,72 @@ visible NaN.
 - **`scene.cpp:331` TLAS rebuild and the DXR camera-relative rebuild** were cited by candidates
   but not re-read here (ASSUMED). Confirm the rebase is as cheap for RT as claimed before Stage
   0 depends on it.
+
+---
+
+## DECISION REVISION (owner directive, supersedes §4/§5 orbital ownership)
+
+The owner directed: use the more accurate physics like Children of a Dead Earth,
+take no shortcuts. This changes the orbital core from patched-conics-default to
+**N-body-default within the active system**, with a scale-aware hybrid so it stays
+tractable across a galaxy.
+
+### The N-body / on-rails hybrid by scale
+
+- **Active gravitational system (where the player is): FULL N-BODY.** Every
+  significant body (star, planets, moons, stations, ships) integrated under the
+  summed pairwise Newtonian gravity of every other significant body, with a
+  **Forest-Ruth 4th-order symplectic integrator** (the CoDE choice; PHYSICS_-
+  RESEARCH_REFERENCE.md §2/§11). This is what buys real perturbation, Lagrange
+  points, and multi-body accuracy. A star system has O(10-100) significant bodies
+  plus ships, which is trivially real-time at 60 Hz. Softening is the ONE shared
+  Plummer constant already specified (§5), floored at max(body radius, r_s+eps).
+- **Inactive / distant systems: ON-RAILS KEPLER for LOD.** A planet in a system
+  the player is not in cannot be meaningfully perturbed by the player, and its
+  siblings' perturbations are cosmetic at that distance, so it propagates on
+  analytic Kepler rails around its primary. This is a performance LOD, not a
+  physics claim, and a system is promoted to full N-body when the player enters
+  its SOI/frame. The promotion must be CONTINUOUS: seed the N-body state from the
+  on-rails state vector (r, v) at the instant of promotion, and demote by fitting
+  osculating elements from the current (r, v).
+- **Interstellar: static catalog positions.** Stellar mutual gravity is irrelevant
+  on gameplay timescales; stars are fixed in their sector frame. This is where the
+  unsolved interstellar-precision problem (§11 / open problems) lives, unchanged.
+
+### What this changes from the patched-conics design
+
+- The "on-rails XOR force-integrated, exactly one owner per body per step"
+  invariant (§5) is REPLACED by a level-of-detail state: a body is either
+  N-BODY-ACTIVE or ON-RAILS, still exactly one per step, still debug-asserted, but
+  the default flips to N-body in the active system. The double-count negative
+  control still applies (an on-rails body must receive no separate primary-gravity
+  force).
+- Drift: N-body symplectic integration DOES drift (bounded, energy-oscillating),
+  unlike analytic on-rails which cannot. This is accepted for the accuracy it buys,
+  per CoDE. The verification changes accordingly and this is load-bearing: do NOT
+  assert exact energy/momentum conservation over the N-body arc (the Stage-1
+  fantasy-tolerance lesson). Assert instead: (a) bounded energy OSCILLATION with no
+  secular trend over a long run (the defining property of a symplectic method), (b)
+  a two-body N-body case CLOSES on the analytic Kepler orbit over one period to the
+  integrator's actual tolerance, and (c) dt-CONVERGENCE of the drift. The Forest-Ruth
+  coefficients themselves get a unit test against their published values.
+- Determinism: N-body is deterministic under fixed dt and fixed body iteration
+  order (RULE 6). Same-binary determinism is a goal; the force-summation order must
+  be fixed (sort by a stable body id) so floating-point non-associativity does not
+  make it depend on iteration accident.
+- Cost: the active-system force sum is O(N^2) in significant bodies. At O(100)
+  bodies this is ~10^4 pairwise force evals per substep, negligible. A
+  Barnes-Hut/tree upgrade is only needed if significant-body count ever reaches
+  thousands, which it will not for a hand-authored system; noted, not built.
+
+### What this does NOT change
+
+The coordinate architecture (§1, hierarchical frames + camera-relative narrowing),
+time and dilation (§2), relativistic momentum-space dynamics (§3), atmosphere (§6),
+FTL/warp/wormhole frame handling (§7), and save/load (§8) are unchanged. N-body
+makes the coordinate/precision story MORE important, not less, because every body's
+force depends on relative positions computed WITHIN a single frame — the
+catastrophic-cancellation concern of §1 now applies to every gravity pair.
+
+Stage 0 (coordinate validation) remains the first thing built and is unaffected by
+this revision. The orbital stage that follows is now N-body-first per this note.
