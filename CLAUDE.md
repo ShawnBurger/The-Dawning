@@ -174,14 +174,141 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            opaque pass keeps early-Z in Release and the probe is still compiled
            into shipping builds; the cost is one extra PSO. The vertex shaders
            are not permuted - early-Z is a pixel-stage property
-           IMAGE-BASED LIGHTING IS AT STAGE 1 OF SIX
-           (docs/research/IBL_DESIGN.md section 11). Stage 1 builds the
-           prefiltered environment cubemap and proves it correct. It changes
-           NOTHING about the image, by design: no shader samples the cube yet,
-           and both smoke captures are statistically identical to the pre-IBL
-           run. The near-black metallic asset is NOT fixed yet - that lands in
-           Stages 2 and 3, which add the SH diffuse and split-sum specular terms
-           that replace basic_ps.hlsl's hemisphere ambient.
+           IMAGE-BASED LIGHTING IS AT STAGE 3 OF SIX
+           (docs/research/IBL_DESIGN.md section 11). Stages 1-3 are done in the
+           RASTER path; Stage 4 (DXR) is not.
+           STAGE 3 IS WHERE THE IMAGE CHANGED. basic_ps.hlsl's hemisphere ambient
+           (ambientDiffuse / ambientSpecular) is DELETED - not scaled down, which
+           would have been a straight double count - and replaced by L2 spherical
+           -harmonic diffuse plus split-sum specular. The near-black Meshy
+           corridor is FIXED: its region mean luminance goes 66.96 -> 98.59 in
+           the raster capture. Forcing the iblParams.z kill switch to 0 sends the
+           same region to 0.148, i.e. black, which is both the proof that
+           basic_ps really reaches the new code and a demonstration of the
+           original defect - a glTF metallicFactor of 1.0 has no diffuse lobe, so
+           with no environment term there is literally nothing to shade it with.
+           AGAINST THE DXR REFERENCE, per region, |raster - DXR-full| before ->
+           after: convex metal sphere 28.25 -> 3.63, near ground 13.82 -> 2.75,
+           far ground 5.01 -> 1.83. Raster moved decisively toward the reference
+           wherever environment VISIBILITY is not the dominant term.
+           It did NOT on the corridor: 15.57 -> 16.07, undershoot turned into
+           overshoot of almost the same size. That is not a mystery and it is not
+           a regression - the split-sum has NO visibility term, the Meshy asset
+           ships no occlusion map (base_color/metallic/roughness/normal only), and
+           the corridor is concave, so raster gives it full unoccluded
+           environment specular where the path tracer traces the actual geometry.
+           Specular occlusion is IBL_DESIGN.md 9.3's named, deliberately deferred
+           item and this is what deferring it costs.
+           Diffuse costs ZERO descriptors - nine RGB coefficients in CBPerFrame,
+           projected on the CPU by core::ProjectSkyRadiance. Specular costs ONE
+           root DWORD, and the evidence that it is USED costs two more: raster
+           root signature 15 -> 16 -> 18, root parameter 9 being the consumption
+           probe's UAV. That is the correct trade - without it every IBL
+           assertion passes with the cube unsampled and with the wrong descriptor
+           bound. Root parameter 8 binds
+           the cube at t0/space6 with a third static sampler s2 (trilinear,
+           CLAMP). Both hand-written root-signature branches changed identically.
+           The design attributed that DWORD to Stage 1; it belongs here, because a
+           descriptor costs a root DWORD only when something BINDS it.
+           CBPerFrame 416 -> 576, appended only, so sky_ps.hlsl's frozen prefix is
+           untouched. Ring peak 1792 -> 2048 against a budget that reads
+           cb_per_frame_bytes and is now 2304. The budget stays FLAT in entity
+           count, which is the property it exists to protect.
+           FOUR STARTUP GPU ASSERTIONS, in every mode, gated on nothing, all
+           watched failing: SH basis agreement, mirror specular, env-BRDF
+           physical bounds, roughness->mip monotonicity.
+           THE ONE THAT MATTERED MOST is ibl_sh_agreement. core::SHBasisL2 and
+           DawningSHBasisL2 are nine expressions written twice, in two languages.
+           WATCHED: negate y[1] in the HLSL only and all 161 CPU tests pass while
+           the two genuinely disagree; only this probe fails. Note that negating
+           the C++ basis instead changes NOTHING, because it is used by both the
+           projector and the evaluator and cancels - which is the property
+           IBL_DESIGN.md section 4 relies on, measured rather than assumed.
+           WHAT THOSE SIX DO NOT COVER, AND WHAT NOW DOES. They witness
+           ibl_common.hlsli - the same header basic_ps includes - but NOT
+           basic_ps's CALL SITE. MEASURED: deleting the IBL block from basic_ps
+           leaves every one of them green, and so does BINDING THE WRONG
+           DESCRIPTOR at t0/space6. That is this repo's recurring failure, hit
+           for the fourth time: the shadow probe, the draw probe, Stage 1's
+           direction probe, and now these.
+           A SEVENTH PROBE CLOSES IT, and it is a different kind of evidence:
+           the IBL CONSUMPTION probe (src/render/ibl_consume_probe.h,
+           shaders/ibl_consume_probe.hlsli). basic_ps writes what it ACTUALLY
+           LOADED and what it ACTUALLY ADDED into a UAV at u1/space4 - the same
+           pattern the draw-record probe uses, on the same probe frame, through
+           the same PSO permutation and root-constant gate, so there is no
+           second frame schedule to get wrong. Three independent claims:
+             CONSUMPTION  envSpecular, envDiffuse, and the environment as it
+                          landed in finalColor (recovered as
+                          finalColor - direct - emission, so DELETING the terms
+                          from the combine is caught, not just zeroing them)
+             IDENTITY     the cube's own mip-0 fetch along the SHADING
+                          reflection vector against the closed-form sky. Worst
+                          relative error MEASURED 0.000977 against a 2% bound
+             LIVENESS     cubeSamples == shadedPixels == 1.49M, not > 0
+           AND IT RUNS A NEGATIVE CONTROL FRAME. This is the part that answers
+           "every assertion passes with the feature absent": the frame before
+           the verify frame renders with CBPerFrame::iblParams.z forced to 0 and
+           asserts every word reads ZERO while pixels are still being shaded.
+           The harness demands BOTH verdicts. An assertion shown only to pass
+           with the feature present is what all six above already were.
+           WATCHED FAILING, each broken -> failing -> restored -> green:
+             (a) zero envSpecular/envDiffuse at the point of use ->
+                 ibl_consume_consumption=failed, spec/diffuse/in-final 0.343292/
+                 0.287125/0.343384 -> 0. Every startup marker stays green
+             (b) bind heap slot 1 (the shadow map) as the environment cube ->
+                 ibl_consume_identity=failed, sky_rel_err 0.000977 -> 1.000000,
+                 radiance and mirror maxima -> 0. ibl_sh_agreement,
+                 ibl_spec_mirror and ibl_env_brdf ALL STILL PASS, which is the
+                 gap measured rather than argued
+             (c) sample the cube on only part of the screen -> reached=failed
+                 on cubeSamples 65750 != shadedPixels 1491649, while consumption
+                 AND identity both stay ok. A `cubeSamples > 0` check passes here
+             (d) neuter SetIBLDisabledForFrame -> the CONTROL fails and the live
+                 assertion stays green, which is the pair doing its job
+           Plus nine CPU cases over the GPU-free reduction, including one that
+           asserts the two claim sets reject each other's blocks (171 tests, up
+           from 161).
+           A COMMITTED CLAIM WAS FALSE AND IS CORRECTED. tools/smoke_test.ps1
+           recorded "WATCHED NOT FAILING: adding 1.0 to the mip leaves both this
+           and the mirror assertion green". RE-MEASURED by performing the
+           mutation: ibl_spec_mip_monotonic FAILS, worst backward step
+           -0.00098392 against -1e-5, deterministically, identical in both smoke
+           modes. Half the claim was true - ibl_spec_mirror does stay green at
+           0.001768 - and it was wrongly extended to the other assertion. The
+           mechanism: kEnvMipSweepLastSlot excludes the 2x2/1x1 faces' luminance
+           reversal under the CORRECT mapping, and +1 drags that reversal into
+           the asserted window, so the exclusion range and the detection are the
+           same fact. Corrected in smoke_test.ps1 and environment_ibl.h.
+           TWO DESIGN CLAIMS REMAIN MEASURED FALSE AND CORRECTED IN PLACE:
+           assertion 3.1's furnace bound is unsatisfiable (it contradicts section
+           9.4's accepted 55% single-scatter loss at roughness 1); and 3.3 does
+           not catch a WRAP sampler, because cube sampling never consults the 2-D
+           address modes. 3.3 also does not catch the mip off-by-one (0.0010 ->
+           0.001768, inside 2%) - only 3.2 does.
+           THE ENV-BRDF ENERGY GUARD IS WIDER THAN IT LOOKED. It bounded A + B,
+           which is the F0 = 1 case, and was blind to the dielectric: MEASURED,
+           0.04*A + B reaches 1.042432 at roughness 0 and grazing incidence, i.e.
+           a smooth dielectric reflects 4.2% MORE environment energy than
+           arrives. That is the documented accuracy of the Lazarov fit at the
+           worst corner of its domain, not a defect, so the new
+           ibl_env_brdf_max_dielectric assertion bounds how far the FIT may stray
+           (1.06) rather than claiming physics it does not obey. An A/B swap
+           sends it to 1.29.
+           A FAILED IBL VALIDATION IS NOW FATAL. It was not, justified by "a
+           resource that nothing samples yet" - a clause Stage 3 deleted. There
+           is no hemisphere-ambient fallback to degrade to any more, so booting
+           means shading every surface from an environment the engine just proved
+           wrong, silently, because that reads as "the tone mapping needs
+           tuning". It also removes a split where the harness treated the same
+           evidence as fatal and the engine did not.
+           core::EvaluateIrradiance NOW CLAMPS, like DawningIrradianceSH always
+           did. The two were compared to 1e-4 by the SH agreement probe while
+           being different functions; it passed only because THIS sky never
+           drives the reconstruction negative, which made a property of the
+           environment look like a property of the code.
+           EvaluateIrradianceRaw exposes the unclamped reconstruction for the
+           closed-form identity cases, and one CPU case pins the difference.
            Built: a 128x128x6 R16G16B16A16_FLOAT cube, 8 mips, roughness =
            mip/7, prefiltered from the PROCEDURAL sky. The source is closed-form,
            so the prefilter pass takes NO SRV INPUT - every mip is an independent
@@ -191,10 +318,7 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            an edit rather than a redesign.
            Cost: ONE descriptor. The cube's SRV takes raster heap slot 2 and the
            material allocator's firstIndex moved 2 -> 3, so usable material slots
-           are 126 -> 125. The raster root signature is UNCHANGED at 15 DWORDs -
-           nothing binds the cube yet; the +1 DWORD the design specifies belongs
-           to Stage 3. The prefilter has its own separate root signature.
-           CBPerFrame is untouched and the constant ring peak is still 1792.
+           are 126 -> 125. The prefilter has its own separate root signature.
            VERIFICATION RUNS ON EVERY LAUNCH IN EVERY MODE, gated on nothing.
            The prefilter happens once at startup, before the raster/RT branch
            exists, so there is no frame to arm it on and no mode that can skip

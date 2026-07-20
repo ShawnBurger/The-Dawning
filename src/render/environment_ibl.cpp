@@ -245,12 +245,21 @@ bool EnvironmentIBL::CreateCube(ID3D12Device* device)
 
 bool EnvironmentIBL::CreateRootSignature(ID3D12Device* device)
 {
-    D3D12_DESCRIPTOR_RANGE directionRange = {};
-    directionRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    directionRange.NumDescriptors                    = 1;
-    directionRange.BaseShaderRegister                = 0;
-    directionRange.RegisterSpace                     = 0;
-    directionRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    // Two SRVs in one table: t0 the direction cubemap (assertion 1.2), t1 the
+    // prefiltered environment cube itself (Stage 3). APPEND puts them at
+    // descriptors 0 and 1 of m_probeSrvHeap, in that order.
+    D3D12_DESCRIPTOR_RANGE probeRanges[2] = {};
+    probeRanges[0].RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    probeRanges[0].NumDescriptors                    = 1;
+    probeRanges[0].BaseShaderRegister                = 0;
+    probeRanges[0].RegisterSpace                     = 0;
+    probeRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    probeRanges[1].RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    probeRanges[1].NumDescriptors                    = 1;
+    probeRanges[1].BaseShaderRegister                = 1;
+    probeRanges[1].RegisterSpace                     = 0;
+    probeRanges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
     D3D12_ROOT_PARAMETER params[3] = {};
 
@@ -267,10 +276,10 @@ bool EnvironmentIBL::CreateRootSignature(ID3D12Device* device)
     params[1].Descriptor.RegisterSpace  = 0;
     params[1].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    // t0: the direction cubemap (verification only).
+    // t0: the direction cubemap, t1: the environment cube (verification only).
     params[2].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    params[2].DescriptorTable.NumDescriptorRanges = 1;
-    params[2].DescriptorTable.pDescriptorRanges   = &directionRange;
+    params[2].DescriptorTable.NumDescriptorRanges = _countof(probeRanges);
+    params[2].DescriptorTable.pDescriptorRanges   = probeRanges;
     params[2].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
     // Trilinear + CLAMP. Anisotropic/WRAP - what the material sampler uses - is
@@ -347,7 +356,22 @@ bool EnvironmentIBL::CreatePipelines(ID3D12Device* device)
     auto dirProbePs  = CompileShaderFromFile(L"shaders/ibl_probe_ps.hlsl",
                                              "DirectionRoundTripPS", "ps_5_1");
 
-    if (!vs || !prefilterPs || !directionPs || !skyProbePs || !dirProbePs)
+    // Stages 2 and 3. These four include shaders/ibl_common.hlsli - the SAME
+    // header basic_ps.hlsl includes - so compiling them here under ps_5_1 /WX is
+    // the standing answer to IBL_DESIGN.md section 6.3's open question about
+    // TextureCube and SamplerState as function parameters. It is checked every
+    // launch, and the engine fails to start rather than failing quietly.
+    auto shProbePs      = CompileShaderFromFile(L"shaders/ibl_eval_probe_ps.hlsl",
+                                                "SHIrradianceProbePS", "ps_5_1");
+    auto mirrorProbePs  = CompileShaderFromFile(L"shaders/ibl_eval_probe_ps.hlsl",
+                                                "MirrorSpecularProbePS", "ps_5_1");
+    auto envBRDFProbePs = CompileShaderFromFile(L"shaders/ibl_eval_probe_ps.hlsl",
+                                                "EnvBRDFProbePS", "ps_5_1");
+    auto mipSweepProbePs = CompileShaderFromFile(L"shaders/ibl_eval_probe_ps.hlsl",
+                                                 "MipSweepProbePS", "ps_5_1");
+
+    if (!vs || !prefilterPs || !directionPs || !skyProbePs || !dirProbePs ||
+        !shProbePs || !mirrorProbePs || !envBRDFProbePs || !mipSweepProbePs)
     {
         core::Log::Error("Failed to compile environment IBL shaders");
         return false;
@@ -381,6 +405,10 @@ bool EnvironmentIBL::CreatePipelines(ID3D12Device* device)
         { directionPs.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT,    &m_psoDirection,      L"EnvironmentDirectionPSO" },
         { skyProbePs.Get(),  DXGI_FORMAT_R32G32B32A32_FLOAT,    &m_psoSkyProbe,       L"EnvironmentSkyProbePSO" },
         { dirProbePs.Get(),  DXGI_FORMAT_R32G32B32A32_FLOAT,    &m_psoDirectionProbe, L"EnvironmentDirProbePSO" },
+        { shProbePs.Get(),       DXGI_FORMAT_R32G32B32A32_FLOAT, &m_psoSHProbe,       L"EnvironmentSHProbePSO" },
+        { mirrorProbePs.Get(),   DXGI_FORMAT_R32G32B32A32_FLOAT, &m_psoMirrorProbe,   L"EnvironmentMirrorProbePSO" },
+        { envBRDFProbePs.Get(),  DXGI_FORMAT_R32G32B32A32_FLOAT, &m_psoEnvBRDFProbe,  L"EnvironmentEnvBRDFProbePSO" },
+        { mipSweepProbePs.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT, &m_psoMipSweepProbe, L"EnvironmentMipSweepProbePSO" },
     };
 
     for (const PipelineSpec& spec : specs)
@@ -457,9 +485,14 @@ bool EnvironmentIBL::CreateVerificationResources(ID3D12Device* device)
         device->CreateRenderTargetView(m_directionCube.Get(), &rtv, handle);
     }
 
-    // Shader-visible SRV for the direction cube, in its own one-descriptor heap.
+    // Shader-visible SRVs for the two cubes the probes read, in their own heap:
+    // [0] the direction cube (assertion 1.2), [1] the environment cube itself
+    // (Stages 2 and 3). This is a SECOND CBV_SRV_UAV heap and that is legal here
+    // because it is bound only during the startup probe pass, before any frame
+    // is recorded - the engine's one-bindable-heap rule is about a single point
+    // in time, and no scene pass is open.
     D3D12_DESCRIPTOR_HEAP_DESC probeHeapDesc = {};
-    probeHeapDesc.NumDescriptors = 1;
+    probeHeapDesc.NumDescriptors = 2;
     probeHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     probeHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     hr = device->CreateDescriptorHeap(&probeHeapDesc, IID_PPV_ARGS(&m_probeSrvHeap));
@@ -477,8 +510,26 @@ bool EnvironmentIBL::CreateVerificationResources(ID3D12Device* device)
     dirSrv.TextureCube.MostDetailedMip     = 0;
     dirSrv.TextureCube.MipLevels           = 1;
     dirSrv.TextureCube.ResourceMinLODClamp = 0.0f;
-    device->CreateShaderResourceView(m_directionCube.Get(), &dirSrv,
-                                     m_probeSrvHeap->GetCPUDescriptorHandleForHeapStart());
+    D3D12_CPU_DESCRIPTOR_HANDLE probeSrvStart =
+        m_probeSrvHeap->GetCPUDescriptorHandleForHeapStart();
+    device->CreateShaderResourceView(m_directionCube.Get(), &dirSrv, probeSrvStart);
+
+    // [1] the prefiltered cube, with the FULL mip chain exposed - the mip sweep
+    // probe is precisely a claim about which mip a roughness lands on, so a view
+    // that clamped MipLevels to 1 would make that assertion vacuous.
+    const uint32_t srvDescSize =
+        device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE envSrvHandle = probeSrvStart;
+    envSrvHandle.ptr += srvDescSize;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC envSrv = {};
+    envSrv.Format                          = kEnvCubeFormat;
+    envSrv.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURECUBE;
+    envSrv.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    envSrv.TextureCube.MostDetailedMip     = 0;
+    envSrv.TextureCube.MipLevels           = kEnvCubeMips;
+    envSrv.TextureCube.ResourceMinLODClamp = 0.0f;
+    device->CreateShaderResourceView(m_cube.Get(), &envSrv, envSrvHandle);
 
     // --- 64x1 probe target ---------------------------------------------------
     D3D12_RESOURCE_DESC probeDesc = {};
@@ -526,15 +577,16 @@ bool EnvironmentIBL::CreateVerificationResources(ID3D12Device* device)
     device->CreateRenderTargetView(m_probeTarget.Get(), nullptr,
                                    m_probeRtvHeap->GetCPUDescriptorHandleForHeapStart());
 
-    // Two 64-texel rows: [0] sky agreement, [1] direction round trip. 64 * 16 B
-    // is 1024, already a multiple of both the 256-byte row pitch alignment and
-    // the 512-byte placed-footprint alignment.
+    // One 64-texel row per probe pass; see enum EnvProbePass for the order.
+    // 64 * 16 B is 1024, already a multiple of both the 256-byte row pitch
+    // alignment and the 512-byte placed-footprint alignment, so each pass's row
+    // starts on a legal offset with no padding arithmetic.
     D3D12_HEAP_PROPERTIES readbackHeap = {};
     readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
 
     D3D12_RESOURCE_DESC probeReadbackDesc = {};
     probeReadbackDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-    probeReadbackDesc.Width            = 2ull * kEnvProbeCount * 16ull;
+    probeReadbackDesc.Width            = static_cast<UINT64>(kEnvPassCount) * kEnvProbeCount * 16ull;
     probeReadbackDesc.Height           = 1;
     probeReadbackDesc.DepthOrArraySize = 1;
     probeReadbackDesc.MipLevels        = 1;
@@ -556,27 +608,55 @@ bool EnvironmentIBL::CreateVerificationResources(ID3D12Device* device)
     D3D12_HEAP_PROPERTIES uploadHeap = {};
     uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
 
+    // 64 directions + 9 SH coefficients + 1 parameter row, rounded up to a
+    // 256-byte boundary because a root CBV's address must be 256-aligned and the
+    // resource base is the address here.
     D3D12_RESOURCE_DESC cbDesc = probeReadbackDesc;
-    cbDesc.Width = kEnvProbeCount * 16ull;
+    cbDesc.Width = 1280ull;   // (64 + 9 + 1) * 16 = 1184, aligned up
 
     hr = device->CreateCommittedResource(
         &uploadHeap, D3D12_HEAP_FLAG_NONE, &cbDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_probeDirectionCB));
     if (FAILED(hr))
     {
-        core::Log::Errorf("Failed to create IBL probe direction CB: 0x%08X", hr);
+        core::Log::Errorf("Failed to create IBL probe constant buffer: 0x%08X", hr);
         return false;
     }
-    m_probeDirectionCB->SetName(L"EnvironmentProbeDirectionCB");
+    m_probeDirectionCB->SetName(L"EnvironmentProbeConstantBuffer");
 
+    // Contents are written by UploadProbeConstants, which runs per bake because
+    // the SH tail is not known until the projection has happened.
+    return true;
+}
+
+// The (NdotV, roughness) grid the env-BRDF probe sweeps. Twin of DawningProbeGrid
+// in shaders/ibl_eval_probe_ps.hlsl; the header says what watches that.
+void EnvironmentIBL::EnvBRDFProbeTuple(uint32_t slot, float& NdotV, float& roughness)
+{
+    NdotV     = static_cast<float>(slot % 8u) / 7.0f;
+    roughness = static_cast<float>(slot / 8u) / 7.0f;
+}
+
+// Writes the probe constant buffer: the direction set, then the SH coefficients
+// and parameters the frame shaders will receive.
+//
+// THE SAME m_irradiance ARRAY GOES TO BOTH the GPU here and to
+// Renderer::BeginFrame's CBPerFrame. That is the property that makes the
+// agreement probe meaningful: it compares the CPU's own numbers against the
+// HLSL's evaluation OF THOSE NUMBERS, so what is under test is the BASIS and
+// nothing else. If the probe projected its own coefficients it would be testing
+// two projections and telling you nothing about the one the frame uses.
+bool EnvironmentIBL::UploadProbeConstants()
+{
     float* mapped = nullptr;
     D3D12_RANGE noRead = { 0, 0 };
-    hr = m_probeDirectionCB->Map(0, &noRead, reinterpret_cast<void**>(&mapped));
+    HRESULT hr = m_probeDirectionCB->Map(0, &noRead, reinterpret_cast<void**>(&mapped));
     if (FAILED(hr))
     {
-        core::Log::Errorf("Failed to map IBL probe direction CB: 0x%08X", hr);
+        core::Log::Errorf("Failed to map IBL probe constant buffer: 0x%08X", hr);
         return false;
     }
+
     for (uint32_t i = 0; i < kEnvProbeCount; ++i)
     {
         mapped[i * 4 + 0] = m_probeDirections[i].x;
@@ -584,8 +664,23 @@ bool EnvironmentIBL::CreateVerificationResources(ID3D12Device* device)
         mapped[i * 4 + 2] = m_probeDirections[i].z;
         mapped[i * 4 + 3] = 0.0f;
     }
-    m_probeDirectionCB->Unmap(0, nullptr);
 
+    float* sh = mapped + kEnvProbeCount * 4;
+    for (uint32_t k = 0; k < core::kSHCoefficientCount; ++k)
+    {
+        sh[k * 4 + 0] = m_irradiance.c[k].x;
+        sh[k * 4 + 1] = m_irradiance.c[k].y;
+        sh[k * 4 + 2] = m_irradiance.c[k].z;
+        sh[k * 4 + 3] = 0.0f;
+    }
+
+    float* params = sh + core::kSHCoefficientCount * 4;
+    params[0] = static_cast<float>(kEnvCubeMips);
+    params[1] = 1.0f;
+    params[2] = 1.0f;
+    params[3] = 0.0f;
+
+    m_probeDirectionCB->Unmap(0, nullptr);
     return true;
 }
 
@@ -600,6 +695,23 @@ bool EnvironmentIBL::EnsureBuilt(D3D12Device& device, uint32_t skyRevision)
         return true;
 
     if (!m_cube || !m_psoPrefilter)
+        return false;
+
+    // Diffuse irradiance, projected on the CPU, because it lives in a constant
+    // buffer and there is no compute path in this project to read one back from
+    // the GPU. The cost of that choice is a C++ mirror of the sky (see
+    // src/core/sky_radiance.h) plus a C++ mirror of the SH basis (see
+    // src/core/sh_irradiance.h); both are watched by probes below, which is what
+    // makes IBL_DESIGN.md section 4's recommendation defensible rather than
+    // merely cheap.
+    //
+    // Projected BEFORE the command list opens: it is pure CPU work and it must be
+    // in the constant buffer before RecordVerification draws the pass that reads
+    // it.
+    m_irradiance = core::PackIrradianceCoefficients(
+        core::ProjectSkyRadiance(core::kSHProjectionSamples));
+
+    if (!UploadProbeConstants())
         return false;
 
     if (!device.WaitForCurrentFrame() || !device.ResetCommandList())
@@ -755,7 +867,7 @@ void EnvironmentIBL::RecordVerification(D3D12Device& device)
                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     cmd->ResourceBarrier(1, &dirToRead);
 
-    // --- the two 64x1 probe passes -------------------------------------------
+    // --- the 64x1 probe passes -----------------------------------------------
     ID3D12DescriptorHeap* heaps[] = { m_probeSrvHeap.Get() };
     cmd->SetDescriptorHeaps(1, heaps);
     cmd->SetGraphicsRootConstantBufferView(1, m_probeDirectionCB->GetGPUVirtualAddress());
@@ -772,8 +884,17 @@ void EnvironmentIBL::RecordVerification(D3D12Device& device)
 
     const float poison[4] = { -1.0f, -1.0f, -1.0f, -1.0f };
 
-    ID3D12PipelineState* probePsos[2] = { m_psoSkyProbe.Get(), m_psoDirectionProbe.Get() };
-    for (uint32_t pass = 0; pass < 2; ++pass)
+    // Order MUST match enum EnvProbePass: the readback row a pass writes is its
+    // index, and ReadbackAndValidate indexes by the same enum.
+    ID3D12PipelineState* probePsos[kEnvPassCount] = {
+        m_psoSkyProbe.Get(),        // kEnvPassSkyAgreement
+        m_psoDirectionProbe.Get(),  // kEnvPassDirectionRT
+        m_psoSHProbe.Get(),         // kEnvPassSHIrradiance
+        m_psoMirrorProbe.Get(),     // kEnvPassMirrorSpecular
+        m_psoEnvBRDFProbe.Get(),    // kEnvPassEnvBRDF
+        m_psoMipSweepProbe.Get(),   // kEnvPassMipSweep
+    };
+    for (uint32_t pass = 0; pass < kEnvPassCount; ++pass)
     {
         if (pass > 0)
         {
@@ -850,10 +971,11 @@ bool EnvironmentIBL::ReadbackAndValidate()
         m_validation.probeFacesCovered = covered;
     }
 
-    // ---- probe readback: assertions 1.2 and 1.3 -----------------------------
+    // ---- probe readback: every pass -----------------------------------------
     {
         const float* probe = nullptr;
-        D3D12_RANGE readRange = { 0, static_cast<SIZE_T>(2ull * kEnvProbeCount * 16ull) };
+        D3D12_RANGE readRange = { 0, static_cast<SIZE_T>(
+            static_cast<uint64_t>(kEnvPassCount) * kEnvProbeCount * 16ull) };
         HRESULT hr = m_probeReadback->Map(0, &readRange,
                                           reinterpret_cast<void**>(const_cast<float**>(&probe)));
         if (FAILED(hr) || !probe)
@@ -862,8 +984,10 @@ bool EnvironmentIBL::ReadbackAndValidate()
             return false;
         }
 
-        const float* skyRow = probe;
-        const float* dirRow = probe + kEnvProbeCount * 4;
+        auto Row = [probe](uint32_t pass) { return probe + static_cast<size_t>(pass) * kEnvProbeCount * 4; };
+
+        const float* skyRow = Row(kEnvPassSkyAgreement);
+        const float* dirRow = Row(kEnvPassDirectionRT);
 
         float worstSky = 0.0f;
         uint32_t skySlots = 0;
@@ -900,6 +1024,190 @@ bool EnvironmentIBL::ReadbackAndValidate()
         }
         m_validation.directionSlots    = dirSlots;
         m_validation.worstDirectionDot = (dirSlots == 0) ? 0.0f : worstDot;
+
+        // ---- Stage 2: the SH BASIS mirror ----------------------------------
+        // The one assertion that can see a one-sided sign flip or permutation
+        // between core::SHBasisL2 and DawningSHBasisL2. No CPU test can: the
+        // HLSL is not linked into the test binary. Both sides consume the SAME
+        // m_irradiance array, so the only variable under test is the basis.
+        {
+            const float* shRow = Row(kEnvPassSHIrradiance);
+            float worst = 0.0f;
+            float minLum = 1e30f;
+            uint32_t slots = 0;
+            for (uint32_t i = 0; i < kEnvProbeCount; ++i)
+            {
+                if (shRow[i * 4 + 3] != 1.0f)
+                    continue;
+                ++slots;
+
+                const core::Vec3f expected =
+                    core::EvaluateIrradiance(m_irradiance, m_probeDirections[i].Normalized());
+                worst = (std::max)(worst, std::fabs(shRow[i * 4 + 0] - expected.x));
+                worst = (std::max)(worst, std::fabs(shRow[i * 4 + 1] - expected.y));
+                worst = (std::max)(worst, std::fabs(shRow[i * 4 + 2] - expected.z));
+
+                const core::Vec3f got{ shRow[i * 4 + 0], shRow[i * 4 + 1], shRow[i * 4 + 2] };
+                minLum = (std::min)(minLum, core::Luminance(got));
+            }
+            m_validation.shSlots        = slots;
+            m_validation.worstSHDelta   = worst;
+            m_validation.minSHLuminance = (slots == 0) ? 0.0f : minLum;
+        }
+
+        // ---- Stage 3.3: mirror specular ------------------------------------
+        // rgb is DawningSpecularIBL at roughness 0 with N = V = d and F0 = 1;
+        // w is the env-BRDF scalar the SHADER computed for that configuration.
+        // Dividing w out leaves the prefiltered mip-0 fetch, which must be
+        // core::SkyRadiance(d) - so this compares the SHIPPED sampling path
+        // against the CPU sky WITHOUT re-implementing the Lazarov fit anywhere.
+        {
+            const float* row = Row(kEnvPassMirrorSpecular);
+            float worstRel = 0.0f;
+            float minLum   = 1e30f;
+            uint32_t slots = 0;
+            for (uint32_t i = 0; i < kEnvProbeCount; ++i)
+            {
+                const float scale = row[i * 4 + 3];
+                // The w channel is doing double duty here: it is the env-BRDF
+                // scalar AND the written-slot witness, since the poison clear
+                // leaves -1 and a real scalar is strictly positive.
+                if (!(scale > 0.0f))
+                    continue;
+                ++slots;
+
+                const core::Vec3f expected = core::SkyRadiance(m_probeDirections[i].Normalized()) * scale;
+                const core::Vec3f got{ row[i * 4 + 0], row[i * 4 + 1], row[i * 4 + 2] };
+
+                const float denom = (std::max)(core::Luminance(expected), 1e-4f);
+                worstRel = (std::max)(worstRel, std::fabs(got.x - expected.x) / denom);
+                worstRel = (std::max)(worstRel, std::fabs(got.y - expected.y) / denom);
+                worstRel = (std::max)(worstRel, std::fabs(got.z - expected.z) / denom);
+                minLum   = (std::min)(minLum, core::Luminance(got));
+            }
+            m_validation.mirrorSlots        = slots;
+            m_validation.worstMirrorRelError = worstRel;
+            m_validation.minMirrorLuminance  = (slots == 0) ? 0.0f : minLum;
+        }
+
+        // ---- Stage 3.1: the env-BRDF fit's physical bounds ------------------
+        // PHYSICAL PROPERTIES, NOT GOLDEN NUMBERS. IBL_DESIGN.md's own furnace
+        // formulation for this assertion - "every result within 10% of the cube
+        // mean" - is not satisfiable and contradicts the design's own section
+        // 9.4: at roughness 1 and F0 = 1 the single-scattering split-sum returns
+        // A + B = 0.452, a 55% energy loss that section 9.4 names as deliberately
+        // uncorrected. Asserting 10% there would have failed for a reason the
+        // design already accepted. What is asserted instead:
+        //
+        //   normal incidence, dielectric : F0*A + B must reduce to F0
+        //   grazing, dielectric          : F0*A + B must approach unity
+        //   anywhere, F0 = 1             : A + B in (floor, 1] - loses energy,
+        //                                  never creates it
+        //
+        // The first two are what give an A/B SWAP teeth. At F0 = 1 the expression
+        // is symmetric in A and B and a swap is completely invisible; only a
+        // dielectric can see it, and the design's stated negative test omits that.
+        {
+            const float* row = Row(kEnvPassEnvBRDF);
+            const float dielectricF0 = 0.04f;
+            uint32_t slots = 0;
+            float worstNormal   = 0.0f;
+            // Sentinel, NOT 1.0. Initialising a running MINIMUM to the value the
+            // assertion is trying to prove it exceeds makes the check pass when
+            // no qualifying sample exists, and reports a fabricated number when
+            // one does - both of which this initialiser did on its first run.
+            float worstGrazing  = 1e30f;
+            float worstExcess   = 0.0f;
+            float worstShortfall = 1e30f;
+            float worstDielectric = 0.0f;
+            // The vacuity guard for the two smooth-row claims: they look at a
+            // single grid point each, and a grid that no longer contains
+            // (roughness 0, NdotV 0/1) would satisfy them by never evaluating.
+            uint32_t smoothRowSamples = 0;
+
+            for (uint32_t i = 0; i < kEnvProbeCount; ++i)
+            {
+                if (row[i * 4 + 3] != 1.0f)
+                    continue;
+                ++slots;
+
+                const float A = row[i * 4 + 0];
+                const float B = row[i * 4 + 1];
+
+                float NdotV, roughness;
+                EnvBRDFProbeTuple(i, NdotV, roughness);
+
+                const float metalReflectance = A + B;
+                worstExcess    = (std::max)(worstExcess, metalReflectance);
+                worstShortfall = (std::min)(worstShortfall, metalReflectance);
+
+                // The two Fresnel identities hold for a SMOOTH surface only; see
+                // kEnvBRDFNormalIncidenceTolerance for the measurement that
+                // established this restriction and why widening it back would be
+                // asserting against physics rather than for it.
+                const float dielectric = dielectricF0 * A + B;
+                // The dielectric energy claim, over the WHOLE grid rather than
+                // the smooth row. It is not covered by metalReflectance above:
+                // at F0 = 1 the expression is symmetric in A and B, so the metal
+                // reading is blind to exactly the asymmetries this one sees.
+                worstDielectric = (std::max)(worstDielectric, dielectric);
+                if (roughness <= 0.0f && NdotV >= 1.0f)
+                {
+                    worstNormal = (std::max)(worstNormal, std::fabs(dielectric - dielectricF0));
+                    ++smoothRowSamples;
+                }
+                if (roughness <= 0.0f && NdotV <= 0.0f)
+                {
+                    worstGrazing = (std::min)(worstGrazing, dielectric);
+                    ++smoothRowSamples;
+                }
+            }
+            m_validation.envBRDFSlots              = slots;
+            m_validation.envBRDFSmoothRowSamples   = smoothRowSamples;
+            m_validation.worstNormalIncidenceError = worstNormal;
+            m_validation.worstGrazingReflectance   = (worstGrazing > 1e29f) ? 0.0f : worstGrazing;
+            m_validation.worstEnergyExcess         = worstExcess;
+            m_validation.worstEnergyShortfall      = (worstShortfall > 1e29f) ? 0.0f : worstShortfall;
+            m_validation.worstDielectricExcess     = worstDielectric;
+        }
+
+        // ---- Stage 3.2: roughness -> mip ------------------------------------
+        // Prefiltered radiance along +Y, roughness swept 0..1. It must not fall,
+        // and it must rise appreciably. An inverted or off-by-one mapping
+        // reverses the sequence, which fails both halves.
+        {
+            const float* row = Row(kEnvPassMipSweep);
+            uint32_t slots = 0;
+            float worstStep = 0.0f;
+            float first = 0.0f;
+            float last  = 0.0f;
+            bool  haveFirst = false;
+            float previous = 0.0f;
+
+            // Slot count is over the WHOLE row - "did every slot run" is a
+            // question about the draw, not about the asserted sub-range - while
+            // the monotonicity and rise claims stop at kEnvMipSweepLastSlot.
+            for (uint32_t i = 0; i < kEnvProbeCount; ++i)
+            {
+                if (row[i * 4 + 3] != 1.0f)
+                    continue;
+                ++slots;
+
+                if (i > kEnvMipSweepLastSlot)
+                    continue;
+
+                const core::Vec3f got{ row[i * 4 + 0], row[i * 4 + 1], row[i * 4 + 2] };
+                const float lum = core::Luminance(got);
+
+                if (!haveFirst) { first = lum; haveFirst = true; }
+                else            { worstStep = (std::min)(worstStep, lum - previous); }
+                previous = lum;
+                last = lum;
+            }
+            m_validation.mipSweepSlots  = slots;
+            m_validation.worstMipSweepStep = worstStep;
+            m_validation.mipSweepRise      = last - first;
+        }
 
         const D3D12_RANGE noWrite = { 0, 0 };
         m_probeReadback->Unmap(0, &noWrite);
@@ -992,6 +1300,42 @@ bool EnvironmentIBL::ReadbackAndValidate()
 
     m_validation.varianceDecreasing = decreasing;
 
+    // ---- Stage 2 / Stage 3 verdicts -----------------------------------------
+    // Every one of these leads with a SLOT COUNT, because a comparison neither
+    // side reached is not a comparison, and every one carries a non-degeneracy
+    // floor beside the agreement bound, because two implementations that both
+    // return zero agree perfectly.
+    m_validation.shAgreementOk =
+        (m_validation.shSlots == kEnvProbeCount) &&
+        (m_validation.worstSHDelta < kEnvSHAgreementTolerance) &&
+        (m_validation.minSHLuminance > 0.1f);
+
+    m_validation.mirrorOk =
+        (m_validation.mirrorSlots == kEnvProbeCount) &&
+        (m_validation.worstMirrorRelError < kEnvMirrorTolerance) &&
+        (m_validation.minMirrorLuminance > 1e-4f);
+
+    m_validation.envBRDFOk =
+        (m_validation.envBRDFSlots == kEnvProbeCount) &&
+        (m_validation.envBRDFSmoothRowSamples == 2u) &&
+        (m_validation.worstNormalIncidenceError < kEnvBRDFNormalIncidenceTolerance) &&
+        (m_validation.worstGrazingReflectance   > kEnvBRDFGrazingFloor) &&
+        (m_validation.worstEnergyExcess         < kEnvBRDFEnergyCeiling) &&
+        (m_validation.worstEnergyShortfall      > kEnvBRDFEnergyFloor) &&
+        // The dielectric energy bound. Added because the F0 = 1 ceiling beside
+        // it CANNOT see a dielectric overshoot - it reads A + B, and the
+        // dielectric quantity is 0.04*A + B - so "no energy creation" was
+        // asserted for one material and merely hoped for the other. It is a
+        // wider bound than the metal one, honestly, because the fit really does
+        // overshoot by 4.2% at grazing incidence on a smooth surface; see
+        // kEnvBRDFDielectricEnergyCeiling for the measurement and the argument.
+        (m_validation.worstDielectricExcess     < kEnvBRDFDielectricEnergyCeiling);
+
+    m_validation.mipSweepOk =
+        (m_validation.mipSweepSlots == kEnvProbeCount) &&
+        (m_validation.worstMipSweepStep > -kEnvMipSweepStepTolerance) &&
+        (m_validation.mipSweepRise      > kEnvMipSweepMinRise);
+
     return true;
 }
 
@@ -1043,6 +1387,40 @@ bool EnvironmentIBL::LogMarkers(uint32_t descriptorSlot, uint32_t firstMaterialS
     core::Log::Infof("[SMOKE] ibl_mip_variance_decreasing=%s ibl_mip_variance_0=%.8f",
                      varianceOk ? "yes" : "no", m_validation.mipVariance[0]);
 
+    core::Log::Infof("[SMOKE] ibl_sh_agreement=%s ibl_sh_slots=%u ibl_sh_worst_delta=%.8f "
+                     "ibl_sh_min_luminance=%.6f",
+                     m_validation.shAgreementOk ? "pass" : "fail",
+                     m_validation.shSlots,
+                     m_validation.worstSHDelta,
+                     m_validation.minSHLuminance);
+
+    core::Log::Infof("[SMOKE] ibl_spec_mirror=%s ibl_spec_mirror_slots=%u "
+                     "ibl_spec_mirror_worst_rel=%.6f",
+                     m_validation.mirrorOk ? "pass" : "fail",
+                     m_validation.mirrorSlots,
+                     m_validation.worstMirrorRelError);
+
+    core::Log::Infof("[SMOKE] ibl_env_brdf=%s ibl_env_brdf_slots=%u "
+                     "ibl_env_brdf_smooth_samples=%u "
+                     "ibl_env_brdf_normal_err=%.6f ibl_env_brdf_grazing=%.6f "
+                     "ibl_env_brdf_max_energy=%.6f ibl_env_brdf_min_energy=%.6f "
+                     "ibl_env_brdf_max_dielectric=%.6f",
+                     m_validation.envBRDFOk ? "pass" : "fail",
+                     m_validation.envBRDFSlots,
+                     m_validation.envBRDFSmoothRowSamples,
+                     m_validation.worstNormalIncidenceError,
+                     m_validation.worstGrazingReflectance,
+                     m_validation.worstEnergyExcess,
+                     m_validation.worstEnergyShortfall,
+                     m_validation.worstDielectricExcess);
+
+    core::Log::Infof("[SMOKE] ibl_spec_mip_monotonic=%s ibl_spec_mip_slots=%u "
+                     "ibl_spec_mip_worst_step=%.8f ibl_spec_mip_rise=%.6f",
+                     m_validation.mipSweepOk ? "pass" : "fail",
+                     m_validation.mipSweepSlots,
+                     m_validation.worstMipSweepStep,
+                     m_validation.mipSweepRise);
+
     for (uint32_t mip = 0; mip < kEnvCubeMips; ++mip)
         core::Log::Infof("  env mip %u: roughness %.3f  mean-luminance %.6f  variance %.8f",
                          mip,
@@ -1083,7 +1461,49 @@ bool EnvironmentIBL::LogMarkers(uint32_t descriptorSlot, uint32_t firstMaterialS
                           kEnvVarianceFirstMip, m_validation.mipVariance[kEnvVarianceFirstMip],
                           kEnvVarianceLastMip,  m_validation.mipVariance[kEnvVarianceLastMip]);
 
-    return reservationOk && directionOk && skyOk && energyOk && varianceOk;
+    if (!m_validation.shAgreementOk)
+        core::Log::Errorf("IBL SH agreement failed: %u/%u slots written, worst delta %.8f "
+                          "(need < %.6f), min irradiance luminance %.6f (need > 0.1). "
+                          "DawningSHBasisL2 in shaders/ibl_common.hlsli and core::SHBasisL2 "
+                          "have drifted - a sign flip or permutation on ONE side does not "
+                          "cancel and lights every surface from the wrong direction.",
+                          m_validation.shSlots, kEnvProbeCount,
+                          m_validation.worstSHDelta, kEnvSHAgreementTolerance,
+                          m_validation.minSHLuminance);
+    if (!m_validation.mirrorOk)
+        core::Log::Errorf("IBL mirror specular failed: %u/%u slots written, worst relative "
+                          "error %.6f (need < %.4f), min luminance %.6f. Mip 0 is not an exact "
+                          "evaluation of the sky, or the reflection direction is wrong "
+                          "(reflect(V, N) for reflect(-V, N) measures 1.03 here).",
+                          m_validation.mirrorSlots, kEnvProbeCount,
+                          m_validation.worstMirrorRelError, kEnvMirrorTolerance,
+                          m_validation.minMirrorLuminance);
+    if (!m_validation.envBRDFOk)
+        core::Log::Errorf("IBL env-BRDF failed: %u/%u slots, normal-incidence error %.6f "
+                          "(need < %.4f), grazing reflectance %.6f (need > %.2f), F0=1 "
+                          "reflectance in [%.4f, %.4f] (need (%.2f, %.2f]), F0=0.04 peak "
+                          "%.4f (need < %.2f). "
+                          "DawningEnvBRDFApprox no longer behaves like a split-sum BRDF - "
+                          "check for an A/B swap or a re-expression in terms of "
+                          "DawningGeometrySmithG1, which uses a DIFFERENT Smith k.",
+                          m_validation.envBRDFSlots, kEnvProbeCount,
+                          m_validation.worstNormalIncidenceError, kEnvBRDFNormalIncidenceTolerance,
+                          m_validation.worstGrazingReflectance, kEnvBRDFGrazingFloor,
+                          m_validation.worstEnergyShortfall, m_validation.worstEnergyExcess,
+                          kEnvBRDFEnergyFloor, kEnvBRDFEnergyCeiling,
+                          m_validation.worstDielectricExcess, kEnvBRDFDielectricEnergyCeiling);
+    if (!m_validation.mipSweepOk)
+        core::Log::Errorf("IBL mip monotonicity failed: %u/%u slots, worst backward step %.8f "
+                          "(need > %.5f), total rise %.6f (need > %.3f). roughness -> mip is "
+                          "inverted or off by one, which is otherwise invisible - it reads as "
+                          "'reflections are slightly too blurry'.",
+                          m_validation.mipSweepSlots, kEnvProbeCount,
+                          m_validation.worstMipSweepStep, -kEnvMipSweepStepTolerance,
+                          m_validation.mipSweepRise, kEnvMipSweepMinRise);
+
+    return reservationOk && directionOk && skyOk && energyOk && varianceOk &&
+           m_validation.shAgreementOk && m_validation.mirrorOk &&
+           m_validation.envBRDFOk && m_validation.mipSweepOk;
 }
 
 void EnvironmentIBL::WriteCubeSRV(ID3D12Device* device,
@@ -1105,6 +1525,10 @@ void EnvironmentIBL::WriteCubeSRV(ID3D12Device* device,
 
 void EnvironmentIBL::Shutdown()
 {
+    m_psoMipSweepProbe.Reset();
+    m_psoEnvBRDFProbe.Reset();
+    m_psoMirrorProbe.Reset();
+    m_psoSHProbe.Reset();
     m_psoDirectionProbe.Reset();
     m_psoSkyProbe.Reset();
     m_psoDirection.Reset();

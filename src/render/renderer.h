@@ -15,6 +15,7 @@
 //   b3:        CBDrawIndex  — { objectIndex, materialIndex, drawProbeEnabled },
 //                             root 32-bit constants
 //   u0/space4: RWByteAddressBuffer — merged draw-record probe    (root UAV)
+//   u1/space4: RWByteAddressBuffer — IBL consumption probe       (root UAV)
 //   b4:        CBPerPass    — viewProj; light matrix in the shadow pass, camera
 //                             matrix in the main pass. Once per pass, not per draw.
 //   b0 and b2 are permanently free: they were CBPerObject and CBMaterial, and
@@ -26,6 +27,7 @@
 #include "gpu_draw_records.h"   // ObjectData / MaterialData / CBPerPass layouts
 #include "descriptor_allocator.h"
 #include "environment_ibl.h"
+#include "ibl_consume_probe.h"  // the IBL CONSUMPTION probe's layout and reduction
 #include "mesh.h"
 #include "camera.h"
 #include "texture.h"
@@ -133,12 +135,47 @@ struct CBPerFrame
     // so enabling the optional cross-cascade blend later cannot churn the byte
     // layout, which is the one thing sky_ps.hlsl cannot tolerate.
     float cascadeFadeLo[core::kShadowCascadeCount];
+
+    // 416..559 - L2 spherical-harmonic diffuse irradiance for the environment
+    // (IBL_DESIGN.md section 6.1). Nine RGB coefficients, produced by
+    // core::PackIrradianceCoefficients, consumed by DawningIrradianceSH.
+    // ZERO descriptor slots: this is the whole reason diffuse IBL is SH here
+    // rather than an irradiance cubemap.
+    //
+    // [9][4], NOT [9][3], AND THIS IS THE TRAP WORTH THE MOST HERE. HLSL places
+    // every element of a cbuffer ARRAY on its own 16-byte register, so
+    // `float3 iblSH[9]` is 144 bytes in HLSL and 108 in C++. That mismatch
+    // compiles on BOTH sides, keeps the member names identical, and makes the
+    // shader read coefficient 1 out of the middle of coefficient 0. It is the
+    // identical trap the cascade tables are documented for in basic_ps.hlsl:29-42,
+    // and the fourth component is dead padding ON PURPOSE.
+    float iblSH[9][4];
+
+    // 560..575 - IBL scalar parameters.
+    //   x: specular mip count, as a FLOAT so there is no int/float cbuffer split
+    //   y: environment intensity multiplier, 1.0 today
+    //   z: IBL enable, 0 or 1. A runtime kill switch, NOT a debug leftover: it is
+    //      what makes "is the IBL path actually reached" answerable, and the
+    //      negative tests in IBL_DESIGN.md section 11 toggle it
+    //   w: reserved, must be written zero
+    float iblParams[4];
 };
-// These five pin the C++ half of the layout. The HLSL half is pinned
-// independently by packoffset on every member of cbuffer CBPerFrame in
-// basic_ps.hlsl - see the comment there for why that matters more than it looks.
-static_assert(sizeof(CBPerFrame) == 416,
+// These pin the C++ half of the layout. The HLSL half is pinned independently by
+// packoffset on every member of cbuffer CBPerFrame in basic_ps.hlsl - see the
+// comment there for why that matters more than it looks.
+static_assert(sizeof(CBPerFrame) == 576,
               "CBPerFrame must match cbuffer CBPerFrame (b1) in the raster shaders");
+static_assert(offsetof(CBPerFrame, iblSH) == 416,
+              "iblSH must land on register c26 in basic_ps.hlsl");
+static_assert(offsetof(CBPerFrame, iblParams) == 560,
+              "iblParams must land on register c35 in basic_ps.hlsl");
+// THE ONE THAT CATCHES THE REAL BUG. float[9][3] would be 108 bytes and would
+// still compile, still match member-for-member, and still satisfy the offsetof
+// check above, because iblSH is the last-but-one field - so its own offset does
+// not move and only iblParams' does. This is the assertion that fails.
+static_assert(sizeof(CBPerFrame::iblSH) == 144,
+              "HLSL puts each cbuffer array element on its own 16-byte register; "
+              "iblSH must be float[9][4], never float[9][3]");
 static_assert(offsetof(CBPerFrame, lightViewProj) == 112,
               "sky_ps.hlsl declares bytes 0..111 as a frozen prefix; "
               "lightViewProj must stay at offset 112");
@@ -300,6 +337,34 @@ public:
     // with the CPU upload records after the queue retires.
     bool RecordDrawProbeReadback(D3D12Device& device);
     bool ReadDrawProbe(DrawProbeValidation& validation);
+
+    // -------------------------------------------------------------------------
+    // The IBL CONSUMPTION probe. See render/ibl_consume_probe.h.
+    // -------------------------------------------------------------------------
+    // It rides the draw probe's PSO permutation and the draw probe's root
+    // constant gate, so it is armed by exactly the same flag on exactly the same
+    // frames and there is no second frame schedule to get wrong. What it does
+    // NOT share is the readback: this is recorded and reduced independently, so
+    // arming the pixel-stage probe without reading the draw records back is a
+    // legal configuration - which is what the negative-control frame is.
+    bool RecordIBLConsumeProbeReadback(D3D12Device& device);
+    bool ReadIBLConsumeProbe(IBLConsumeValidation& validation, bool iblExpectedActive);
+
+    // Forces CBPerFrame::iblParams.z to 0 for the NEXT BeginFrame, disabling the
+    // environment terms in basic_ps.hlsl for exactly one frame.
+    //
+    // THIS IS WHAT MAKES THE KILL SWITCH REACHABLE. iblParams.z used to be
+    // written solely from EnvironmentIBL::IsBuilt(), and Renderer::Init returns
+    // false when the bake fails - so no frame was ever rendered with it clear,
+    // in any configuration, and its documented justification described states
+    // that could not occur. It now has one real caller: App::RenderFrame arms it
+    // on the control frame of every smoke run, where the consumption probe
+    // asserts the environment really does vanish from the image. A switch with a
+    // consumer and an assertion, rather than a switch with a comment.
+    //
+    // Not latched: the caller passes the value it wants every frame, so a missed
+    // reset cannot leave the environment off for the rest of a run.
+    void SetIBLDisabledForFrame(bool disabled) { m_iblDisabledThisFrame = disabled; }
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
@@ -499,6 +564,10 @@ private:
                                      const wchar_t* debugName);
     bool EnsureDrawProbeResources(D3D12Device& device, uint32_t elementCount);
     bool PrepareDrawProbe(D3D12Device& device);
+    // Fixed 64 bytes, allocated once in Init and never grown - the block is
+    // scene-wide, so unlike the draw probe there is nothing for it to scale with.
+    bool EnsureIBLConsumeProbeResources(ID3D12Device* device);
+    bool PrepareIBLConsumeProbe(D3D12Device& device);
 
     FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 96
     FrameStructuredBuffer m_materialBuffer;   // stride sizeof(MaterialData) = 80
@@ -558,6 +627,19 @@ private:
     uint32_t m_drawProbeMaterialRecords = 0;
     bool m_drawProbeEnabled = false;
     bool m_drawProbeReadbackPending = false;
+
+    // The IBL consumption probe's UAV. Same per-frame-slot shape as the draw
+    // probe and for the same reason - clearing storage a still-in-flight frame
+    // may be writing is a hazard whatever the buffer holds - but a FIXED size,
+    // because the block is one scene-wide reduction rather than one slot per
+    // record. See render/ibl_consume_probe.h.
+    ComPtr<ID3D12Resource> m_iblProbeBuffer[kFrameCount];
+    ComPtr<ID3D12Resource> m_iblProbeZeroUpload;
+    ComPtr<ID3D12Resource> m_iblProbeReadback;
+    uint32_t m_iblProbeReadbackFrame = 0;
+    bool m_iblProbeReadbackPending = false;
+    // Set per frame by App::RenderFrame; see SetIBLDisabledForFrame.
+    bool m_iblDisabledThisFrame = false;
 
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
@@ -692,10 +774,18 @@ private:
     // It does not change the ceiling's character or bring the bindless work
     // forward.
     //
-    // NOTHING SAMPLES IT YET. Stage 1 of docs/research/IBL_DESIGN.md builds and
-    // proves the resource; Stages 2-4 consume it. See environment_ibl.h.
+    // CONSUMED SINCE STAGE 3: basic_ps.hlsl samples it through root parameter 8
+    // (t0/space6) for split-sum specular. Diffuse takes no descriptor at all -
+    // it rides CBPerFrame::iblSH. The DXR path is Stage 4 and still traces its
+    // own environment; see environment_ibl.h.
     static constexpr uint32_t kEnvCubeDescriptorIndex = 2;
     EnvironmentIBL m_environmentIBL;
+
+    // Environment intensity multiplier, uploaded as iblParams.y. One, and
+    // deliberately so: this stage replaces the hemisphere ambient with a
+    // physically-derived term, and a tuning knob set to anything but 1 would
+    // make the before/after comparison a statement about the knob.
+    float m_iblIntensity = 1.0f;
 
     // Bumped whenever the sky changes; EnsureEnvironmentIBL rebakes when the
     // cube's baked revision no longer matches. A COUNTER, not a bool, so a

@@ -150,13 +150,20 @@ Assert-Marker "shadow_map_slot" "1"
 Assert-Marker "shadow_cascades" "4"
 
 # =============================================================================
-# Environment IBL - docs/research/IBL_DESIGN.md section 11, Stage 1
+# Environment IBL - docs/research/IBL_DESIGN.md section 11, Stages 1-3
 # =============================================================================
-# The prefiltered environment cubemap. NOTHING SAMPLES IT YET: Stage 1 builds
-# and proves the resource, Stages 2-4 consume it, and the capture statistics are
-# expected to be byte-identical to the pre-IBL run. Do not read "the image did
-# not change" as these assertions being inert - they are about the resource, and
-# every one of them has been watched failing.
+# The prefiltered environment cubemap (Stage 1), the L2 diffuse SH projection
+# (Stage 2), and the split-sum specular path (Stage 3). basic_ps.hlsl now
+# consumes all of it: its hemisphere ambient is DELETED, not scaled down, so
+# the raster capture statistics legitimately differ from the pre-IBL run.
+#
+# There is deliberately NO golden-value gate on those statistics - see the long
+# note by the capture block below for why one was deleted rather than
+# recalibrated. Every assertion here is either CPU-side over GPU-free code or a
+# GPU-side probe reading back what the shipped shaders computed, and none of it
+# depends on which assets happen to sit in build/<Config>.
+#
+# Every one of these has been watched failing.
 #
 # BOTH MODES, unconditionally. The prefilter runs once at startup, before the
 # raster/path-tracing branch exists, so unlike the shadow and draw probes there
@@ -224,6 +231,213 @@ Assert-Marker "ibl_mip_energy" "pass"
 # trivially, so without it this assertion passes on a cube that was never
 # rendered at all.
 Assert-Marker "ibl_mip_variance_decreasing" "yes"
+
+# --- Stage 2 ---------------------------------------------------------------
+# The SH BASIS mirror. core::SHBasisL2 (which produced the coefficients) and
+# DawningSHBasisL2 in shaders/ibl_common.hlsli (which evaluates them) are two
+# hand-written copies of nine expressions in two files and two languages. A sign
+# flip or permutation applied to ONE of them does not cancel and lights every
+# surface in the scene from the wrong direction, smoothly and plausibly.
+#
+# No CPU test can see this - the HLSL is not linked into TheDawningTests. This
+# probe evaluates the SHIPPED HLSL on the GPU against the SHIPPED coefficients
+# and compares to core::EvaluateIrradiance. It is the SH analogue of
+# ibl_sky_agreement, and it exists for the same reason: a mirror nobody watches
+# is a convention, not a guarantee.
+Assert-Marker "ibl_sh_agreement" "pass"
+Assert-Marker "ibl_sh_slots" "64"
+# The kill switch is ON and the coefficients are not degenerate. DELIBERATELY
+# WEAK, and listed as such: it says what BeginFrame will upload, not that
+# basic_ps.hlsl reads it. Nothing in this harness witnesses that call site - see
+# the note at the top of shaders/ibl_eval_probe_ps.hlsl.
+Assert-Marker "ibl_enabled" "yes"
+
+# --- Stage 3 ---------------------------------------------------------------
+# 3.3 - mirror agreement. At roughness 0 with N = V = d the split-sum reduces to
+# a mip-0 fetch times the env-BRDF scalar, and the shader writes that scalar in
+# the alpha channel so the CPU can divide it out and compare the remaining
+# radiance against core::SkyRadiance WITHOUT re-implementing the Lazarov fit.
+# WATCHED: reflect(V, N) in place of reflect(-V, N) takes the worst relative
+# error from 0.0010 to 1.03. WATCHED NOT FAILING, and disclosed rather than
+# quietly dropped: switching the cube sampler to WRAP leaves this green, because
+# cube sampling never consults the 2-D address modes - the design claims this
+# assertion covers that and it does not.
+Assert-Marker "ibl_spec_mirror" "pass"
+Assert-Marker "ibl_spec_mirror_slots" "64"
+
+# 3.1 - the env-BRDF fit's physical bounds. Restated from the design's furnace
+# formulation, which is not satisfiable: at roughness 1 with F0 = 1 the
+# single-scattering split-sum returns 0.45, a 55% energy loss that the design's
+# own section 9.4 names and deliberately leaves uncorrected, so "within 10% of
+# the cube mean" would have failed for an accepted reason.
+#
+# What is asserted instead are properties of the physics the fit approximates:
+# a smooth dielectric reflects F0 at normal incidence and approaches unity at
+# grazing, and a perfect mirror never reflects MORE than it receives at any
+# roughness. The first two are what give an A/B swap teeth - at F0 = 1 the
+# expression F0*A + B is symmetric in A and B and the swap is invisible, which
+# the design's stated negative test does not account for.
+Assert-Marker "ibl_env_brdf" "pass"
+Assert-Marker "ibl_env_brdf_slots" "64"
+# Vacuity guard: the two smooth-surface claims each look at ONE grid point, so a
+# grid that stopped reaching (roughness 0, NdotV 0) and (roughness 0, NdotV 1)
+# would satisfy them by never evaluating them.
+Assert-Marker "ibl_env_brdf_smooth_samples" "2"
+
+# The DIELECTRIC energy bound, and it is a separate assertion because the F0 = 1
+# reading beside it is structurally blind to this case: it reads A + B, while a
+# dielectric's reflectance is 0.04*A + B. MEASURED 1.042432 - a smooth dielectric
+# at grazing incidence really does return 4.2% more environment energy than
+# arrives, which is the documented accuracy of the Lazarov fit at the corner of
+# the domain where it is worst, not a defect. The old guard reported "no energy
+# creation" with that number sitting unexamined in the same table; the bound is
+# now stated at the value the fit actually reaches rather than at the value the
+# physics would.
+if ([double]$markers["ibl_env_brdf_max_dielectric"] -ge 1.06) {
+    throw ("ibl_env_brdf_max_dielectric=$($markers['ibl_env_brdf_max_dielectric']) exceeds the " +
+           "bound the Lazarov fit is allowed to stray to (1.06, measured 1.042432). An A/B swap " +
+           "sends this to 1.29, and so does re-expressing the fit with brdf_common.hlsli's " +
+           "direct-lighting Smith k - see kEnvBRDFDielectricEnergyCeiling.")
+}
+
+# 3.2 - roughness -> mip. The prefiltered fetch along +Y must rise monotonically
+# with roughness. WATCHED: inverting the mapping to (1 - roughness) * (mips - 1)
+# fails this and the mirror assertion together.
+#
+# AN OFF-BY-ONE IS CAUGHT, HERE, AND THIS LINE PREVIOUSLY SAID IT WAS NOT.
+#
+# The claim that stood here - "WATCHED NOT FAILING: adding 1.0 to the mip leaves
+# both this and the mirror assertion green" - is FALSE, and it was committed to
+# the tree where the next reader would trust it. RE-MEASURED by performing the
+# mutation: `mip = saturate(roughness) * (mipCount - 1) + 1.0` in
+# shaders/ibl_common.hlsli fails ibl_spec_mip_monotonic with worst backward step
+# -0.00098392 against a tolerance of -1e-5, DETERMINISTICALLY, with identical
+# numbers in both smoke modes (it is a startup probe, so the mode cannot matter).
+#
+# HALF the original claim is true and is kept: ibl_spec_mirror really does stay
+# green, moving only from 0.001768 to 0.001768 - the mirror comparison cannot see
+# it. What was wrong was extending that to this assertion.
+#
+# WHY it is caught, so the next reader can tell this from luck. The sweep is
+# asserted over slots 0..54 because the correct mapping puts the 2x2 and 1x1
+# faces' known luminance reversal above that (see kEnvMipSweepLastSlot). Adding 1
+# shifts the whole sweep up a mip, which drags mip 7's reversal down INTO the
+# asserted window: slot 54 is roughness 6/7, which the mutation sends to mip 7.0
+# where the true mapping sends it to mip 6. The exclusion range and the mutation
+# detection are therefore the same mechanism, not two independent facts.
+#
+# A false claim committed to source is trusted by the next reader, and this tree
+# has done it before - a merge deleted a -ForceGrow switch and the follow-up
+# commit documented the corpse it had just created as pre-existing rot. Measure
+# before writing "watched not failing".
+Assert-Marker "ibl_spec_mip_monotonic" "pass"
+Assert-Marker "ibl_spec_mip_slots" "64"
+
+# -----------------------------------------------------------------------------
+# CONSUMPTION. Everything above this line witnesses shaders/ibl_common.hlsli.
+# -----------------------------------------------------------------------------
+# Every assertion above passes with the IBL block DELETED from basic_ps.hlsl and
+# passes with the WRONG DESCRIPTOR bound at t0/space6. That was disclosed in the
+# probe shader's own header and it is the same failure this repo hit with the
+# shadow-map probe, the draw-record probe and Stage 1's direction probe: a check
+# that exists, reads as coverage, and cannot fail for the thing it names.
+#
+# The block below is the fix. basic_ps writes what it ACTUALLY LOADED and what it
+# ACTUALLY ADDED into a UAV at u1/space4, on the same probe frame and through the
+# same PSO permutation as the draw-record probe, and the CPU reduces it. See
+# src/render/ibl_consume_probe.h.
+#
+# AND IT RUNS TWICE, which is the part that makes it worth anything. An assertion
+# that passes with the feature present is what every check above already did. So
+# the harness demands BOTH sides:
+#
+#   the control frame  renders with CBPerFrame::iblParams.z forced to 0 and must
+#                      report every word ZERO with pixels still being shaded
+#   the live frame     must report every word nonzero and the cube agreeing with
+#                      the sky
+#
+# Neither verdict is meaningful alone. Assert both or assert nothing.
+
+if (-not $markers.ContainsKey("ibl_consume_frame")) {
+    throw ("Smoke test did not emit 'ibl_consume_frame'. The IBL consumption probe " +
+           "was never armed. It must run on the last raster frame in BOTH smoke " +
+           "modes - see smokeRasterVerifyFrame in App::Run. A missing marker here " +
+           "means the only evidence that basic_ps.hlsl samples the environment cube " +
+           "at all has gone away.")
+}
+if (-not $markers.ContainsKey("ibl_consume_control_frame")) {
+    throw ("Smoke test did not emit 'ibl_consume_control_frame'. The IBL consumption " +
+           "probe's NEGATIVE CONTROL was never armed, so the live verdict beside it " +
+           "proves nothing: it has not been shown to fail with the feature absent.")
+}
+Write-Host ("IBL consumption frames: control $($markers['ibl_consume_control_frame']), " +
+            "live $($markers['ibl_consume_frame'])")
+if ([uint64]$markers["ibl_consume_control_frame"] -ge [uint64]$markers["ibl_consume_frame"]) {
+    throw ("ibl_consume_control_frame=$($markers['ibl_consume_control_frame']) must come " +
+           "BEFORE ibl_consume_frame=$($markers['ibl_consume_frame']). The control has to " +
+           "be the frame that ran with the environment switched off, and the pair only " +
+           "means anything in that order.")
+}
+if (-not $RasterOnly -and [uint64]$markers["ibl_consume_frame"] -ge [uint64]$markers["frames"]) {
+    throw ("ibl_consume_frame=$($markers['ibl_consume_frame']) is not before the end of " +
+           "the run ($($markers['frames']) frames). In the default mode this probe must " +
+           "land on a raster frame - basic_ps does not run on a path-traced one.")
+}
+
+# --- the live frame --------------------------------------------------------
+# WATCHED FAILING, all three, each broken -> failing -> restored -> green:
+#   (a) force envSpecular and envDiffuse to zero at the point of use in
+#       basic_ps.hlsl  -> ibl_consume_consumption=failed
+#   (b) bind the shadow map's descriptor (heap slot 1) as the environment cube
+#       -> ibl_consume_identity=failed, sky_rel_err 0.000977 -> 1.000000
+#   (c) sample the cube on only part of the screen -> ibl_consume_reached=failed
+#       on cube_samples 65750 against shaded_pixels 1491649, while consumption
+#       AND identity both stay ok. A `cube_samples > 0` form passes here
+# Two more, measured because the comments above claim they are distinct:
+#   (d) neuter Renderer::SetIBLDisabledForFrame -> the CONTROL fails and the
+#       live verdict stays ok, which is the pair doing exactly its job
+#   (e) delete the environment from the combine line while leaving the variables
+#       alone -> spec 0.343292 and diffuse 0.287125 stay EXACTLY green and only
+#       in_final_max goes to 0. This is why the third word is recovered from
+#       finalColor rather than summed from the two variables
+Assert-Marker "ibl_consume" "ok"
+Assert-Marker "ibl_consume_reached" "ok"
+Assert-Marker "ibl_consume_consumption" "ok"
+Assert-Marker "ibl_consume_identity" "ok"
+
+# Not redundant with the verdict above: the verdict is computed in C++ and these
+# are the numbers it was computed FROM, so a reduction that lost a clause is
+# visible here as a marker that reads absurd beside a verdict that reads ok.
+# Every shaded pixel must have taken the IBL branch - the branch is predicated on
+# a frame constant, so any inequality means pixels shading without the
+# environment.
+if ([uint64]$markers["ibl_consume_shaded_pixels"] -eq 0) {
+    throw "ibl_consume_shaded_pixels=0: the probe frame shaded nothing, so every IBL claim on it is vacuous."
+}
+if ($markers["ibl_consume_cube_samples"] -ne $markers["ibl_consume_shaded_pixels"]) {
+    throw ("ibl_consume_cube_samples=$($markers['ibl_consume_cube_samples']) against " +
+           "ibl_consume_shaded_pixels=$($markers['ibl_consume_shaded_pixels']). Every pixel " +
+           "basic_ps shades must have fetched the environment cube; the branch is " +
+           "predicated on a frame constant, so an inequality means some pixels are being " +
+           "shaded with no environment term at all.")
+}
+Write-Host ("IBL consumption: spec=$($markers['ibl_consume_spec_max']) " +
+            "diffuse=$($markers['ibl_consume_diffuse_max']) " +
+            "in-final=$($markers['ibl_consume_in_final_max']) " +
+            "sky-rel-err=$($markers['ibl_consume_sky_rel_err'])")
+
+# --- the negative control --------------------------------------------------
+# The half that makes the half above mean something.
+Assert-Marker "ibl_consume_control" "ok"
+Assert-Marker "ibl_consume_control_reached" "ok"
+Assert-Marker "ibl_consume_control_consumption" "ok"
+Assert-Marker "ibl_consume_control_identity" "ok"
+Assert-Marker "ibl_consume_control_cube_samples" "0"
+if ([uint64]$markers["ibl_consume_control_shaded_pixels"] -eq 0) {
+    throw ("ibl_consume_control_shaded_pixels=0: the control frame rendered nothing, so " +
+           "'every word reads zero' is satisfied by an empty frame rather than by the " +
+           "environment being switched off. The control proves nothing in that state.")
+}
 # BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
 # skipped in path-tracing runs, which do not use the shadow map at all" - an
 # accurate description of a hole, not a reason for one. The shadow probe rode the

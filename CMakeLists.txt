@@ -28,6 +28,7 @@ set(CORE_SOURCES
     src/core/window.cpp
     src/core/shadow_cascades.cpp
     src/core/sky_radiance.cpp
+    src/core/sh_irradiance.cpp
 )
 
 set(CORE_HEADERS
@@ -38,6 +39,7 @@ set(CORE_HEADERS
     src/core/window.h
     src/core/shadow_cascades.h
     src/core/sky_radiance.h
+    src/core/sh_irradiance.h
 )
 
 set(ASSET_SOURCES
@@ -62,6 +64,7 @@ set(RENDER_SOURCES
     src/render/renderer.cpp
     src/render/environment_ibl.cpp
     src/render/gpu_draw_records.cpp
+    src/render/ibl_consume_probe.cpp
     src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
@@ -79,6 +82,7 @@ set(RENDER_HEADERS
     src/render/camera.h
     src/render/renderer.h
     src/render/gpu_draw_records.h
+    src/render/ibl_consume_probe.h
     src/render/debug_overlay.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
@@ -108,6 +112,9 @@ set(SHADER_FILES
     shaders/ibl_environment.hlsli
     shaders/ibl_prefilter_ps.hlsl
     shaders/ibl_probe_ps.hlsl
+    shaders/ibl_common.hlsli
+    shaders/ibl_eval_probe_ps.hlsl
+    shaders/ibl_consume_probe.hlsli
 )
 
 set(ECS_HEADERS
@@ -143,6 +150,8 @@ set(TEST_SOURCES
     tests/test_gpu_draw_records.cpp
     tests/test_rt_texture_lod.cpp
     tests/test_sky_energy.cpp
+    tests/test_sh_irradiance.cpp
+    tests/test_ibl_consume_probe.cpp
 )
 
 set(TEST_HEADERS
@@ -307,6 +316,13 @@ add_executable(TheDawningTests
     # and states precisely what that tripwire does not prove.
     src/core/sky_radiance.h
     src/core/sky_radiance.cpp
+    # L2 spherical-harmonic diffuse irradiance. GPU-free on the same sanctioned
+    # footing as shadow_cascades.cpp: it includes only core/types.h and <cmath>,
+    # so tests/test_sh_irradiance.cpp exercises the SHIPPED projector rather than
+    # a copy of it. Its BASIS has an HLSL twin, which the header names and which
+    # a GPU probe watches - no CPU test here can see that half.
+    src/core/sh_irradiance.h
+    src/core/sh_irradiance.cpp
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
@@ -322,6 +338,13 @@ add_executable(TheDawningTests
     # path_tracer.cpp or rt_pipeline.cpp - both pull in d3d12.h.
     src/render/rt_texture_lod.cpp
     src/render/rt_texture_lod.h
+    # The IBL consumption probe's layout and verdict logic. Safe here for the
+    # third time and the same reason: ibl_consume_probe.h includes only <cstdint>
+    # and no D3D12 header, so tests/test_ibl_consume_probe.cpp drives the SHIPPED
+    # reduction rather than a copy of it. The GPU supplies the 64-byte block;
+    # every threshold and every verdict below it is decided here.
+    src/render/ibl_consume_probe.cpp
+    src/render/ibl_consume_probe.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

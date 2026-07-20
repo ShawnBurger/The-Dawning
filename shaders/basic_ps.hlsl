@@ -22,7 +22,7 @@
 #endif
 
 // Mirrors struct CBPerFrame in src/render/renderer.h, which is static_assert'd
-// at 416 bytes with four offsetof checks. sky_ps.hlsl declares ONLY the first
+// at 576 bytes with six offsetof/sizeof checks. sky_ps.hlsl declares ONLY the first
 // 112 bytes of this layout and reads them by offset, so fields may only ever be
 // APPENDED below lightViewProj.
 //
@@ -67,6 +67,16 @@ cbuffer CBPerFrame : register(b1)
     float4   cascadeSplitRadius : packoffset(c23);                   // 368..383
     float4   cascadeTexelWorld  : packoffset(c24);                   // 384..399
     float4   cascadeFadeLo      : packoffset(c25);                   // 400..415 (reserved)
+    // ---- image-based lighting (IBL_DESIGN.md 6.1) --------------------------
+    // 416/16 = 26, 560/16 = 35. iblSH spans c26..c34 because HLSL gives every
+    // array element its own register - the same fact the C++ side pins with
+    // sizeof(CBPerFrame::iblSH) == 144. An accidental overlap here is FXC X4019,
+    // which is the property this whole packoffset block exists for.
+    //
+    // These coefficients ALREADY carry the Lambertian transfer constants; see
+    // DawningIrradianceSH in ibl_common.hlsli.
+    float4   iblSH[9]           : packoffset(c26);                   // 416..559
+    float4   iblParams          : packoffset(c35);                   // 560..575
 };
 
 StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
@@ -96,6 +106,12 @@ StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
 // permutation so the two PSOs agree on the root-constant layout.
 #if DAWNING_DRAW_PROBE
 RWByteAddressBuffer drawRecordProbe : register(u0, space4);
+// The IBL CONSUMPTION probe, u1/space4. Same permutation, same PSO, same probe
+// frames, same early-Z argument - so it costs the shipping pipeline exactly
+// nothing and inherits a frame schedule that is already known to be reached in
+// the mode people actually execute. See shaders/ibl_consume_probe.hlsli for what
+// it claims and why the six startup probes do not claim it.
+RWByteAddressBuffer iblConsumeProbe : register(u1, space4);
 #endif
 
 // Which record this draw owns. Declared identically in basic_vs.hlsl and
@@ -138,7 +154,34 @@ SamplerState linearSampler : register(s0);
 Texture2DArray<float>     shadowMap     : register(t0, space1);
 SamplerComparisonState    shadowSampler : register(s1);
 
+// Prefiltered environment cubemap, in its own register space for the same
+// reason the shadow map has one: it is bound at a fixed heap slot the material
+// allocator never hands out (kEnvCubeDescriptorIndex = 2, allocator firstIndex
+// = 3), so it can never collide with the material table however large that
+// grows. space6 rather than space5 is deliberate - space4 is the draw-record
+// probe UAV, and skipping one stops a reader mistaking this for "the next space
+// after the probe".
+//
+// s2 is its OWN static sampler: trilinear, CLAMP, MaxAnisotropy 1. The material
+// sampler s0 is ANISOTROPIC/WRAP, which is wrong twice over for a cube - WRAP is
+// not the cube addressing mode, and anisotropy across cube faces means nothing
+// here. Trilinear and not point-mip, because the mip is a CONTINUOUS function of
+// roughness and point selection bands visibly across a roughness gradient.
+TextureCube<float4> envCube    : register(t0, space6);
+SamplerState        envSampler : register(s2);
+
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
+#include "ibl_common.hlsli"    // the ONE IBL evaluation, shared with the probe (and DXR at Stage 4)
+
+// Probe permutation only. sky_common.hlsli is what lets the consumption probe
+// compare the CUBE against the closed-form sky it is a prefiltered version of,
+// which is the claim that catches a wrong descriptor at t0/space6. It is pulled
+// in here rather than unconditionally so the shipping PSO's instruction count is
+// untouched; the file is a pure function of direction with no resources.
+#if DAWNING_DRAW_PROBE
+#include "sky_common.hlsli"
+#include "ibl_consume_probe.hlsli"
+#endif
 
 // Returns 1 for fully lit, 0 for fully shadowed.
 //
@@ -346,23 +389,74 @@ float4 main(PSInput input) : SV_TARGET
     float3 kD = DawningDiffuseWeight(F, materialMetallic);
     float3 diffuse = kD * baseColor / PI;
 
-    // Shadowing multiplies DIRECT light only. Ambient and emission are
-    // deliberately untouched: ambient is a crude stand-in for everything the
-    // single directional light does not carry, so occluding it too would leave
-    // shadowed regions pure black, and emission is produced by the surface
-    // rather than received. This matches what the path tracer does, where the
-    // shadow ray gates the NEE term and nothing else.
+    // Shadowing multiplies DIRECT light only. Environment light and emission are
+    // deliberately untouched: the environment is everything the single
+    // directional light does not carry, so occluding it with the shadow term too
+    // would leave shadowed regions pure black, and emission is produced by the
+    // surface rather than received. This matches what the path tracer does, where
+    // the shadow ray gates the NEE term and nothing else.
     float shadow = ComputeShadow(input.positionWS, N, NdotL);
 
     float3 direct = (diffuse + specular) * lightColor * NdotL * shadow;
 
-    // Ambient (hemisphere approximation — ground color darker)
-    float hemisphereBlend = N.y * 0.5 + 0.5;
-    float3 groundColor = ambientColor * 0.3;
-    float3 ambientDiffuse = baseColor * lerp(groundColor, ambientColor, hemisphereBlend)
-                          * (1.0 - materialMetallic) * ambientOcclusion;
-    float3 ambientSpecular = DawningFresnelSchlick(NdotV, F0) * (ambientColor + 0.04) *
-                             lerp(0.2, 0.8, 1.0 - materialRoughness) * ambientOcclusion;
+    // -------------------------------------------------------------------------
+    // Environment (IBL). This REPLACES the hemisphere ambient approximation.
+    // -------------------------------------------------------------------------
+    // What was here: a two-colour lerp on N.y for diffuse, and a Fresnel times a
+    // `lerp(0.2, 0.8, 1 - roughness)` gloss ramp for specular. That term had no
+    // directional dependence, could not reflect anything, corresponded to no
+    // physical quantity, and - the reason this change exists - its diffuse half
+    // was multiplied by (1 - metallic), so a surface with glTF metallicFactor 1.0
+    // received NOTHING from it. The first imported Meshy asset is exactly that,
+    // and it rendered near-black.
+    //
+    // THE OLD TERMS ARE DELETED, NOT SCALED DOWN. Leaving them alongside IBL is
+    // the obvious double count (IBL_DESIGN.md 9.2), and it is the failure this
+    // stage was most likely to ship. `ambientColor` is now read by no shader; it
+    // sits at byte 32 in CBPerFrame's FROZEN PREFIX, which sky_ps.hlsl reads by
+    // offset, so it cannot be removed. It is vestigial and stays uploaded.
+    //
+    // Single `if`, both outputs initialised above it, one exit - FXC's X4000
+    // analysis is satisfied by construction, the same shape ComputeShadow keeps.
+    float3 envDiffuse  = (float3)0.0;
+    float3 envSpecular = (float3)0.0;
+    // The prefiltered radiance the shading fetch LOADED and the direction it
+    // loaded it along, reported out of the shipped evaluation below. Read only by
+    // the consumption probe; FXC removes them from the shipping permutation.
+    float3 envRadiance = (float3)0.0;
+    float3 envR        = float3(0.0, 1.0, 0.0);
+    bool   sampledCube = false;
+    if (iblParams.z != 0.0)
+    {
+        // The ENVIRONMENT Fresnel split: NdotV and roughness-aware, standing in
+        // for an integral over the whole hemisphere. Different argument from the
+        // VdotH Fresnel used for `direct` above, because they are different
+        // integrals of the same physics - not one quantity computed twice.
+        float3 F_env  = DawningFresnelSchlickRoughness(NdotV, F0, materialRoughness);
+        float3 kD_env = (1.0 - F_env) * (1.0 - materialMetallic);
+
+        float3 irradiance = DawningIrradianceSH(iblSH, N);
+        envDiffuse = kD_env * baseColor * irradiance / PI;
+
+        envSpecular = DawningSpecularIBLWitnessed(envCube, envSampler, N, V,
+                                                  materialRoughness, F0, iblParams.x,
+                                                  envRadiance, envR);
+        sampledCube = true;
+    }
+
+    // ORM occlusion multiplies ENVIRONMENT terms only and never direct light -
+    // occluding NEE would double-count the shadow ray. That is today's rule and
+    // IBL inherits it unchanged.
+    //
+    // Known imprecision, kept DELIBERATELY: applying the diffuse AO map to
+    // envSpecular is not physically correct - specular occlusion depends on
+    // roughness and view direction, and reusing diffuse AO over-darkens smooth
+    // surfaces. The principled fix is a specular-occlusion term. It is not done
+    // here because the term it replaces already multiplied by ambientOcclusion,
+    // and changing that in the same stage that changes everything else would make
+    // any luminance shift unattributable.
+    envDiffuse  *= ambientOcclusion * iblParams.y;
+    envSpecular *= ambientOcclusion * iblParams.y;
 
     // Emission is added last and is unaffected by lighting, occlusion or the
     // Fresnel split: it is radiance the surface produces, not radiance it
@@ -372,8 +466,40 @@ float4 main(PSInput input) : SV_TARGET
     if (mat.useEmissiveTexture != 0)
         emission *= materialTextures[mat.emissiveTextureIndex].Sample(linearSampler, input.uv).rgb;
 
-    // Combine
-    float3 finalColor = direct + ambientDiffuse + ambientSpecular + emission;
+    // Combine. IBL_DESIGN.md 9.1: direct + envDiffuse + envSpecular + emission.
+    //
+    // direct and the environment are DISJOINT energy, and that rests on exactly
+    // one assumption: DawningSkyRadiance contains no sun disc, so the directional
+    // light is not represented anywhere in the environment. tests/test_sky_energy.cpp
+    // asserts that property directly. If a sun is ever added to the sky, either
+    // exclude it from the prefilter integral or delete the analytic directional
+    // light - keeping both double-counts the brightest thing in the scene.
+    float3 finalColor = direct + envDiffuse + envSpecular + emission;
+
+    // -------------------------------------------------------------------------
+    // The IBL CONSUMPTION probe. AFTER the combine, deliberately.
+    // -------------------------------------------------------------------------
+    // This is the only evidence in the tree that the RASTER PATH consumes the
+    // environment, as opposed to shaders/ibl_common.hlsli computing it correctly
+    // when asked. Every other IBL assertion passes with this whole block deleted
+    // and with the wrong descriptor bound at t0/space6; see the header of
+    // shaders/ibl_consume_probe.hlsli for why, and for the negative control the
+    // harness runs to prove these words are not merely more of the same.
+    //
+    // `finalColor - direct - emission` rather than `envDiffuse + envSpecular`:
+    // the subtraction is what makes the witness be about the SUM ABOVE. Written
+    // the other way it would stay green with the environment terms deleted from
+    // that line while the variables kept their values.
+#if DAWNING_DRAW_PROBE
+    if (drawProbeEnabled != 0)
+    {
+        DawningWriteIBLConsumption(iblConsumeProbe, envDiffuse, envSpecular,
+                                   finalColor - direct - emission, sampledCube);
+        if (sampledCube)
+            DawningWriteIBLIdentity(iblConsumeProbe, envCube, envSampler,
+                                    envR, envRadiance);
+    }
+#endif
 
     // Linear HDR out. Tone mapping happens once, in tonemap_ps.hlsl, so that
     // the scene exists as linear radiance in a buffer that bloom/exposure/TAA
