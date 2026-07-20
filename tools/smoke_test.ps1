@@ -4,6 +4,7 @@ param(
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
+    [switch]$ForceGrow,
     [switch]$Unlocked,
     [switch]$GPUValidation,
     [int]$TimeoutSeconds = 15,
@@ -64,6 +65,7 @@ if (!$RasterOnly)  {
 }
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
+if ($ForceGrow)    { $arguments += "--smoke-force-grow" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if ($GPUValidation){ $arguments += "--gpu-validation" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
@@ -196,26 +198,120 @@ if ($RasterOnly) {
     Assert-Marker "shadow_cascade_texel_monotonic" "yes"
 }
 
-# Constant-ring headroom. The ring is fixed at kCBRingSize and every shadowed
-# entity now costs 1536 bytes per frame: 256 per-object + 256 material + 256 for
-# each of the 4 cascades, because the casters are walked once per cascade.
-# Cascades roughly halved the entity ceiling - measured, this run peaks at 57% of
-# capacity with 97 entities, against 29% before, so the gate trips somewhere near
-# 127 entities. Overflow is already an error, but by then draws are reading
-# address zero. This fails while there is still room to do something about it.
-# The threshold is deliberately loose - it is a scaling alarm, not an appearance
-# check. The real fix is per-object data in a structured buffer indexed by draw;
-# per-cascade caster culling would also help, but Mesh carries no bounds yet.
+# -----------------------------------------------------------------------------
+# Constant-ring FLATNESS
+# -----------------------------------------------------------------------------
+# This replaces a "fail at 75% of kCBRingSize" gate, which after the per-object
+# structured-buffer change could not fire on the regression it existed to catch.
+# The ring no longer scales with entity count at all: per-object and per-material
+# data live in structured buffers, and the only ring traffic left is CBPerFrame
+# plus one CBPerPass per pass. Measured peak is 1792 bytes in BOTH smoke modes -
+# 1% of the 256 KB ring. Restoring the ENTIRE pre-change per-draw traffic would
+# reach roughly 24% here, so a 75% gate would have sat there passing forever
+# while the very thing it was watching for went unnoticed.
+#
+# So gate on FLATNESS instead of on a fraction of a fixed capacity. The budget
+# below scales with the cascade count - a fifth cascade legitimately costs one
+# more 256-byte cbuffer - but NOT with entity count. Any per-draw ring
+# allocation reintroduced anywhere immediately blows it: one 256-byte upload per
+# caster at this scene's draw count is already an order of magnitude over.
+#
+# This is a gate that can actually trip, which the previous one was not.
 if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capacity")) {
     $peak = [double]$markers["cb_ring_peak"]
     $cap  = [double]$markers["cb_ring_capacity"]
     $pct  = [int](100 * $peak / $cap)
     Write-Host "Constant ring peak: $peak / $cap bytes ($pct%)"
-    if ($pct -ge 75) {
-        throw "Constant ring at $pct% of capacity. Raise kCBRingSize or move per-object data into a structured buffer before adding draws."
+
+    $cascades = if ($markers.ContainsKey("shadow_cascades")) { [int]$markers["shadow_cascades"] } else { 4 }
+    # CBPerFrame rounded up to the 256-byte constant alignment (512 with four
+    # cascade matrices), plus one CBPerPass per shadow cascade and one for the
+    # main pass, plus one spare slot of slack for a future per-pass constant.
+    $flatBudget = 512 + (($cascades + 1) * 256) + 256
+
+    if ($peak -gt $flatBudget) {
+        $perDrawCost = 0
+        if ($markers.ContainsKey("shadow_records")) {
+            $perDrawCost = [int]$markers["shadow_records"] * 256
+        }
+        throw ("Constant ring peak is $peak bytes, above the flat budget of $flatBudget for " +
+               "$cascades cascades. The ring is supposed to hold only CBPerFrame and one " +
+               "CBPerPass per pass, so its peak must not depend on entity count. This says " +
+               "something now allocates from the ring PER DRAW - at this scene's draw count " +
+               "one 256-byte upload per caster would add about $perDrawCost bytes. Find the " +
+               "new UploadCB call on a per-draw path and move that data into the object or " +
+               "material structured buffer instead. Do NOT raise this budget to make the " +
+               "failure go away: the budget scales with cascade count on purpose and with " +
+               "nothing else, and raising it re-creates the entity ceiling this change removed.")
     }
 }
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
+
+# -----------------------------------------------------------------------------
+# Per-draw structured-buffer REALLOCATION
+# -----------------------------------------------------------------------------
+# EnsureFrameStructuredBuffer's grow branch allocates kFrameCount replacement
+# buffers, unmaps and DeferredReleases the outgoing ones, and swaps them in. It
+# is the only code in the per-object structured-buffer design that can
+# use-after-free: kFrameCount frames may still be reading the buffers it
+# releases, and CPU writes to persistently mapped UPLOAD memory are not
+# synchronised by resource barriers, so nothing but the deferred-release fence
+# stands between it and a live buffer being freed underneath a frame in flight.
+#
+# In an ordinary run it NEVER EXECUTES. The demo scene's draw count sits under
+# kMinObjectCapacity, so after the first allocation the function early-outs on
+# every frame. -ForceGrow ramps the sizing hint so the buffers reallocate
+# repeatedly, mid-run, with frames genuinely in flight.
+#
+# Assert it actually happened rather than assuming the flag worked: a hint ramp
+# that stopped crossing capacity boundaries would leave this whole path
+# uncovered again while the run still passed.
+if ($markers.ContainsKey("structured_buffer_reallocations")) {
+    $reallocs = [int]$markers["structured_buffer_reallocations"]
+    Write-Host "Structured-buffer reallocations: $reallocs"
+    if ($ForceGrow -and $reallocs -lt 5) {
+        throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
+               "The grow branch is meant to run many times under this switch; if the " +
+               "sizing hint no longer crosses capacity boundaries then the one code " +
+               "path here that can use-after-free is going untested. Check the " +
+               "--smoke-force-grow ramp in App::RenderFrame against kCapacityHeadroom.")
+    }
+    if (-not $ForceGrow -and $reallocs -ne 0) {
+        Write-Host "  (note: buffers reallocated without -ForceGrow; the scene outgrew the capacity floor)"
+    }
+}
+
+# Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
+# walk the same MeshInstance pool in the same order with identical
+# visible/Transform/Material filters, so they issue the same number of draws.
+# That is what makes 2 x MeshInstanceCount() sufficient capacity for the shared
+# object buffer - and it is enforced nowhere in the code. Asserting the
+# INVARIANT rather than a magic entity count means it survives the demo scene
+# changing, and a future divergence (frustum culling, a castsShadow flag, an LOD
+# cut) surfaces here as a test failure instead of as a wrong-looking frame.
+foreach ($k in @("shadow_records", "main_records", "object_records_peak", "object_capacity")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+$shadowRecords = [uint32]$markers["shadow_records"]
+$mainRecords   = [uint32]$markers["main_records"]
+if ($shadowRecords -ne $mainRecords) {
+    throw ("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+           "The two scene walks no longer issue the same draws." -f $shadowRecords, $mainRecords)
+}
+if ($shadowRecords -lt 1) {
+    throw "No per-object records were written by either pass; the raster path drew nothing."
+}
+# The object buffer is shared by both passes at disjoint index ranges, so its
+# peak occupancy must be exactly the two counts summed, and must fit.
+if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
+    throw ("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+           "overlapping in the object buffer rather than taking disjoint ranges." -f `
+           $markers["object_records_peak"], ($shadowRecords + $mainRecords))
+}
+if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
+    throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
+           $markers["object_records_peak"], $markers["object_capacity"])
+}
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
     throw "Scene shutdown did not retire any raster texture descriptors."
@@ -323,6 +419,77 @@ if (!$NoCapture) {
     if ($meanLum -gt 245)     { throw "Capture is blown out (mean luminance $([math]::Round($meanLum,1)))." }
     if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
+
+    # -------------------------------------------------------------------------
+    # Golden-value gate for the RASTER capture
+    # -------------------------------------------------------------------------
+    # The loose thresholds above catch catastrophic failure and nothing else.
+    # They are not enough: forcing every draw to read per-object record 0 - the
+    # single highest-prior failure mode of per-draw structured-buffer indexing,
+    # and precisely what happens if someone "simplifies" the root constant to
+    # SV_InstanceID at SM 5.1 - renders the whole scene with the first entity's
+    # transform, and STILL passes every check above. That was verified, not
+    # assumed, by building both mutations and watching the harness pass.
+    #
+    # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
+    # so the capture is deterministic (confirmed identical across repeated runs):
+    #
+    #   correct                              mean 122.9   buckets 59
+    #   shadow_vs objectBuffer[0]            mean 123.6   buckets 58
+    #   basic_vs  objectBuffer[0]            mean 124.4   buckets 27
+    #
+    # Re-measured against THIS tree, not carried over: the mutation figures in
+    # the previous version of this block were taken before four-cascade shadows
+    # and no longer describe either failure.
+    #
+    # A +/-0.5 band on the mean catches both (0.7 and 1.5 off), and the bucket
+    # count catches both outright. Raster only: the path-traced capture depends
+    # on accumulation depth and is not a golden-value candidate.
+    #
+    # RECALIBRATED for four-cascade shadows. The previous figure, 128.3, was
+    # measured before cascades landed on main and was already stale when this
+    # gate was written - it failed on the first run after merge, against a
+    # correct image. If you are reading this because it failed again, see the
+    # message below.
+    if ($RasterOnly) {
+        $goldenMeanLum  = 122.9
+        $goldenBuckets  = 59
+        $meanTolerance  = 0.5
+
+        # DELIBERATELY does not tell you to update the numbers. The previous
+        # wording ("If that was intended, re-measure and update the golden
+        # values") is what a reader follows on autopilot, and doing that on a
+        # real regression silently retires the only check that pins the HLSL row
+        # layout against gpu_draw_records.h - the layout nothing validates at
+        # runtime, because a root SRV has no descriptor and no stride. Updating
+        # the constants is sometimes right, but it is the LAST step, not the
+        # first.
+        $fixHint = @"
+The rendered raster image changed. Work out WHY before touching these constants.
+  1. Check the bucket count in the same failure. 59 -> ~25 means most draws are
+     reading one object record: the per-draw root constant at b3 is not reaching
+     basic_vs.hlsl. 59 -> 58 points at shadow_vs.hlsl doing the same.
+  2. Diff shaders/basic_vs.hlsl, shaders/shadow_vs.hlsl and
+     src/render/gpu_draw_records.h against each other. ObjectData must be
+     byte-identical in all three; nothing checks this at runtime.
+  3. Compare the capture against a build of origin/main to see whether the
+     change is yours.
+Only once you can NAME the rendering change that moved the mean should you
+re-measure and update goldenMeanLum and goldenBuckets - and record what changed
+in the calibration block above. Widening meanTolerance is not a fix.
+"@
+
+        if ([math]::Abs($meanLum - $goldenMeanLum) -gt $meanTolerance) {
+            $msg = "Raster capture mean luminance is {0:N1}, expected {1:N1} +/- {2:N1}. {3}" -f `
+                   $meanLum, $goldenMeanLum, $meanTolerance, $fixHint
+            throw $msg
+        }
+        if ($distinct -ne $goldenBuckets) {
+            $msg = "Raster capture has {0} distinct colour buckets, expected {1}. {2}" -f `
+                   $distinct, $goldenBuckets, $fixHint
+            throw $msg
+        }
+    }
 }
 
 if ($RasterOnly) {
