@@ -124,6 +124,20 @@ set(ECS_HEADERS
     src/ecs/registry.h
 )
 
+# Flight & physics (Phase 4). GPU-free by construction: sim/*.h include only
+# core/types.h and ecs/components.h (both device-free), so every file here also
+# links into TheDawningTests below and the analytic tests drive the SHIPPED
+# integrator. Do NOT add anything that includes a D3D12 or render header here.
+set(SIM_SOURCES
+    src/sim/rigid_body.cpp
+    src/sim/thrusters.cpp
+)
+
+set(SIM_HEADERS
+    src/sim/rigid_body.h
+    src/sim/thrusters.h
+)
+
 set(SCENE_SOURCES
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
@@ -152,6 +166,7 @@ set(TEST_SOURCES
     tests/test_sky_energy.cpp
     tests/test_sh_irradiance.cpp
     tests/test_ibl_consume_probe.cpp
+    tests/test_rigid_body.cpp
 )
 
 set(TEST_HEADERS
@@ -171,6 +186,8 @@ add_executable(TheDawningV3 WIN32
     ${RENDER_SOURCES}
     ${RENDER_HEADERS}
     ${ECS_HEADERS}
+    ${SIM_SOURCES}
+    ${SIM_HEADERS}
     ${SCENE_SOURCES}
     ${SCENE_HEADERS}
     ${SHADER_FILES}
@@ -243,6 +260,7 @@ source_group("Core"    FILES ${CORE_SOURCES} ${CORE_HEADERS})
 source_group("Asset"   FILES ${ASSET_SOURCES} ${ASSET_HEADERS})
 source_group("Render"  FILES ${RENDER_SOURCES} ${RENDER_HEADERS})
 source_group("ECS"     FILES ${ECS_HEADERS})
+source_group("Sim"     FILES ${SIM_SOURCES} ${SIM_HEADERS})
 source_group("Scene"   FILES ${SCENE_SOURCES} ${SCENE_HEADERS})
 source_group("Shaders" FILES ${SHADER_FILES})
 source_group("Application" FILES ${APP_SOURCES} ${APP_HEADERS})
@@ -345,6 +363,15 @@ add_executable(TheDawningTests
     # every threshold and every verdict below it is decided here.
     src/render/ibl_consume_probe.cpp
     src/render/ibl_consume_probe.h
+    # Flight & physics integrator. GPU-free on the same sanctioned footing as
+    # shadow_cascades.cpp: sim/*.h include only core/types.h and ecs/components.h
+    # (both device-free), so tests/test_rigid_body.cpp drives the SHIPPED
+    # semi-implicit-Euler integrator and thruster wrench math, not a copy. Do NOT
+    # add physics_system.cpp here if it is ever written to include a render header.
+    src/sim/rigid_body.cpp
+    src/sim/rigid_body.h
+    src/sim/thrusters.cpp
+    src/sim/thrusters.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

@@ -121,4 +121,111 @@ struct Name
 // =============================================================================
 struct ActiveTag { uint8_t _pad = 0; };
 
+// =============================================================================
+// Flight & Physics (Phase 4, Stage 1) — APPENDED, do not reorder the above.
+// =============================================================================
+// These are the dynamics-state components for the six-DOF rigid-body flight
+// model. They follow docs/research/FLIGHT_PHYSICS_DESIGN.md §3 (the double-
+// precision boundary) and §6 (single-source-of-truth pose).
+//
+// The world POSE is NOT duplicated here: position lives in Transform.position
+// (already Vec3d) and orientation in Transform.rotation (already Quatf). The
+// integrator is Each<Transform, RigidBody>: it reads the pose from Transform,
+// integrates, and writes it back. Duplicating position would create a second
+// copy free to diverge — see FLIGHT_PHYSICS_DESIGN.md §6.
+//
+// Frame conventions (fixed here, load-bearing for every sim function):
+//   - forceAccum / linearVelocity  are WORLD frame.
+//   - torqueAccum / angularVelocity are BODY frame, which is the natural frame
+//     for the diagonal body-space inertia and its gyroscopic coupling.
+// The two conventions never mix: linear dynamics live in world space, angular
+// dynamics in body space, and the exponential-map orientation update is the
+// only bridge between them.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// RigidBody — six-DOF dynamics state (semi-implicit Euler; see sim/rigid_body.h)
+// -----------------------------------------------------------------------------
+struct RigidBody
+{
+    // WORLD-frame linear velocity. Vec3d by necessity (FLIGHT_PHYSICS_DESIGN §3):
+    // it accumulates directly into the Vec3d Transform.position every step, and
+    // orbital conservation laws (½v² − μ/r, r×v) are written over it.
+    core::Vec3d linearVelocity = { 0.0, 0.0, 0.0 };
+
+    // BODY-frame angular velocity (rad/s). Bounded O(1–10), never a world
+    // position, so Vec3f — matching Velocity.angular and the deep-dive.
+    core::Vec3f angularVelocity = { 0.0f, 0.0f, 0.0f };
+
+    // Reciprocal mass. double (not float) so it multiplies the Vec3d velocity
+    // update in uniform double arithmetic (FLIGHT_PHYSICS_DESIGN §3). 0 == a
+    // static / infinite-mass body: force produces no linear acceleration.
+    double invMass = 0.0;
+
+    // BODY-frame reciprocal principal moments of inertia (1/Ixx, 1/Iyy, 1/Izz).
+    // Diagonal-only for the first slice (§2.5): distinct entries already produce
+    // the full non-commuting tumble, so no Mat3x3 is needed. A zero entry locks
+    // that axis (infinite inertia).
+    core::Vec3f invInertiaDiag = { 0.0f, 0.0f, 0.0f };
+
+    // Per-step wrench accumulators, zeroed by the integrator after each step.
+    core::Vec3d forceAccum  = { 0.0, 0.0, 0.0 };   // WORLD frame, newtons
+    core::Vec3f torqueAccum = { 0.0f, 0.0f, 0.0f }; // BODY frame, newton-metres
+
+    // Reserved for render-side interpolation (FLIGHT_PHYSICS_DESIGN §6). NOT read
+    // by the simulation — reading interpolated pose back into the sim would break
+    // determinism. Present now so adding interpolation later is not a component
+    // change. Unused in Stage 1.
+    core::Vec3d prevPosition = { 0.0, 0.0, 0.0 };
+    core::Quatf prevRotation = core::Quatf::Identity();
+};
+
+// -----------------------------------------------------------------------------
+// Thruster — one discrete thruster mounted at a body-local offset.
+// -----------------------------------------------------------------------------
+// Force = localDirection * maxForce * throttle; torque about the centre of mass
+// = (localPosition − centreOfMass) × force  (Ship deep-dive PART 2). All fields
+// are body-local geometry, comfortably inside float (a ship is tens of metres).
+// localDirection is expected to be unit length; it is used as-is, not
+// renormalised, so the force formula matches the design exactly.
+struct Thruster
+{
+    core::Vec3f localPosition  = { 0.0f, 0.0f, 0.0f }; // offset from body origin, metres
+    core::Vec3f localDirection = { 0.0f, 0.0f, 1.0f }; // unit thrust direction (body)
+    float       maxForce       = 0.0f;                  // newtons at full throttle
+    float       throttle       = 0.0f;                  // commanded [0,1]
+};
+
+// -----------------------------------------------------------------------------
+// ThrusterSet — a small fixed-capacity bank of thrusters for one body.
+// -----------------------------------------------------------------------------
+// Fixed capacity keeps the component POD (no heap, direct memcpy for save/load).
+// 32 covers the Ship deep-dive's 24-nozzle layout with headroom.
+struct ThrusterSet
+{
+    static constexpr uint32_t kMaxThrusters = 32;
+
+    Thruster thrusters[kMaxThrusters] = {};
+    uint32_t count = 0; // number of live entries in thrusters[]
+};
+
+// -----------------------------------------------------------------------------
+// FlightControl — six-axis pilot demand plus the flight-assist mode.
+// -----------------------------------------------------------------------------
+// Data only for Stage 1. The control-demand → wrench mapping and the coupled
+// auto-brake are FLIGHT_PHYSICS_DESIGN Stage 2/3 (deferred); nothing consumes
+// this component yet. Each demand axis is normalised pilot intent in [-1, 1].
+enum class FlightMode : uint32_t
+{
+    Coupled   = 0, // flight assist on: auto-brake toward zero when stick centred
+    Decoupled = 1, // raw Newtonian: no assist
+};
+
+struct FlightControl
+{
+    core::Vec3f linearDemand  = { 0.0f, 0.0f, 0.0f }; // strafe X / lift Y / thrust Z (body)
+    core::Vec3f angularDemand = { 0.0f, 0.0f, 0.0f }; // pitch X / yaw Y / roll Z (body)
+    FlightMode  mode          = FlightMode::Coupled;
+};
+
 } // namespace ecs
