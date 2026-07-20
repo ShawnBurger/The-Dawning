@@ -133,6 +133,7 @@ set(SIM_SOURCES
     src/sim/thrusters.cpp
     src/sim/flight_control.cpp
     src/sim/physics_system.cpp
+    src/sim/reference_frame.cpp
 )
 
 set(SIM_HEADERS
@@ -140,6 +141,7 @@ set(SIM_HEADERS
     src/sim/thrusters.h
     src/sim/flight_control.h
     src/sim/physics_system.h
+    src/sim/reference_frame.h
 )
 
 set(SCENE_SOURCES
@@ -173,6 +175,7 @@ set(TEST_SOURCES
     tests/test_rigid_body.cpp
     tests/test_flight_control.cpp
     tests/test_physics_system.cpp
+    tests/test_reference_frame.cpp
 )
 
 set(TEST_HEADERS
@@ -385,6 +388,13 @@ add_executable(TheDawningTests
     src/sim/flight_control.h
     src/sim/physics_system.cpp
     src/sim/physics_system.h
+    # SIM STAGE 0 coordinate architecture. GPU-free on the same sanctioned footing
+    # as shadow_cascades.cpp: reference_frame.h includes only core/types.h and
+    # <cstdint>/<vector>, so tests/test_reference_frame.cpp drives the SHIPPED
+    # sector-split world position and frame graph rather than a copy. Do NOT add
+    # anything here that pulls in a D3D12 or render header.
+    src/sim/reference_frame.cpp
+    src/sim/reference_frame.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
