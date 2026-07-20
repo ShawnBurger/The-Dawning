@@ -935,3 +935,64 @@ Proposal: neither of us builds in `The Dawning/build` for feature work. I alread
 build feature branches in `.agents/worktrees/<lane>/build`; the collision is only
 when verifying merges on main. If you need to verify a merge, say so in the
 handoff first, or use a throwaway worktree. I will do the same.
+
+# Status: per-object structured buffer is READY BUT NOT MERGED
+
+Branch: `claude/per-object-buffer-v3` (456a7b4 + 86e72ee, on current main).
+Do not merge yet - two verification blockers below. The rendering change itself
+looks sound and the rebase is clean: 16 files, +1805/-176, zero reversions of
+main's glTF loader, cooked compiler or cascade work. For contrast the earlier v2
+diff was 41 files with 6080 deletions of exactly those.
+
+What it buys: constant ring drops to 1792 bytes FLAT in both smoke modes, ~1% of
+capacity, no longer scaling with entity count. On current main with four cascades
+the ring is already at 58% on the 97-entity growth run against a 75% gate, so
+this is needed before more content lands, not after.
+
+It also correctly absorbed something written after it: v2 uploaded ONE CBPerPass
+with a single `m_lightViewProj` in `BeginShadowPass`, but main now has four
+cascades with `m_lightViewProj[4]` and a `BeginShadowCascade` v2 had never seen.
+Resolved by binding the object SRV once per pass and moving the CBPerPass upload
+into the per-cascade call.
+
+## Blocker 1: the golden capture gate cannot hold calibration
+
+Mis-calibrated twice in one round - 128.3 before cascades, then 122.9 measured on
+a clean-clone 17-entity checkout while the tree where smoke actually runs has the
+gitignored corridor GLB loaded and renders 64 buckets. README.md already says why:
+capture statistics depend on which assets sit in `build/<Config>`, which is build
+output, not tracked source.
+
+I started to fix this by replacing the exact match with a loose bucket floor, then
+checked the calibration data and found that does not work:
+
+| case | mean | buckets |
+|---|---|---|
+| correct | 122.9 | 59 |
+| `basic_vs` reads record 0 | 124.4 | 27 |
+| `shadow_vs` reads record 0 | 123.6 | 58 |
+
+A bucket floor catches the basic_vs collapse and MISSES shadow_vs, which moves the
+count by one. Only the mean separates that, by 0.7 - smaller than the
+cross-environment variation the gate cannot hold. Final-image statistics are the
+wrong instrument for the shadow path.
+
+Needs GPU-side evidence instead. The `object_records_peak` / `shadow_records` /
+`main_records` markers are CPU-side counts of what was WRITTEN and cannot see the
+GPU reading the wrong record. Sketched options are in the task list; the one I
+would try first is a small UAV the vertex shader writes its consumed record index
+into, reduced to a distinct-count marker. Do NOT recalibrate a third time.
+
+## Blocker 2: the reallocation path is opt-in
+
+Buffer reallocation is the only code here that can use-after-free with three
+frames in flight, and it runs only under `-ForceGrow`. The default loop everyone
+actually runs keeps exactly the blind spot the work was meant to close. Best fix
+is probably to set the initial capacity floor below the demo scene's draw count so
+growth happens on the default path by construction, rather than behind a flag.
+
+## Shared-build hazard, repeated
+
+We both ran cmake in `The Dawning/build` and got four `C1041` PDB-contention
+errors. Transient, clean on retry, but it presents as a compile error. Merge
+verification should move out of the shared checkout.
