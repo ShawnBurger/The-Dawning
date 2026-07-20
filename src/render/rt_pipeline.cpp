@@ -33,6 +33,9 @@ bool RTPipeline::Init(ID3D12Device5* device)
 void RTPipeline::Shutdown()
 {
     m_shaderTable.Reset();
+    for (auto& table : m_retiredShaderTables)
+        table.Reset();
+    m_retiredShaderTableSlot = 0;
     m_shaderTableInstanceCount = UINT32_MAX;
     m_stateObject.Reset();
     m_globalRootSig.Reset();

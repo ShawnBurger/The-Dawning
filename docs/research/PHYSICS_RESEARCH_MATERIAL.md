@@ -1,5 +1,9 @@
 # Gathered research material — physics for The Dawning sim
-STATUS: search + fetch + claim-extraction completed; adversarial VERIFICATION and synthesis did NOT run (session usage limit, resets 8pm CDT). Claims below are EXTRACTED FROM SOURCES, not fact-checked, except one 3-0 verified item (Markley Kepler solver). Treat as leads to verify, not settled findings.
+STATUS: PROVISIONAL. Search, fetch, and claim extraction completed; adversarial
+verification and synthesis did not run. The source URLs and extracted claims were
+exported as separate lists, so this artifact does not preserve a claim-to-source
+mapping. Except for the inherited harness label on the Markley solver, treat every
+claim below as an unattributed lead to recover and verify, not as a settled finding.
 
 ## Search angles (5)
 - **Astrodynamics / orbital-mechanics implementation**: Kepler equation solver universal variable formulation hyperbolic near-parabolic eccentricity Danby Markley initial guess orbital elements state vectors patched conics sphere of influence Vallado Curtis
@@ -8,7 +12,12 @@ STATUS: search + fetch + claim-extraction completed; adversarial VERIFICATION an
 - **Fictional physics, peer-reviewed vs disputed**: Alcubierre warp drive metric Bobrick Martire general framework Natario Van Den Broeck Lentz Fell Heisenberg positive energy soliton critique Morris-Thorne wormhole exotic matter quantum inequality FTL causality violation
 - **Engineering precedent from serious space games**: Kerbal Space Program patched conics floating origin on-rails physics GDC talk Children of a Dead Earth orbital combat sim Star Citizen Elite Dangerous 64-bit large world coordinate precision Outer Wilds
 
-## Sources gathered (29 unique URLs)
+## Sources gathered (29 unique URLs; mixed authority)
+
+This corpus mixes peer-reviewed papers and official technical material with project
+source, developer blogs/interviews, encyclopedia pages, and practitioner articles.
+The `(rel high)` and `(rel medium)` labels record search relevance, not source
+authority or verification status.
 - [Kepler Equation Solver — F. Landis Markley (NASA, 1995)](https://ntrs.nasa.gov/api/citations/19950021346/downloads/19950021346.pdf) (rel high)
 - [Robust resolution of Kepler's equation in all eccentricity regimes (Celestial Mechanics and Dynamical Astronomy, 2013)](https://link.springer.com/article/10.1007/s10569-013-9476-9) (rel high)
 - [A fast and accurate universal Kepler solver without Stumpff series (MNRAS, 2015)](https://academic.oup.com/mnras/article/453/3/3015/1752673) (rel high)
@@ -39,7 +48,7 @@ STATUS: search + fetch + claim-extraction completed; adversarial VERIFICATION an
 - [Integration Basics (Gaffer On Games — Glenn Fiedler)](https://gafferongames.com/post/integration_basics/) (rel high)
 - [Orbit — Kerbal Space Program Wiki](https://wiki.kerbalspaceprogram.com/wiki/Orbit) (rel medium)
 
-## Extracted claims (117) — UNVERIFIED unless noted
+## Extracted claims (117) — UNVERIFIED and not individually source-mapped
 
 **[central]** Rapidity is defined as the integral of proper acceleration over proper time (phi = integral of a(s) ds from 0 to tau), providing a natural additive variable for relativistic dynamics.
   > The quantity φ = ∫₀^τ a(s)ds is known as the rapidity.

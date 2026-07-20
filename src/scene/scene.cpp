@@ -129,14 +129,7 @@ void Scene::SystemVelocity(double dt)
 // =============================================================================
 void Scene::SystemRotation(double dt)
 {
-    m_registry.Each<ecs::Transform, ecs::RotationSpeed>(
-        [dt](uint32_t /*entityIdx*/, ecs::Transform& transform, ecs::RotationSpeed& spin)
-        {
-            const float angle = spin.radiansPerSecond * static_cast<float>(dt);
-            core::Quatf delta = core::Quatf::FromAxisAngle(spin.axis, angle);
-            transform.rotation = (transform.rotation * delta).Normalized();
-        }
-    );
+    ecs::systems::IntegrateRotations(m_registry, dt);
 }
 
 // =============================================================================
@@ -146,8 +139,9 @@ void Scene::SystemRotation(double dt)
 // per fixed step. This is called from UpdateSystems, which app.cpp drains on the
 // RULE-6 fixed-timestep accumulator (`while (ConsumeFixedStep()) UpdateSystems(
 // GetFixedDt())`), so it advances by a constant dt independent of the render
-// frame. It keys on RigidBody, disjoint from SystemVelocity's Velocity movers, so
-// the two coexist without touching the same entities.
+// frame. RigidBody owns its Transform even if a legacy Velocity or RotationSpeed
+// component remains during an ownership transition; those systems explicitly
+// skip rigid bodies so the pose is integrated exactly once.
 void Scene::SystemFlightPhysics(double dt)
 {
     sim::StepFlightPhysics(m_registry, dt);

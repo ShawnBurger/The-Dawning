@@ -997,14 +997,19 @@ tractable across a galaxy.
 
 ### The N-body / on-rails hybrid by scale
 
-- **Active gravitational system (where the player is): FULL N-BODY.** Every
-  significant body (star, planets, moons, stations, ships) integrated under the
-  summed pairwise Newtonian gravity of every other significant body, with a
-  **Forest-Ruth 4th-order symplectic integrator** (the CoDE choice; PHYSICS_-
-  RESEARCH_REFERENCE.md §2/§11). This is what buys real perturbation, Lagrange
-  points, and multi-body accuracy. A star system has O(10-100) significant bodies
-  plus ships, which is trivially real-time at 60 Hz. Softening is the ONE shared
-  Plummer constant already specified (§5), floored at max(body radius, r_s+eps).
+- **Active gravitational system (where the player is): FULL N-BODY GRAVITY.** Every
+  dynamic body receives the summed Newtonian gravity of the active massive bodies.
+  Massive contributors are integrated pairwise; ships, stations, missiles, and
+  debris are test particles unless their configured mass crosses an explicit
+  contribution threshold. Evaluate each massive pair once and apply equal/opposite
+  impulses in stable-ID order so momentum symmetry and deterministic summation are
+  designed in. A **Forest-Ruth 4th-order symplectic integrator** is the baseline
+  candidate for the fixed-step conservative gravity subsystem (the CoDE choice;
+  `PHYSICS_RESEARCH_REFERENCE.md` §2/§11). It is not automatically the integrator
+  for thrust, drag, collision impulses, or other nonconservative forces. A system
+  with O(100) massive contributors requires roughly O(10^4) pair evaluations per
+  substep, which is a reasonable starting budget but must be profiled. Softening
+  uses the shared policy already specified in §5.
 - **Inactive / distant systems: ON-RAILS KEPLER for LOD.** A planet in a system
   the player is not in cannot be meaningfully perturbed by the player, and its
   siblings' perturbations are cosmetic at that distance, so it propagates on
@@ -1034,6 +1039,19 @@ tractable across a galaxy.
   a two-body N-body case CLOSES on the analytic Kepler orbit over one period to the
   integrator's actual tolerance, and (c) dt-CONVERGENCE of the drift. The Forest-Ruth
   coefficients themselves get a unit test against their published values.
+- Integrator domain: the bounded-energy claim applies only to an isolated,
+  conservative, fixed-step gravity test. Player ships under thrust, atmospheric
+  drag, collisions, scripted forces, or relativistic adapters do not conserve that
+  Hamiltonian. Apply those forces through an explicit operator split or a separate
+  integrator, and never use total-energy conservation as their acceptance test.
+- Close encounters: fixed-step symplectic methods lose accuracy when a pair becomes
+  too close. Detect encounters from physical radii and a timestep-derived approach
+  bound, then route the pair through a documented collision or high-accuracy hybrid
+  path. Plummer softening is not permission to integrate through a collision.
+- Time acceleration: changing a symplectic timestep ad hoc changes the modified
+  Hamiltonian and can introduce secular error. Time-warp modes need deterministic,
+  block-synchronized step schedules with convergence gates; 60 Hz real-time cost
+  alone does not establish time-warp accuracy.
 - Determinism: N-body is deterministic under fixed dt and fixed body iteration
   order (RULE 6). Same-binary determinism is a goal; the force-summation order must
   be fixed (sort by a stable body id) so floating-point non-associativity does not
@@ -1054,3 +1072,7 @@ catastrophic-cancellation concern of §1 now applies to every gravity pair.
 
 Stage 0 (coordinate validation) remains the first thing built and is unaffected by
 this revision. The orbital stage that follows is now N-body-first per this note.
+This also supersedes the Stage 4 label in §9: Stage 3 establishes the pairwise
+gravity kernel and ownership guard; revised Stage 4 adds active-system N-body,
+inactive-system Kepler LOD, promotion/demotion continuity, close-encounter routing,
+and time-warp convergence.

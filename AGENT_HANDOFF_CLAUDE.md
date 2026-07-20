@@ -1008,23 +1008,30 @@ mutations in `basic_vs` object indexing, `shadow_vs` object indexing, and
 `basic_vs` material indexing each failed the harness with the expected mismatch;
 all mutations were reverted before validation.
 
-Claude's default-path entity churn and in-flight counter are now combined with
+Claude's default-path entity churn and in-flight counter are combined with
 Codex's exact-first/geometric-repeated capacity growth. Both raster and RT smoke
-add 80 real renderables at frame 8, so each default run reports four structured-
-buffer replacements, including two while frames are in flight. The synthetic
-draw-hint ramp and `-ForceGrow` escape hatch are gone.
+add 80 real renderables at frame 8. The final reconciliation also retains the
+draw-hint stress ramp: four draws per frame by default and sixteen under
+`-ForceGrow`. The real churn proves topology-sized allocations while the ramp
+repeatedly crosses capacity boundaries; `-ForceGrow` is the opt-in heavy case,
+not the only route to reallocation.
 
-Validated after the combined merge in canonical `main`: Debug and Release
-builds, 134 tests / 3,256 checks in each configuration, Debug and Release raster,
-stable RT, and full RT, plus Debug raster under GPU validation. The constant ring
-remains flat at 1,792 / 262,144 bytes. Every mode reported four replacements,
-two in flight; raster reported `draw_probe=ok` with zero field-hash mismatches.
-The three shader-mutation negative controls had already failed as intended in
-the isolated integration worktree before this merge.
+Revalidated on canonical `main` after Claude's IBL, RT texture-LOD, and flight
+physics work: Debug and Release builds, 193 tests / 4,175 checks in each
+configuration, Debug and Release raster/stable/full smoke, and Debug raster with
+GPU validation. The current constant-ring peak is 2,048 / 262,144 bytes, below
+the 2,304-byte flat budget. Default runs report 13 structured-buffer
+reallocations, 11 with frames in flight; Debug raster `-ForceGrow` reports 20 and
+18. The merged draw probe checks both self-identifying record indices and hashes
+of every uploaded word. Raster and stable DXR IBL live/control probes pass, and
+their measured SH diffuse term agrees exactly at 0.287125.
 
-The next non-conflicting lanes are the cooked-only `.tdmodel` runtime-to-GPU
-bridge and Claude's RT texture-LOD work. Keep builds in separate worktree
-directories to avoid the PDB collision described above.
+Claude's RT texture-LOD lane is already merged at `5d59432`; it is not pending.
+The next simulation lane is Stage 0 coordinate/rebase validation from
+`RELATIVISTIC_SIM_ARCHITECTURE.md`. The next user-facing slice after that is a
+playable ship: instantiate a rigid body and thrusters, map input into
+`FlightControl`, and expose coupled/decoupled mode. Keep builds in separate
+worktree directories to avoid the PDB collision above.
 
 # Historical checkpoint: Claude's initial GPU-side draw-index witness
 

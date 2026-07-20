@@ -1,9 +1,10 @@
 # Physics research reference — implementation notes for the sim
 
 Companion to `RELATIVISTIC_SIM_ARCHITECTURE.md`. Produced by a deep-research pass
-(5 search angles, 29 authoritative sources, 117 extracted claims). It confirms
-most of the architecture's locked decisions and surfaces one real tension worth
-reconsidering (patched-conics vs N-body).
+(5 search angles, 29 mixed primary/secondary URLs, 117 extracted claims). It
+provisionally supports several architecture decisions and surfaced the
+patched-conics vs N-body tradeoff. It is a research index, not an implementation
+contract.
 
 ## Epistemic status — read this first
 
@@ -11,17 +12,19 @@ The research harness completed **search, fetch, and claim-extraction** but its
 **adversarial verification and synthesis did not run** — the session usage limit
 was hit mid-verification (resets 8 pm CDT). So confidence is tagged per item:
 
-- **[VERIFIED 3-0]** — survived the harness's three-vote adversarial check. Exactly
-  one claim reached this: the Markley Kepler solver.
-- **[SOURCED]** — a direct quote from a named authoritative source (NASA NTRS,
-  MNRAS, arXiv, *Class. Quantum Grav.*, GDC, or a shipped-game postmortem) AND
-  standard textbook physics. High confidence, but not adversarially challenged.
+- **[VERIFIED 3-0]** — inherited from the research harness's three-vote check.
+  Exactly one claim reached this: the Markley Kepler solver. The repository has
+  not independently reproduced that vote.
+- **[SOURCED]** — the claim was synthesized from the gathered corpus. The exported
+  raw material does not retain a per-claim source ID, so this label is provisional
+  until the source mapping is recovered and checked against the primary text.
 - **[DISPUTED]** — the sources themselves disagree; presented as a live dispute,
   never as settled. All the warp positive-energy claims are here.
 
-The raw gathered material (all 117 claims with quotes and sources) is preserved in
-`PHYSICS_RESEARCH_MATERIAL.md`. The harness can be resumed to complete verification
-(`resumeFromRunId` on the deep-research workflow) once the limit resets.
+The raw material preserves 117 claims with quote fragments and a separate list of
+29 URLs in `PHYSICS_RESEARCH_MATERIAL.md`; it does not say which URL supports each
+claim. Recover that mapping before using a numerical constant, performance ratio,
+or disputed physics statement as a build requirement.
 
 ---
 
@@ -59,12 +62,13 @@ The elliptic form `M = E − e·sin E` and hyperbolic `M = e·sinh E − E`.
 - **[SOURCED]** Known limits: patched conics "does not model Lagrangian points" and
   is insufficiently accurate for some missions.
 
-→ **Confirms** the architecture's Kepler-robustness and SOI-continuity decisions.
+→ **Provisionally supports** the architecture's Kepler-robustness and
+SOI-continuity decisions.
 See the tension in §11 on patched-conics vs N-body.
 
 ## 2. Integrators and conservation
 
-- **[SOURCED]** Children of a Dead Earth — the most physically-serious orbital game
+- **[SOURCED]** Children of a Dead Earth — a physics-focused orbital game
   — propagates with a **fourth-order symplectic (Forest–Ruth)** integrator, chosen
   for energy/momentum conservation over standard integrators.
 - **[SOURCED]** Symplectic methods (leapfrog / velocity-Verlet / KDK, Forest–Ruth)
@@ -84,7 +88,7 @@ See the tension in §11 on patched-conics vs N-body.
   through **relativistic velocity addition** of a per-step increment — "automatically
   guarantees the player will not move faster than the speed of light." The
   architecture's **momentum-space** recovery `v = p/√(m² + (|p|/c)²)` achieves the
-  same invariant in momentum space; both are valid, and the precedent confirms the
+  same invariant in momentum space; both are valid, and the precedent supports the
   *strategy* (make sub-c a property of the state, not a clamp).
 - **[SOURCED]** Rapidity `φ = ∫ a dτ` is the natural additive variable; `v = c·tanh φ`
   structurally bounds speed. A momentum/rapidity state is what serious SR sims
@@ -112,7 +116,7 @@ See the tension in §11 on patched-conics vs N-body.
 
 - Covered above: Newtonian point-mass, Plummer softening, and the explicit rejection
   of discontinuous cutoffs (the deep-dive's `if(dist<1) continue`) are in the
-  architecture. The research confirms the N-body-vs-analytic tradeoff (§11).
+  architecture. The research illustrates the N-body-vs-analytic tradeoff (§11).
 
 ## 6. Atmospheric flight
 
@@ -138,13 +142,14 @@ research area; do not implement from memory without the harness pass.
 - The architecture's **hierarchical frames + camera-relative narrowing** is a third,
   compatible approach. The **interstellar precision hole it flagged is real**: double
   gives ~metre resolution at 1 ly, so a top-level galactic frame needs sub-framing
-  (integer sector + double intra-sector) — the research confirms this is unsolved by
+  (integer sector + double intra-sector) — the research suggests this is unsolved by
   hierarchy alone and matches how 64-bit-world games cap their extent.
 
 ## 8–10. Fictional physics — Alcubierre, wormholes, FTL
 
-**All internally-consistent fiction, not achievable physics. The research confirms
-the constraints that keep the fiction honest:**
+**These are mathematical proposals used here as fictional devices, not established
+technology. The provisional research identifies constraints that keep the fiction
+honest:**
 
 - **[SOURCED]** Alcubierre (1994): warp bubble, ship locally sub-c, requires
   **negative energy density / exotic matter**. Bobrick & Martire (2021) give a
@@ -169,11 +174,13 @@ the constraints that keep the fiction honest:**
 
 ## 11. The one tension worth reconsidering — patched conics vs N-body
 
-The architecture chose **on-rails patched conics** for passive orbits, justified by
-robustness: analytic propagation *cannot* drift, is deterministic, and is cheap.
+The original architecture chose **on-rails patched conics** for passive orbits,
+justified by robustness: analytic propagation *cannot* drift, is deterministic,
+and is cheap. Commit `b197701` supersedes that choice with N-body by default in the
+active system and Kepler rails as a distant-system LOD.
 
-The research surfaces that the **most physically-serious game, Children of a Dead
-Earth, deliberately chose the opposite** — a full N-body simulation with a
+The research surfaces that **Children of a Dead Earth deliberately chose the
+opposite** — a full N-body simulation with a
 Forest–Ruth symplectic integrator — and calls patched conics "much less accurate,"
 citing NASA's practice of patched-conics-for-estimates, N-body-for-precision. N-body
 also reproduces **Lagrange points and multi-body perturbation**, which patched
@@ -187,19 +194,18 @@ This is a genuine design tension, not a defect in either choice:
   perturbations; but drifts (bounded, symplectic), more expensive, and determinism
   needs care.
 
-**Recommendation:** keep patched conics as the *default owner* per the architecture
-— its robustness properties are exactly what the owner asked for — but the design
-should explicitly note N-body symplectic as the accuracy-upgrade path for the
-"actively perturbed" bodies the architecture already carves out for force
-integration, and Lagrange-point gameplay as a feature patched conics forecloses.
-Feed this back into `RELATIVISTIC_SIM_ARCHITECTURE.md` §4.
+**Current decision:** use N-body gravity in the active system and retain analytic
+Kepler propagation as a distant-system LOD. Forest-Ruth is only a candidate for the
+fixed-step, conservative gravitational subsystem. Thrust, drag, collisions, close
+encounters, and time acceleration require explicit integration policies and
+separate verification; the game precedent alone does not settle those choices.
 
 ---
 
 ## Open follow-ups when the session limit resets
 
-1. **Resume the harness** to complete adversarial verification of the 116
-   still-unverified claims (especially the disputed warp items — the verification
-   is where their contested status gets pinned).
+1. Recover a claim-to-source mapping, then resume adversarial verification of the
+   116 still-unverified claims (especially the disputed warp items).
 2. **Atmospheric flight (§6)** is the thinnest area — re-run that angle specifically.
-3. Fold the **patched-conics-vs-N-body tension (§11)** into the architecture doc.
+3. Verify the active-system integrator against primary literature for conservative
+   gravity, nonconservative force splitting, close encounters, and time acceleration.

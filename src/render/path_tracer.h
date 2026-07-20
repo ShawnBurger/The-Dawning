@@ -41,9 +41,9 @@ namespace render
 struct RTEnvironmentInputs
 {
     // Null on the frames before Renderer::Init has baked the cube. The path
-    // tracer writes a null cube SRV and clears the enable flag in that case, so
-    // the shader's `if (g_IblParams.z != 0)` is the single place the absence is
-    // handled - the same shape the raster path uses.
+    // tracer leaves the reserved descriptor untouched and clears the enable
+    // flag in that case, so the shader's `if (g_IblParams.z != 0)` is the single
+    // place the absence is handled - the same shape the raster path uses.
     const EnvironmentIBL* ibl = nullptr;
 
     // Uploaded as iblParams.y, matching CBPerFrame::iblParams.y exactly. If the
@@ -201,8 +201,9 @@ private:
     bool CreateConstantBuffer(ID3D12Device5* device);
     bool CreateIBLProbeResources(ID3D12Device5* device);
     // Writes the environment cube's SRV into this frame slot's reserved
-    // descriptor, or a null cube SRV when there is no cube yet. Returns whether a
-    // real cube landed there, which is what drives iblParams.z.
+    // descriptor when one is available. Returns whether a real cube is bound,
+    // which is what drives iblParams.z and prevents stale descriptors from being
+    // sampled when the environment is absent.
     bool UpdateEnvironmentDescriptor(ID3D12Device5* device, const EnvironmentIBL* ibl);
     // One growth path for all five per-frame upload buffers. Allocates
     // kFrameCount instances so each frame in flight writes its own copy.

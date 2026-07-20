@@ -589,6 +589,42 @@ TEST_CASE(VelocitySystem_RegistryVisitsOnlyCompleteMotionPairs)
     CHECK_APPROX(registry.Get<ecs::Transform>(transformOnly).position.x, 0.0);
 }
 
+TEST_CASE(MotionSystems_RigidBodyExclusivelyOwnsItsTransform)
+{
+    ecs::Registry registry;
+
+    const ecs::Entity kinematic = registry.Create();
+    registry.Assign<ecs::Transform>(kinematic);
+    registry.Assign<ecs::Velocity>(
+        kinematic, ecs::Velocity{ { 2.0f, 0.0f, 0.0f }, {} });
+    registry.Assign<ecs::RotationSpeed>(
+        kinematic, ecs::RotationSpeed{ core::PI, { 0.0f, 1.0f, 0.0f } });
+
+    const ecs::Entity dynamic = registry.Create();
+    registry.Assign<ecs::Transform>(dynamic);
+    registry.Assign<ecs::Velocity>(
+        dynamic, ecs::Velocity{ { 20.0f, 0.0f, 0.0f }, {} });
+    registry.Assign<ecs::RotationSpeed>(
+        dynamic, ecs::RotationSpeed{ core::PI, { 0.0f, 1.0f, 0.0f } });
+    registry.Assign<ecs::RigidBody>(dynamic);
+
+    ecs::systems::IntegrateVelocities(registry, 0.25);
+    ecs::systems::IntegrateRotations(registry, 0.5);
+
+    CHECK_APPROX(registry.Get<ecs::Transform>(kinematic).position.x, 0.5);
+    const core::Vec3f kinematicForward =
+        registry.Get<ecs::Transform>(kinematic).rotation.Rotate({ 1.0f, 0.0f, 0.0f });
+    CHECK_APPROX(kinematicForward.x, 0.0f);
+    CHECK_APPROX(kinematicForward.z, -1.0f);
+
+    const ecs::Transform& dynamicTransform = registry.Get<ecs::Transform>(dynamic);
+    CHECK_APPROX(dynamicTransform.position.x, 0.0);
+    CHECK_APPROX(dynamicTransform.rotation.x, 0.0f);
+    CHECK_APPROX(dynamicTransform.rotation.y, 0.0f);
+    CHECK_APPROX(dynamicTransform.rotation.z, 0.0f);
+    CHECK_APPROX(dynamicTransform.rotation.w, 1.0f);
+}
+
 TEST_CASE(VelocitySystem_RejectsNonPositiveAndNonFiniteTimesteps)
 {
     ecs::Transform transform;
