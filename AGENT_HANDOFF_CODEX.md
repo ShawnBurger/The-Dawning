@@ -7,6 +7,7 @@ manifests.
 Codex is taking `codex/asset-compiler` and owns:
 
 - new `src/asset/cooked_model.*`
+- new `src/asset/source_snapshot.*`
 - new `tools/asset_compiler.cpp`
 - new `tests/test_asset_compiler.cpp`
 - source-dependency identity additions in `src/asset/gltf_importer.*`
@@ -32,12 +33,14 @@ replacement after temporary-file verification. It hashes external buffers and
 images, embeds external images, blocks source-path aliases, and uses unique
 temporary siblings with bounded Windows sharing retries. The standalone
 `TheDawningAssetCompiler` imports GLTF/GLB, cooks it, writes it, and
-reload-verifies the result without D3D12.
+reload-verifies the result without D3D12. Dependency bytes are snapshotted
+before import and verified unchanged afterward, so a concurrent source edit
+aborts instead of pairing stale geometry with a newer identity.
 
 Validation before integration:
 
 - Debug compiler and tests build: pass
-- Unit tests: 104 cases, 1,425 checks, zero failures
+- Unit tests: 105 cases, 1,434 checks, zero failures
 - Corridor section: 15,562 vertices / 19,193 triangles / 9,533,104 bytes, pass
 - Corridor wall: 100,644 vertices / 71,843 triangles / 34,929,120 bytes, pass
 - repeated production compile: byte-identical SHA-256, pass

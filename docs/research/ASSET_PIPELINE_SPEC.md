@@ -199,8 +199,11 @@ versioned sections are:
 Dependencies are sorted by URI before serialization. Each records URI, byte
 size, and SHA-256; duplicate source references are canonicalized. External
 buffer and image URIs are percent-decoded and hashed, and external images are
-embedded so moving the cooked artifact does not sever its textures. The source
-file also has a SHA-256 in the header. The offline compiler validates memory,
+embedded from those same captured bytes so moving the cooked artifact does not
+sever its textures. Dependencies are snapshotted before import and hashed again
+after import; any concurrent mutation aborts the cook rather than pairing model
+data with a different dependency identity. The source file also has a SHA-256
+in the header. The offline compiler validates memory,
 writes a process-unique temporary sibling, reloads that temporary file, and only
 then atomically replaces the destination. Concurrent publishers retry bounded
 Windows sharing conflicts. The loader has configurable caps for file and

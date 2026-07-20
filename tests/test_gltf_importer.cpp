@@ -490,6 +490,16 @@ TEST_CASE(GltfImporter_RejectsUnsafeExternalDependencyUris)
 
 TEST_CASE(GltfImporter_ReportsDecodedExternalBufferDependencies)
 {
+    const asset::GltfDependencyScanResult scanned =
+        asset::ScanGltfSourceDependencies(BuildExternalBufferGltf("%6d%65sh.bin"));
+    CHECK(scanned.Succeeded());
+    CHECK_EQ(scanned.dependencies.size(), size_t{ 1 });
+    if (!scanned.dependencies.empty())
+    {
+        CHECK_EQ(scanned.dependencies[0].uri, std::string("mesh.bin"));
+        CHECK_EQ(scanned.dependencies[0].kind, asset::GltfDependencyKind::Buffer);
+    }
+
     const std::filesystem::path directory =
         std::filesystem::temp_directory_path() / "the_dawning_gltf_dependency_test";
     std::error_code errorCode;

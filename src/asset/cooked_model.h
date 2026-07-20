@@ -102,6 +102,7 @@ CookedModelResult LoadCookedModelFile(
 CookedModelStatus WriteCookedModelFileAtomic(
     const std::filesystem::path& path,
     std::span<const std::byte> bytes,
-    std::string& error);
+    std::string& error,
+    const CookedModelLimits& limits = {});
 
 } // namespace asset

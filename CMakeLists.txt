@@ -39,12 +39,14 @@ set(CORE_HEADERS
 set(ASSET_SOURCES
     src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
+    src/asset/source_snapshot.cpp
 )
 
 set(ASSET_HEADERS
     src/asset/cooked_model.h
     src/asset/model_data.h
     src/asset/gltf_importer.h
+    src/asset/source_snapshot.h
 )
 
 set(RENDER_SOURCES

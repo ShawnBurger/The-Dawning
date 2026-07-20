@@ -1421,9 +1421,10 @@ CookedModelResult LoadCookedModelFile(
 CookedModelStatus WriteCookedModelFileAtomic(
     const std::filesystem::path& path,
     std::span<const std::byte> bytes,
-    std::string& error)
+    std::string& error,
+    const CookedModelLimits& limits)
 {
-    const CookedModelResult memoryVerification = LoadCookedModelMemory(bytes);
+    const CookedModelResult memoryVerification = LoadCookedModelMemory(bytes, limits);
     if (!memoryVerification.Succeeded())
     {
         error = "refusing to publish invalid cooked bytes: " + memoryVerification.error;
@@ -1468,7 +1469,7 @@ CookedModelStatus WriteCookedModelFileAtomic(
         }
     }
 
-    const CookedModelResult diskVerification = LoadCookedModelFile(temporary);
+    const CookedModelResult diskVerification = LoadCookedModelFile(temporary, limits);
     if (!diskVerification.Succeeded())
     {
         std::filesystem::remove(temporary, errorCode);

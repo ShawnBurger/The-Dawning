@@ -50,6 +50,15 @@ struct GltfSourceDependency
     GltfDependencyKind kind = GltfDependencyKind::Buffer;
 };
 
+struct GltfDependencyScanResult
+{
+    GltfImportStatus status = GltfImportStatus::ParseError;
+    std::vector<GltfSourceDependency> dependencies;
+    std::string error;
+
+    bool Succeeded() const { return status == GltfImportStatus::Success; }
+};
+
 struct GltfImportResult
 {
     GltfImportStatus status = GltfImportStatus::ParseError;
@@ -70,6 +79,10 @@ GltfImportResult ImportGltfFile(
 GltfImportResult ImportGltfMemory(
     std::span<const std::byte> bytes,
     const std::filesystem::path& virtualSourcePath = {},
+    const GltfImportLimits& limits = {});
+
+GltfDependencyScanResult ScanGltfSourceDependencies(
+    std::span<const std::byte> bytes,
     const GltfImportLimits& limits = {});
 
 } // namespace asset

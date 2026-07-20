@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "asset/cooked_model.h"
+#include "asset/source_snapshot.h"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -545,11 +547,53 @@ TEST_CASE(AssetCompiler_InvalidAtomicWritePreservesExistingOutput)
     corrupted.back() ^= std::byte{ 0x01 };
     CHECK_EQ(asset::WriteCookedModelFileAtomic(output, corrupted, error),
              asset::CookedModelStatus::IntegrityMismatch);
+    asset::CookedModelLimits restrictedLimits;
+    restrictedLimits.maxFileBytes = built.bytes.size() - 1;
+    CHECK_EQ(asset::WriteCookedModelFileAtomic(
+                 output, built.bytes, error, restrictedLimits),
+             asset::CookedModelStatus::ResourceLimitExceeded);
     const asset::CookedModelResult preserved = asset::LoadCookedModelFile(output);
     CHECK(preserved.Succeeded());
     if (preserved.Succeeded())
         CHECK_EQ(preserved.metadata.sourceSha256, BuildMetadata().sourceSha256);
     std::filesystem::remove(output, errorCode);
+}
+
+TEST_CASE(AssetCompiler_DetectsDependencyMutationDuringCook)
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "the_dawning_snapshot_mutation_test";
+    const std::filesystem::path dependencyPath = directory / "mesh.bin";
+    std::error_code errorCode;
+    std::filesystem::remove_all(directory, errorCode);
+    std::filesystem::create_directories(directory, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (errorCode)
+        return;
+
+    {
+        std::ofstream stream(dependencyPath, std::ios::binary);
+        stream << "before import";
+    }
+    const std::vector<asset::GltfSourceDependency> dependencies = {
+        { "mesh.bin", asset::GltfDependencyKind::Buffer }
+    };
+    const asset::SourceSnapshotResult captured =
+        asset::CaptureSourceDependencies(directory, dependencies);
+    CHECK(captured.Succeeded());
+    if (!captured.Succeeded())
+        return;
+
+    {
+        std::ofstream stream(dependencyPath, std::ios::binary | std::ios::trunc);
+        stream << "changed during import";
+    }
+    std::string error;
+    CHECK_EQ(asset::VerifySourceDependenciesUnchanged(
+                 directory, captured.dependencies, error),
+             asset::SourceSnapshotStatus::Changed);
+    CHECK(error.find("changed during compilation") != std::string::npos);
+    std::filesystem::remove_all(directory, errorCode);
 }
 
 TEST_CASE(AssetCompiler_RejectsInvalidModelBeforeWriting)

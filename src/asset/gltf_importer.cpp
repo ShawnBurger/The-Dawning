@@ -125,6 +125,32 @@ void AddSourceDependency(
     dependencies.push_back({ std::move(decoded), kind });
 }
 
+bool CollectSourceDependencies(
+    const cgltf_data& data,
+    std::vector<GltfSourceDependency>& dependencies,
+    std::string& error)
+{
+    for (cgltf_size i = 0; i < data.buffers_count; ++i)
+    {
+        if (!IsControlledRelativeUri(data.buffers[i].uri))
+        {
+            error = "buffer URI escapes the controlled asset directory";
+            return false;
+        }
+        AddSourceDependency(data.buffers[i].uri, GltfDependencyKind::Buffer, dependencies);
+    }
+    for (cgltf_size i = 0; i < data.images_count; ++i)
+    {
+        if (!IsControlledRelativeUri(data.images[i].uri))
+        {
+            error = "image URI escapes the controlled asset directory";
+            return false;
+        }
+        AddSourceDependency(data.images[i].uri, GltfDependencyKind::Image, dependencies);
+    }
+    return true;
+}
+
 float Determinant3x3(const core::Mat4x4& matrix)
 {
     return matrix.m[0][0] * (matrix.m[1][1] * matrix.m[2][2] - matrix.m[1][2] * matrix.m[2][1])
@@ -980,16 +1006,9 @@ GltfImportResult ImportParsedData(
     GltfImportResult result;
     result.status = GltfImportStatus::Success;
     result.model.name = sourcePath.empty() ? "memory" : sourcePath.stem().string();
-    for (cgltf_size i = 0; i < data->buffers_count; ++i)
-    {
-        AddSourceDependency(data->buffers[i].uri, GltfDependencyKind::Buffer,
-                            result.sourceDependencies);
-    }
-    for (cgltf_size i = 0; i < data->images_count; ++i)
-    {
-        AddSourceDependency(data->images[i].uri, GltfDependencyKind::Image,
-                            result.sourceDependencies);
-    }
+    std::string dependencyError;
+    if (!CollectSourceDependencies(*data, result.sourceDependencies, dependencyError))
+        return Failure(GltfImportStatus::ValidationError, std::move(dependencyError));
     ImportImages(*data, result.model);
     ImportSamplersAndTextures(*data, result.model);
     ImportMaterials(*data, result.model);
@@ -1104,6 +1123,42 @@ GltfImportResult ImportGltfMemory(
             std::string("glTF parse failed: ") + CgltfResultName(parseResult));
     }
     return ImportParsedData(CgltfDataPtr(rawData), virtualSourcePath, limits);
+}
+
+GltfDependencyScanResult ScanGltfSourceDependencies(
+    std::span<const std::byte> bytes,
+    const GltfImportLimits& limits)
+{
+    GltfDependencyScanResult result;
+    if (bytes.empty())
+    {
+        result.error = "glTF source is empty";
+        return result;
+    }
+    if (bytes.size() > limits.maxSourceBytes)
+    {
+        result.status = GltfImportStatus::SourceTooLarge;
+        result.error = "glTF source exceeds the configured size limit";
+        return result;
+    }
+
+    cgltf_options options = {};
+    cgltf_data* rawData = nullptr;
+    const cgltf_result parseResult =
+        cgltf_parse(&options, bytes.data(), bytes.size(), &rawData);
+    if (parseResult != cgltf_result_success)
+    {
+        result.error = std::string("glTF parse failed: ") + CgltfResultName(parseResult);
+        return result;
+    }
+    CgltfDataPtr data(rawData);
+    if (!CollectSourceDependencies(*data, result.dependencies, result.error))
+    {
+        result.status = GltfImportStatus::ValidationError;
+        return result;
+    }
+    result.status = GltfImportStatus::Success;
+    return result;
 }
 
 } // namespace asset
