@@ -88,6 +88,14 @@ public:
     ResourceManager&    GetResources()      { return m_resources; }
     render::PathTracer* GetPathTracer()     { return &m_pathTracer; }
     uint32_t            EntityCount() const { return m_registry.EntityCount(); }
+
+    // Size hint for the renderer's per-draw structured buffers: the MeshInstance
+    // pool's population, i.e. an UPPER bound on the draws either render pass can
+    // issue. It counts invisible entities and entities missing a Transform or
+    // Material, all of which the two walks skip - which is exactly what you want
+    // for sizing, since over-counting costs a slightly larger allocation while
+    // under-counting costs skipped draws. Defined in scene.cpp per RULE 2.
+    uint32_t            MeshInstanceCount() const;
     bool                IsRTReady() const   { return m_rtReady; }
 
     // --- RT Helpers (public for init) ---

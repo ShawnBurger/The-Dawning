@@ -8,13 +8,20 @@
 //   - Per-frame constant buffer upload ring (persistently mapped, 256-byte aligned)
 //   - Draw dispatch for meshes with per-object transforms and materials
 //
-// Constant buffer layout (matches shaders):
-//   b0: CBPerObject  — worldViewProj, world, worldInvTranspose (192 bytes → 256 aligned)
-//   b1: CBPerFrame   — lightDir, lightColor, ambient, eyePos (64 bytes → 256 aligned)
-//   b2: CBMaterial    — albedo, roughness, metallic, texture indices
+// Shader binding layout (matches the raster shaders):
+//   t0/space2: StructuredBuffer<ObjectData>   — per-draw transforms  (root SRV)
+//   t0/space3: StructuredBuffer<MaterialData> — per-draw material    (root SRV)
+//   b1:        CBPerFrame   — light, ambient, camera basis, lightViewProj
+//   b3:        CBDrawIndex  — { objectIndex, materialIndex }, root 32-bit constants
+//   b4:        CBPerPass    — viewProj; light matrix in the shadow pass, camera
+//                             matrix in the main pass. Once per pass, not per draw.
+//   b0 and b2 are permanently free: they were CBPerObject and CBMaterial, and
+//   the new registers are deliberately NOT reused so a diff cannot confuse
+//   "b0 is per-object data" with "b0 is a draw index".
 // =============================================================================
 
 #include "d3d12_device.h"
+#include "gpu_draw_records.h"   // ObjectData / MaterialData / CBPerPass layouts
 #include "descriptor_allocator.h"
 #include "mesh.h"
 #include "camera.h"
@@ -30,13 +37,6 @@ namespace render
 // =============================================================================
 // Constant buffer structs (must match HLSL cbuffer layouts exactly)
 // =============================================================================
-struct CBPerObject
-{
-    float worldViewProj[16];
-    float world[16];
-    float worldInvTranspose[16];
-};
-
 struct CBPerFrame
 {
     float lightDir[3];
@@ -102,27 +102,6 @@ static_assert(core::kShadowCascadeCount == 4,
               "changing the count means repacking them as float4[(N+3)/4] and "
               "indexing [i/4][i%4]");
 
-struct CBMaterial
-{
-    float albedo[4];     // RGBA
-    float roughness;
-    float metallic;
-    uint32_t useAlbedoTexture;
-    uint32_t useNormalTexture;
-    uint32_t albedoTextureIndex;
-    uint32_t normalTextureIndex;
-    uint32_t useOrmTexture;
-    uint32_t ormTextureIndex;
-    float emissive[3];
-    float emissiveStrength;
-    uint32_t useEmissiveTexture;
-    uint32_t emissiveTextureIndex;
-    uint32_t cbMaterialPad0;
-    uint32_t cbMaterialPad1;
-};
-static_assert(sizeof(CBMaterial) == 80,
-              "CBMaterial must match cbuffer CBMaterial (b2) in basic_ps.hlsl");
-
 // Align size to 256 bytes for CBV placement
 constexpr uint32_t AlignCBSize(uint32_t size)
 {
@@ -137,6 +116,34 @@ class Renderer
 public:
     bool Init(D3D12Device& device);
     void Shutdown();
+
+    // Call once per frame BEFORE any pass records anything - above the shadow
+    // pass, and above the raster/path-tracing branch so an F1 toggle also lands
+    // on a clean slot.
+    //
+    // This exists because BeginFrame is NOT first in a frame. App::RenderFrame
+    // runs the entire shadow pass before it, so while BeginFrame was the only
+    // place m_currentFrame and m_cbOffset were assigned, every DrawMeshShadow
+    // in frame N uploaded into the buffer belonging to frame N-1's slot, at
+    // offsets continuing past that frame's high-water mark, with root CBVs
+    // pointing into it - and BeginFrame then rewound a DIFFERENT buffer to zero.
+    // On frame 0 both indices are zero before and after, so the main pass
+    // overwrote the shadow constants at the same addresses before the GPU
+    // executed anything. In steady state frame N+3 rewinds a slot that frames
+    // N+1 and N+2 may still be reading, since WaitForCurrentFrame only
+    // guarantees frame N has retired. It survived only because a constant
+    // entity count made the two watermarks abut.
+    //
+    // maxDrawsHint sizes the per-draw structured buffers. It is an UPPER bound
+    // (Scene's MeshInstance pool count, including invisible entities), which is
+    // exactly what you want for sizing. Growth happens only here - before any
+    // pass records anything and before either root SRV is bound - so an
+    // already-bound SRV's virtual address can never be invalidated under a
+    // recorded draw.
+    void BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint);
+
+    // Clears the stale-state guard. Called at the end of App::RenderFrame.
+    void EndFrameResources() { m_frameResourcesBegun = false; }
 
     // Call once per frame before any draw calls
     void BeginFrame(D3D12Device& device, const Camera& camera);
@@ -167,6 +174,32 @@ public:
     // one of 127 usable slots permanently.
     void ReleaseTextureDescriptor(D3D12Device& device, DescriptorHandle descriptor);
     void ReclaimTextureDescriptors(D3D12Device& device);
+
+    // Constant-ring pressure, for the smoke harness. The only ring
+    // instrumentation before this was the overflow error in UploadCB, which
+    // fires at 100% - after the offending draws have already bound GPU address
+    // zero. A high-water mark gives the harness something to gate on while
+    // there is still headroom.
+    uint32_t ConstantRingPeakBytes() const { return m_cbPeak; }
+    uint32_t ConstantRingCapacity() const { return kCBRingSize; }
+
+    // Per-draw structured-buffer occupancy, for the smoke harness.
+    // ShadowRecords and MainRecords are the two passes' disjoint slices of the
+    // object buffer, latched at the end of the last completed frame. They must
+    // be equal: Scene::RenderShadowCasters and Scene::RenderEntities walk the
+    // same pool with identical visible/Transform/Material filters, which is
+    // what makes 2 x maxDrawsHint sufficient object capacity - and that parity
+    // is enforced nowhere else.
+    uint32_t ObjectRecordsPeak() const { return m_objectPeak; }
+    uint32_t MaterialRecordsPeak() const { return m_materialPeak; }
+    uint32_t ObjectBufferCapacity() const { return m_objectBuffer.capacity; }
+    uint32_t MaterialBufferCapacity() const { return m_materialBuffer.capacity; }
+    // Times a per-draw structured buffer was REPLACED by a larger one while
+    // frames were in flight - the one operation here that can use-after-free.
+    // Zero in an ordinary run, which is exactly why --smoke-force-grow exists.
+    uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
+    uint32_t ShadowRecords() const { return m_reportedShadowRecords; }
+    uint32_t MainRecords() const { return m_reportedMainRecords; }
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
@@ -295,28 +328,6 @@ public:
     // stops early.
     uint32_t ShadowCascadesRendered() const { return m_cascadesBegunThisPass; }
 
-    // Advance the per-frame constant ring. MUST run exactly once per frame,
-    // BEFORE any pass uploads constants.
-    //
-    // This used to live inside BeginFrame, which was wrong the moment a pass
-    // started running earlier than BeginFrame. The shadow pass does exactly
-    // that: it runs before BeginScenePass, which runs before BeginFrame, so its
-    // per-object constants were allocated against the PREVIOUS frame's index
-    // and appended past that frame's high-water mark. It did not corrupt
-    // anything only because the regions happened to be disjoint and three
-    // frames in flight gave enough fence slack - an accident of the current
-    // allocation pattern, not a property anything enforced.
-    //
-    // Called for both the raster and path-tracing branches so the ring is
-    // advanced uniformly regardless of which one runs.
-    void BeginFrameResources(D3D12Device& device);
-
-    // Peak bytes used in the constant ring on any frame so far. Exposed because
-    // the ring is a fixed kCBRingSize and every new per-draw pass multiplies
-    // pressure on it; a silent overflow degrades into dropped draws.
-    uint32_t ConstantRingPeakBytes() const { return m_cbPeak; }
-    uint32_t ConstantRingCapacity() const { return kCBRingSize; }
-
     // Set directional light (call before BeginFrame or in init)
     void SetDirectionalLight(const core::Vec3f& direction,
                              const core::Vec3f& color,
@@ -338,6 +349,91 @@ private:
 
     // Upload a constant buffer and return its GPU virtual address
     D3D12_GPU_VIRTUAL_ADDRESS UploadCB(const void* data, uint32_t dataSize);
+
+    // -------------------------------------------------------------------------
+    // Per-frame per-draw structured buffers
+    // -------------------------------------------------------------------------
+    // These are CPU writes into persistently mapped UPLOAD memory read by the
+    // GPU from the command list recorded that frame. NO RESOURCE BARRIER CAN
+    // PROTECT THEM: barriers order GPU work, they do not synchronise CPU writes
+    // - stated verbatim at path_tracer.h:98-108 and debug_overlay.h:70-73.
+    //
+    // Fencing is not an alternative either. D3D12Device::WaitForCurrentFrame
+    // waits on m_fenceValues[m_frameIndex] only, i.e. the frame kFrameCount-1
+    // back that last used this back-buffer index; it does NOT wait for frames
+    // N+1 or N+2. kFrameCount-instancing is exactly what makes that narrow wait
+    // sufficient.
+    //
+    // This is the fourth instance of the house FrameUploadBuffer pattern
+    // (PathTracer, RTAcceleration, DebugOverlay each carry their own copy).
+    // Copied rather than lifted into a shared header on purpose: hoisting it is
+    // a mechanical follow-up and folding it in here would widen the blast
+    // radius of an already large change.
+    struct FrameStructuredBuffer
+    {
+        ComPtr<ID3D12Resource> buffer[kFrameCount];
+        uint8_t*               mapped[kFrameCount] = {};
+        uint32_t               capacity = 0;   // ELEMENTS, not bytes
+
+        bool Valid() const { return buffer[0] != nullptr; }
+
+        void Reset()
+        {
+            for (uint32_t i = 0; i < kFrameCount; ++i)
+            {
+                if (buffer[i] && mapped[i])
+                {
+                    buffer[i]->Unmap(0, nullptr);
+                    mapped[i] = nullptr;
+                }
+                buffer[i].Reset();
+            }
+            capacity = 0;
+        }
+    };
+
+    bool EnsureFrameStructuredBuffer(D3D12Device& device,
+                                     FrameStructuredBuffer& target,
+                                     uint32_t elementCount,
+                                     uint64_t elementSize,
+                                     const wchar_t* debugName);
+
+    FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 96
+    FrameStructuredBuffer m_materialBuffer;   // stride sizeof(MaterialData) = 80
+
+    // Monotonic across BOTH passes within a frame, reset in BeginFrameResources.
+    // The shadow pass occupies object elements [0, N) and the main pass [N, 2N):
+    // DISJOINT ranges, not shared records. Sharing was tempting - both passes
+    // walk the same pool in the same order with identical filters - but that
+    // parity is a coincidence of two loops, enforced nowhere. If shadow casting
+    // ever gains a filter the main pass lacks (frustum culling, a castsShadow
+    // flag, an LOD cut), shared indices would silently desynchronise and every
+    // object would render with a different entity's transform. Disjoint ranges
+    // make the two loops matter only for buffer SIZING, where being wrong costs
+    // a slightly oversized allocation rather than wrong transforms.
+    // The object cursor is a DrawRecordCursor rather than a bare uint32_t so
+    // its allocation, pass-marking and per-cascade rewind are production code a
+    // CPU-only test can drive directly. See gpu_draw_records.h - the previous
+    // "test" for this re-implemented the increments in the test body.
+    DrawRecordCursor m_objectCursor;
+    uint32_t m_materialCursor = 0;
+    // Latched high-water marks and per-pass counts for the smoke markers.
+    uint32_t m_objectPeak     = 0;
+    uint32_t m_materialPeak   = 0;
+    // Live for the frame being recorded: where the shadow pass's slice ended.
+    uint32_t m_shadowRecords  = 0;
+    // Latched from the last frame that actually rendered through the RASTER
+    // path. Path-traced frames run neither pass, so without this distinction an
+    // F1 toggle would leave the parity marker reading a half-state - the
+    // previous raster frame's shadow count against a main count of zero - and
+    // the harness would fail on a run where nothing was wrong.
+    uint32_t m_reportedShadowRecords = 0;
+    uint32_t m_reportedMainRecords   = 0;
+    // Overflow is logged once per run rather than per draw: the harness throws
+    // on any [ERR ] line, and one draw over capacity means every subsequent one
+    // is too.
+    bool     m_drawOverflowLogged = false;
+    uint32_t m_structuredBufferReallocations = 0;
 
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
@@ -453,6 +549,26 @@ private:
     uint32_t m_cbOffset = 0;       // Current write offset in ring
     uint32_t m_cbPeak = 0;         // Highest offset reached on any frame
     uint32_t m_currentFrame = 0;
+
+    // Guards against a pass being added ABOVE BeginFrameResources in
+    // App::RenderFrame, which would silently reintroduce the frame-slot bug that
+    // function exists to fix: allocations landing in the previous frame's buffer,
+    // past its high-water mark, with root descriptors pointing into storage a
+    // still-in-flight frame may be reading. It has no visual symptom until entity
+    // counts grow, which is why it needs a guard at all.
+    //
+    // Checked by RequireFrameResources(), NOT by a bare assert(). An assert is
+    // compiled out in Release, and Release is where the higher entity counts that
+    // actually trip this get run. See renderer.cpp.
+    bool m_frameResourcesBegun = false;
+    // Latches the Release-path report so a broken frame logs once, not once per
+    // draw call - the harness fails on the first [ERR ] line either way.
+    bool m_frameResourcesViolationLogged = false;
+
+    // Returns true when it is legal to record into this frame's arena. In Debug
+    // it also asserts, so a debugger stops at the offending call rather than at
+    // the log line.
+    bool RequireFrameResources(const char* site);
 
     // Cached view-projection matrix for the current frame
     core::Mat4x4 m_viewProj;

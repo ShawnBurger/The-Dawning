@@ -9,6 +9,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>   // snprintf, for the MAX_RASTER_TEXTURES shader define
+#include <cassert>
+#include <algorithm>   // std::max
+#include <utility>     // std::move
 
 namespace render
 {
@@ -46,6 +49,12 @@ void Renderer::Shutdown()
             m_cbMappedPtrs[i] = nullptr;
         }
     }
+    // App::Shutdown does WaitForGpu() before calling this, so unmap-and-release
+    // is safe here. Device loss drains rather than waits, and these buffers
+    // retire through DeferredRelease, so they inherit that path with no new
+    // escape hatch.
+    m_objectBuffer.Reset();
+    m_materialBuffer.Reset();
     m_bloomBlurPSO.Reset();
     m_bloomPrefilterPSO.Reset();
     m_bloomRootSig.Reset();
@@ -714,19 +723,42 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 // =============================================================================
 // Root Signature — v1.1 with fallback to v1.0
 // =============================================================================
-// Layout (research-informed):
-//   Slot 0: Root CBV at b0 (per-object) — 2 DWORDs, hot, changes every draw
-//   Slot 1: Root CBV at b1 (per-frame)  — 2 DWORDs, warm, changes once/frame
-//   Slot 2: Root CBV at b2 (material)   — 2 DWORDs, warm, changes per material
-//   Slot 3: Descriptor table for material textures (t0-t127) - 1 DWORD
-//   Slot 4: Descriptor table for the shadow map (t0, space1) - 1 DWORD
-//   Static sampler at s0 (anisotropic), s1 (shadow comparison)
-// Total: 8 DWORDs - well within the 64 DWORD limit.
+// Layout:
+//   Slot 0: Root SRV  t0/space2 — StructuredBuffer<ObjectData>   — 2 DWORDs, VERTEX
+//   Slot 1: Root CBV  b1        — CBPerFrame                     — 2 DWORDs, PIXEL
+//   Slot 2: Root SRV  t0/space3 — StructuredBuffer<MaterialData> — 2 DWORDs, PIXEL
+//   Slot 3: Table     t0-t127/space0 — material textures         — 1 DWORD,  PIXEL
+//   Slot 4: Table     t0/space1      — shadow map                — 1 DWORD,  PIXEL
+//   Slot 5: 32-bit constants b3 — { objectIndex, materialIndex } — 2 DWORDs, ALL
+//   Slot 6: Root CBV  b4        — CBPerPass (viewProj)           — 2 DWORDs, VERTEX
+//   Static samplers at s0 (material) and s1 (shadow comparison) — free
+// Total: 12 DWORDs of 64. 52 free.
 //
-// Root CBVs cost 2 DWORDs each, descriptor tables 1. Recompute this when adding
-// a parameter: two different wrong numbers were sitting in this file at once,
-// which is what happens when a running total is maintained by hand and never
-// checked.
+// Slots 0 and 2 changed TYPE in place (CBV->SRV) rather than being appended
+// alongside dead parameters: slot 0 was "per-object data, VERTEX-visible" and
+// still is, slot 2 was "material, PIXEL-visible" and still is. Only where the
+// data lives changed, so five of the six existing hardcoded slot indices in
+// this file did not move.
+//
+// ROOT SRVs rather than descriptor tables, and BeginShadowPass decides this:
+// it calls SetGraphicsRootSignature and SetPipelineState but never
+// SetDescriptorHeaps, and the command list is reset fresh each frame - so NO
+// shader-visible CBV_SRV_UAV heap is bound during the entire shadow pass. A
+// root SRV is a bare GPU virtual address and works there with no other change;
+// a table would need a second SetDescriptorHeaps + SetGraphicsRootDescriptorTable
+// binding point kept in sync with BeginFrame's, plus reserved slots out of the
+// 128-descriptor heap. That heap is the SCARCE budget (126 usable, ~32 PBR
+// materials, flagged in ASSET_PIPELINE_SPEC.md); the root budget has 52 DWORDs
+// free. Spend DWORDs, not heap slots.
+//
+// Both new root SRVs are DATA_VOLATILE, deliberately: BeginFrame binds the
+// material buffer's address before DrawMesh has written any material record
+// into it, and records are appended throughout each pass after the address is
+// bound. DATA_STATIC_WHILE_SET_AT_EXECUTE promises the contents do not change
+// after the root argument is set, which this design violates by construction.
+// The v1.0 branch has no per-descriptor flags and v1.0 semantics are volatile
+// by default, so the two branches stay behaviourally equivalent rather than
+// merely similar.
 // =============================================================================
 bool Renderer::CreateRootSignature(ID3D12Device* device)
 {
@@ -823,12 +855,12 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         shadowRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[5] = {};
+        D3D12_ROOT_PARAMETER1 rootParams[7] = {};
 
-        // Slot 0: Per-object CBV (b0) — changes every draw call (hottest)
-        rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
+        rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
-        rootParams[0].Descriptor.RegisterSpace  = 0;
+        rootParams[0].Descriptor.RegisterSpace  = 2;
         rootParams[0].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[0].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
@@ -839,10 +871,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[1].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[1].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
-        // Slot 2: Material CBV (b2) — changes per material
-        rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParams[2].Descriptor.ShaderRegister = 2;
-        rootParams[2].Descriptor.RegisterSpace  = 0;
+        // Slot 2: per-draw material StructuredBuffer (t0, space3) — once per pass.
+        // Its own register space, following the precedent basic_ps.hlsl states
+        // for the shadow map: it can then never collide with the material
+        // texture table however large that grows.
+        rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        rootParams[2].Descriptor.ShaderRegister = 0;
+        rootParams[2].Descriptor.RegisterSpace  = 3;
         rootParams[2].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
@@ -859,6 +894,39 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
         rootParams[4].DescriptorTable.pDescriptorRanges   = &shadowRange;
         rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        // Slot 5: per-draw record indices (b3). TWO uints in ONE parameter, so
+        // a single SetGraphicsRoot32BitConstants per draw writes both and no
+        // stale root state can survive from one pass into the next. They stay
+        // SEPARATE fields rather than one shared index because the two differ
+        // by the shadow pass's record count within the main pass, and because
+        // an independent material index is what lets a later "index materials
+        // by ecs::Material handle rather than by draw ordinal" change drop in
+        // without touching the object side.
+        //
+        // NOT SV_InstanceID: on D3D12 at SM 5.1 SV_InstanceID does not include
+        // StartInstanceLocation (that needs SV_StartInstanceLocation at SM 6.8),
+        // so passing a draw index through DrawIndexedInstanced's 5th argument
+        // compiles clean, runs, raises no debug-layer message, and hands every
+        // draw index 0 - the whole scene rendering with the first entity's
+        // transform. The root constant has none of that ambiguity, and it is
+        // the pattern SM 6.6 bindless keeps rather than one it replaces.
+        rootParams[5].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParams[5].Constants.ShaderRegister = 3;
+        rootParams[5].Constants.RegisterSpace  = 0;
+        rootParams[5].Constants.Num32BitValues = 2;
+        rootParams[5].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
+
+        // Slot 6: per-pass view-projection (b4). The light matrix during the
+        // shadow pass, the camera matrix during the main pass. Hoisting it out
+        // of the per-object record is what makes the record cascade-independent:
+        // a fourth cascade costs another 256-byte cbuffer, not another 96 bytes
+        // per entity per cascade.
+        rootParams[6].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[6].Descriptor.ShaderRegister = 4;
+        rootParams[6].Descriptor.RegisterSpace  = 0;
+        rootParams[6].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+        rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -887,11 +955,18 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         shadowRange.RegisterSpace                     = 1;
         shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER rootParams[5] = {};
+        // MUST STAY IN LOCKSTEP WITH THE v1.1 BRANCH ABOVE. These are two
+        // independent copies of the same layout and this one only runs when
+        // CheckFeatureSupport reports no 1.1 support, so a divergence produces
+        // a signature mismatch on someone else's driver that no local run -
+        // including both smoke modes - would ever catch. v1.0 has no
+        // per-descriptor Flags member; volatile is the implicit default there,
+        // which is what the v1.1 branch asks for explicitly.
+        D3D12_ROOT_PARAMETER rootParams[7] = {};
 
-        rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
-        rootParams[0].Descriptor.RegisterSpace  = 0;
+        rootParams[0].Descriptor.RegisterSpace  = 2;
         rootParams[0].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
         rootParams[1].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -899,9 +974,9 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[1].Descriptor.RegisterSpace  = 0;
         rootParams[1].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
-        rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParams[2].Descriptor.ShaderRegister = 2;
-        rootParams[2].Descriptor.RegisterSpace  = 0;
+        rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        rootParams[2].Descriptor.ShaderRegister = 0;
+        rootParams[2].Descriptor.RegisterSpace  = 3;
         rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -913,6 +988,17 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
         rootParams[4].DescriptorTable.pDescriptorRanges   = &shadowRange;
         rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        rootParams[5].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParams[5].Constants.ShaderRegister = 3;
+        rootParams[5].Constants.RegisterSpace  = 0;
+        rootParams[5].Constants.Num32BitValues = 2;
+        rootParams[5].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
+
+        rootParams[6].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[6].Descriptor.ShaderRegister = 4;
+        rootParams[6].Descriptor.RegisterSpace  = 0;
+        rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
@@ -941,7 +1027,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 8 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw-index constants + texture table + shadow table, 2 static samplers, 12 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1262,6 +1348,10 @@ DescriptorHandle Renderer::RegisterTexture(ID3D12Device* device, const Texture& 
 // =============================================================================
 D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize)
 {
+    // Address zero is what a skipped constant allocation reads as, which the
+    // overflow path below already treats as an error.
+    if (!RequireFrameResources("UploadCB")) return 0;
+
     uint32_t alignedSize = AlignCBSize(dataSize);
 
     // Check for overflow. Returning 0 here makes the draw read from address zero,
@@ -1308,14 +1398,182 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
 }
 
 // =============================================================================
-// BeginFrame — set up pipeline state and per-frame constants
+// Per-draw structured buffers — creation and growth
 // =============================================================================
-void Renderer::BeginFrameResources(D3D12Device& device)
+// A direct copy of PathTracer::EnsureFrameUploadBuffer's shape, line for line,
+// because that is the house pattern and inventing a second one here would be a
+// second thing to get right.
+bool Renderer::EnsureFrameStructuredBuffer(D3D12Device& device,
+                                           FrameStructuredBuffer& target,
+                                           uint32_t elementCount,
+                                           uint64_t elementSize,
+                                           const wchar_t* debugName)
 {
-    m_currentFrame = device.FrameIndex();
-    m_cbOffset = 0;
+    if (elementCount == 0) return false;
+    if (target.Valid() && elementCount <= target.capacity) return true;
+
+    // Headroom so growth amortises rather than reallocating every time one
+    // entity is added. It never shrinks: shrinking would mean destroying a
+    // buffer a recorded command list may still reference.
+    const bool hadPriorAllocation = target.Valid();
+    const uint32_t newCapacity = GrownCapacity(target.capacity, elementCount);
+    const uint64_t byteSize    = elementSize * static_cast<uint64_t>(newCapacity);
+
+    // Allocate ALL kFrameCount replacements FIRST and bail without touching the
+    // live buffers on any failure, so they are never left half-swapped.
+    FrameStructuredBuffer replacement;
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        D3D12_HEAP_PROPERTIES heapProps = {};
+        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+        desc.Width            = byteSize;
+        desc.Height           = 1;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels        = 1;
+        desc.Format           = DXGI_FORMAT_UNKNOWN;
+        desc.SampleDesc       = { 1, 0 };
+        desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        desc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+        HRESULT hr = device.Device()->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE,
+            &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&replacement.buffer[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Failed to create '%ls[%u]': 0x%08X", debugName, i, hr);
+            replacement.Reset();
+            return false;
+        }
+
+        wchar_t name[96];
+        swprintf_s(name, L"%s[%u]", debugName, i);
+        replacement.buffer[i]->SetName(name);
+
+        D3D12_RANGE readRange = { 0, 0 };
+        hr = replacement.buffer[i]->Map(
+            0, &readRange, reinterpret_cast<void**>(&replacement.mapped[i]));
+        if (FAILED(hr) || !replacement.mapped[i])
+        {
+            core::Log::Errorf("Failed to map '%ls[%u]': 0x%08X", debugName, i, hr);
+            replacement.Reset();
+            return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        if (target.buffer[i] && target.mapped[i])
+            target.buffer[i]->Unmap(0, nullptr);
+        target.mapped[i] = nullptr;
+        // Never drop the old ComPtr directly: a recorded command list may still
+        // reference it. DeferredRelease parks it at m_globalFenceValue + 1,
+        // which is the correct point for work recorded this frame, and
+        // MoveToNextFrame drains it.
+        device.DeferredRelease(target.buffer[i]);
+        target.buffer[i]      = std::move(replacement.buffer[i]);
+        target.mapped[i]      = replacement.mapped[i];
+        replacement.mapped[i] = nullptr;
+    }
+    // Counted ONLY when this replaced an existing allocation. A first
+    // allocation from capacity 0 shares this code path but not its hazard:
+    // nothing can still be reading a buffer that did not exist. The realloc is
+    // the case that can use-after-free with frames in flight, so it is the case
+    // the smoke marker has to be able to prove happened.
+    if (hadPriorAllocation) ++m_structuredBufferReallocations;
+
+    target.capacity = newCapacity;
+
+    core::Log::Infof("%ls grown to %u elements (%llu bytes per frame slot)",
+                     debugName, newCapacity,
+                     static_cast<unsigned long long>(byteSize));
+    return true;
 }
 
+// =============================================================================
+// BeginFrameResources — advance the frame slot, above every pass
+// =============================================================================
+void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint)
+{
+    m_currentFrame = device.FrameIndex();
+    m_cbOffset     = 0;   // rewind THIS frame's ring, not some other frame's
+
+    // Latch the previous frame's per-pass counts before resetting, so the smoke
+    // markers report a completed frame rather than a half-recorded one. Only
+    // when that frame actually appended records: a path-traced frame runs
+    // neither pass, and overwriting the latch from one would report the last
+    // raster frame's shadow count against a main count of zero.
+    if (m_objectCursor.Next() > 0)
+    {
+        m_reportedShadowRecords = m_shadowRecords;
+        m_reportedMainRecords   = (m_objectCursor.Next() >= m_shadowRecords)
+                                      ? m_objectCursor.Next() - m_shadowRecords
+                                      : 0u;
+    }
+
+    m_shadowRecords  = 0;
+    m_objectCursor.Reset();
+    m_materialCursor = 0;
+
+    // The shadow pass and the main pass each append their own records, so the
+    // object buffer needs twice the draw count. Growth happens HERE and only
+    // here - before any pass records anything and before either root SRV is
+    // bound - so an already-bound SRV address can never be invalidated under a
+    // recorded draw.
+    const uint32_t objectsNeeded   = RequiredObjectCapacity(maxDrawsHint);
+    const uint32_t materialsNeeded = RequiredMaterialCapacity(maxDrawsHint);
+
+    EnsureFrameStructuredBuffer(device, m_objectBuffer, objectsNeeded,
+                                sizeof(ObjectData), L"ObjectDataBuffer");
+    EnsureFrameStructuredBuffer(device, m_materialBuffer, materialsNeeded,
+                                sizeof(MaterialData), L"MaterialDataBuffer");
+
+    m_frameResourcesBegun = true;
+    m_frameResourcesViolationLogged = false;
+}
+
+// =============================================================================
+// RequireFrameResources — the stale-slot guard, and it survives Release
+// =============================================================================
+// This started life as a bare assert(m_frameResourcesBegun) at each call site.
+// That is close to useless here. The bug it guards - a pass recording above
+// BeginFrameResources, so its allocations land in the previous frame's buffer -
+// has NO visual symptom at the entity counts a Debug build gets driven at. It
+// only corrupts once the two passes' high-water marks stop abutting, which needs
+// scene sizes that in practice only ever get exercised in Release. An assert
+// that vanishes in exactly the configuration where the failure occurs is a guard
+// against the case that was never going to happen.
+//
+// So: log at error severity in every configuration, and skip the record. The
+// smoke harness throws on any [ERR ] line, which makes this a hard failure there
+// too. The assert stays as well, so under a debugger you stop at the offending
+// draw rather than reading about it afterwards.
+bool Renderer::RequireFrameResources(const char* site)
+{
+    if (m_frameResourcesBegun) return true;
+
+    if (!m_frameResourcesViolationLogged)
+    {
+        core::Log::Errorf(
+            "%s recorded before Renderer::BeginFrameResources. The frame slot has "
+            "not been advanced, so this allocation would land in the previous "
+            "frame's buffer while a frame in flight may still be reading it. A "
+            "pass has been added above BeginFrameResources in App::RenderFrame. "
+            "Draw skipped.",
+            site);
+        m_frameResourcesViolationLogged = true;
+    }
+    assert(m_frameResourcesBegun &&
+           "pass recorded above BeginFrameResources - see the error log line");
+    return false;
+}
+
+// =============================================================================
+// BeginFrame — set up pipeline state and per-frame constants
+// =============================================================================
 void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
 {
     // NOTE: the ring advance deliberately does NOT happen here any more - see
@@ -1383,6 +1641,22 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
 
+    // Per-pass view-projection (b4): the camera matrix here, the light matrix in
+    // BeginShadowPass. Once per pass rather than folded into every per-object
+    // record.
+    CBPerPass perPass = {};
+    memcpy(perPass.viewProj, m_viewProj.Data(), sizeof(float) * 16);
+    cmd->SetGraphicsRootConstantBufferView(6, UploadCB(&perPass, sizeof(perPass)));
+
+    // Both per-draw buffers, bound ONCE for the whole pass. This must happen
+    // before DrawSky, which runs under this same root signature.
+    if (m_objectBuffer.Valid())
+        cmd->SetGraphicsRootShaderResourceView(
+            0, m_objectBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+    if (m_materialBuffer.Valid())
+        cmd->SetGraphicsRootShaderResourceView(
+            2, m_materialBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+
     cmd->SetGraphicsRootDescriptorTable(3, m_textureHeap->GetGPUDescriptorHandleForHeapStart());
 
     // Shadow map SRV. Its own root parameter rather than a slot the material
@@ -1419,6 +1693,7 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         float emissiveStrength)
 {
     if (!mesh.IsValid()) return;
+    if (!RequireFrameResources("DrawMesh")) return;
 
     auto* cmd = device.CmdList();
     bool useAlbedoTexture = albedoTexture &&
@@ -1436,24 +1711,46 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
         emissiveTexture->IsValid() &&
         m_textureAllocator.IsInUse(emissiveTexture->descriptor);
 
-    // Compute world-view-projection
-    core::Mat4x4 wvp = worldMatrix * m_viewProj;
+    // Claim this draw's slots BEFORE writing, so the root constant names the
+    // records this draw is about to fill.
+    const bool buffersMapped = m_objectBuffer.mapped[m_currentFrame] &&
+                               m_materialBuffer.mapped[m_currentFrame];
+    uint32_t objectIndex = 0;
+    // Allocate only once the buffers are known good, so a skipped draw consumes
+    // no index and the two passes' ranges stay exactly as wide as the draws that
+    // actually recorded.
+    const bool objectOk = buffersMapped &&
+                          m_objectCursor.Allocate(m_objectBuffer.capacity, objectIndex);
+    const uint32_t materialIndex = m_materialCursor;
+
+    // Capacity is sized from an upper bound in BeginFrameResources, so this is
+    // defensive. Skipping the draw outright is strictly better than the old
+    // behaviour: UploadCB returned GPU address 0 on ring overflow and all three
+    // call sites bound that zero with no guard, recording the draw anyway. A
+    // skipped draw is visible and clean, and the harness throws on any [ERR].
+    if (!objectOk || materialIndex >= m_materialBuffer.capacity)
+    {
+        if (!m_drawOverflowLogged)
+        {
+            core::Log::Errorf(
+                "Per-draw record overflow: object %u/%u, material %u/%u. Draw skipped.",
+                m_objectCursor.Next(), m_objectBuffer.capacity,
+                materialIndex, m_materialBuffer.capacity);
+            m_drawOverflowLogged = true;
+        }
+        return;
+    }
 
     // Compute world inverse transpose for correct normal transformation
     // Handles non-uniform scale correctly (not just a copy of world matrix)
-    core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
 
-    // Upload per-object constants (b0)
-    CBPerObject perObject = {};
-    memcpy(perObject.worldViewProj, wvp.Data(), sizeof(float) * 16);
-    memcpy(perObject.world, worldMatrix.Data(), sizeof(float) * 16);
-    memcpy(perObject.worldInvTranspose, worldInvTranspose.Data(), sizeof(float) * 16);
+    ObjectData* objectDst =
+        reinterpret_cast<ObjectData*>(m_objectBuffer.mapped[m_currentFrame]) + objectIndex;
+    WriteObjectRecord(*objectDst, worldMatrix, worldInvTranspose);
+    if (m_objectCursor.Next() > m_objectPeak) m_objectPeak = m_objectCursor.Next();
 
-    auto perObjectAddr = UploadCB(&perObject, sizeof(perObject));
-    cmd->SetGraphicsRootConstantBufferView(0, perObjectAddr);
-
-    // Upload material constants (b2)
-    CBMaterial material = {};
+    MaterialData material = {};
     material.albedo[0] = albedo.r;
     material.albedo[1] = albedo.g;
     material.albedo[2] = albedo.b;
@@ -1474,8 +1771,15 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
     material.emissiveTextureIndex =
         useEmissiveTexture ? emissiveTexture->descriptor.index : 0u;
 
-    auto materialAddr = UploadCB(&material, sizeof(material));
-    cmd->SetGraphicsRootConstantBufferView(2, materialAddr);
+    *(reinterpret_cast<MaterialData*>(m_materialBuffer.mapped[m_currentFrame]) +
+      materialIndex) = material;
+    ++m_materialCursor;
+    if (m_materialCursor > m_materialPeak) m_materialPeak = m_materialCursor;
+
+    // One call writes both indices, so no stale root state can survive from the
+    // shadow pass into this one.
+    const uint32_t indices[2] = { objectIndex, materialIndex };
+    cmd->SetGraphicsRoot32BitConstants(5, 2, indices, 0);
 
     // Bind geometry and draw
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
@@ -1754,6 +2058,28 @@ void Renderer::BeginShadowPass(D3D12Device& device, const core::Vec3d& cameraPos
     cmd->SetPipelineState(m_shadowPSO.Get());
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+    // Per-object records. No SetDescriptorHeaps here and none needed: root
+    // parameter 0 is a root SRV, a bare GPU virtual address. Routing per-object
+    // data through a descriptor table instead would break this pass with a
+    // debug-layer error about binding a table with no heap set, because no
+    // shader-visible CBV_SRV_UAV heap is bound anywhere in the shadow pass.
+    //
+    // Bound once for the whole pass rather than per cascade: the root argument
+    // survives across BeginShadowCascade, which changes only the DSV and the
+    // per-pass cbuffer. Growth already happened in BeginFrameResources, above
+    // every pass, so this address cannot be invalidated under a recorded draw.
+    //
+    // Root params 1, 2, 3 and 4 stay unbound, exactly as before this change.
+    // Still legal: the shadow PSO has no pixel shader and all four are
+    // PIXEL-visible. Param 2 becoming an SRV does not affect that.
+    if (m_objectBuffer.Valid())
+        cmd->SetGraphicsRootShaderResourceView(
+            0, m_objectBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+
+    // Where this pass's object range starts. Every cascade rewinds to it - see
+    // BeginShadowCascade.
+    m_objectCursor.BeginPass();
+
     m_activeCascade = 0;
     m_cascadesBegunThisPass = 0;
 }
@@ -1776,10 +2102,41 @@ void Renderer::BeginShadowCascade(D3D12Device& device, uint32_t cascade)
     // uncleared slice holds undefined values, not 1.0, and would read as
     // "written" while never having been rendered into.
     cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    // EVERY CASCADE REWINDS TO THE SAME OBJECT RANGE. App::RenderFrame calls
+    // Scene::RenderShadowCasters once per cascade, so without this the four
+    // cascades would append four identical copies of every caster's record and
+    // object capacity would have to be (kShadowCascadeCount + 1) x maxDraws.
+    //
+    // They are identical because ObjectData holds only the camera-relative world
+    // matrix and its inverse-transpose - both cascade-independent. The ONLY
+    // per-cascade quantity is the light view-projection, and this change is
+    // precisely what moved that out of the per-object record and into CBPerPass
+    // below. So the four cascades legitimately share one set of N records, each
+    // rewrite is byte-identical to the last, and four cascades cost four flat
+    // 256-byte cbuffers rather than 3N extra records.
+    //
+    // Rewriting the same mapped bytes within a frame is safe: nothing has been
+    // submitted yet, and the buffer is kFrameCount-instanced so no in-flight
+    // frame shares this storage.
+    m_objectCursor.Rewind();
+
+    // The light view-projection for THIS cascade, as a per-pass cbuffer. On main
+    // this matrix was baked into every per-entity record as a premultiplied
+    // world-view-projection, which is what made each cascade cost 256 bytes per
+    // entity.
+    CBPerPass perPass = {};
+    memcpy(perPass.viewProj, m_lightViewProj[cascade].Data(), sizeof(float) * 16);
+    cmd->SetGraphicsRootConstantBufferView(6, UploadCB(&perPass, sizeof(perPass)));
 }
 
 void Renderer::EndShadowPass(D3D12Device& device)
 {
+    // The shadow pass owns object elements [0, m_objectCursor); the main pass
+    // takes it from here. Latched at the boundary so the smoke parity marker
+    // can compare the two passes' record counts.
+    m_shadowRecords = m_objectCursor.Next();
+
     if (!m_shadowMap || !m_shadowIsDepthTarget) return;
 
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -1953,22 +2310,48 @@ void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
                               const core::Mat4x4& worldMatrix)
 {
     if (!mesh.IsValid() || !m_shadowMap) return;
+    if (!RequireFrameResources("DrawMeshShadow")) return;
 
     auto* cmd = device.CmdList();
 
-    // The same CBPerObject the main pass uses, with the light matrix
-    // substituted for the camera one. world and worldInvTranspose are filled in
-    // even though shadow_vs.hlsl ignores them: the struct is shared, and leaving
-    // stale bytes in a mapped upload ring is how a later shader change turns
-    // into a heisenbug.
-    CBPerObject perObject = {};
-    const core::Mat4x4 wvp = worldMatrix * m_lightViewProj[m_activeCascade];
-    memcpy(perObject.worldViewProj, wvp.Data(), sizeof(float) * 16);
-    memcpy(perObject.world, worldMatrix.Data(), sizeof(float) * 16);
-    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
-    memcpy(perObject.worldInvTranspose, worldInvTranspose.Data(), sizeof(float) * 16);
+    uint32_t objectIndex = 0;
+    if (!m_objectBuffer.mapped[m_currentFrame] ||
+        !m_objectCursor.Allocate(m_objectBuffer.capacity, objectIndex))
+    {
+        if (!m_drawOverflowLogged)
+        {
+            core::Log::Errorf(
+                "Per-draw object record overflow in shadow pass: %u/%u. Draw skipped.",
+                m_objectCursor.Next(), m_objectBuffer.capacity);
+            m_drawOverflowLogged = true;
+        }
+        return;
+    }
 
-    cmd->SetGraphicsRootConstantBufferView(0, UploadCB(&perObject, sizeof(perObject)));
+    // The SAME ObjectData record shape the main pass writes, into the same
+    // buffer, at this pass's own disjoint index range. The light matrix is no
+    // longer substituted per object: it lives in CBPerPass (b4), uploaded once
+    // in BeginShadowPass. That is what deletes the shadow pass's second copy of
+    // the view-projection rather than merely relocating it, and what makes a
+    // future fourth cascade cost one more 256-byte cbuffer instead of one more
+    // record per entity.
+    //
+    // normalMatrix is filled even though shadow_vs.hlsl ignores it: the struct
+    // is shared, and leaving stale bytes in a persistently mapped buffer that is
+    // reused across frames without clearing is how a later shader change turns
+    // into a heisenbug.
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    ObjectData* dst =
+        reinterpret_cast<ObjectData*>(m_objectBuffer.mapped[m_currentFrame]) + objectIndex;
+    WriteObjectRecord(*dst, worldMatrix, worldInvTranspose);
+    if (m_objectCursor.Next() > m_objectPeak) m_objectPeak = m_objectCursor.Next();
+
+    // Both values written in one call, so no material index left over from the
+    // previous frame's main pass can survive into this one - the same reasoning
+    // that fills normalMatrix above.
+    const uint32_t indices[2] = { objectIndex, 0u };
+    cmd->SetGraphicsRoot32BitConstants(5, 2, indices, 0);
+
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
     cmd->IASetIndexBuffer(&mesh.ibView);
     cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);

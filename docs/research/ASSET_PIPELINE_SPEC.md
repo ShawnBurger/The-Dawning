@@ -105,22 +105,61 @@ These are not negotiable and any pipeline design that violates one is wrong:
 Found by instrumenting the engine rather than reading it. They bound how much
 real content it can hold today, and the asset pipeline is what will hit them.
 
-**Constant ring: roughly 340 entities.** Every shadowed entity costs 768 bytes
-of the per-frame constant ring each frame - 256 for `CBPerObject`, 256 for
-`CBMaterial`, 256 for the shadow pass's copy, each rounded up to D3D12's 256-byte
-constant-buffer alignment. `kCBRingSize` is 256 KB, so the ceiling is about 341
-entities, and a four-cascade shadow pass roughly halves that to about 170.
+**Constant ring: RESOLVED. The ceiling is removed, not raised.**
 
-Measured: 5% of the ring with the 17-entity demo scene, 29% with the 97 entities
-the smoke growth test creates. Overflow is logged as an error, but by then draws
-are reading GPU address zero, so the smoke harness fails at 75% instead - while
-there is still room to act.
+*Historical, for anyone reading a pre-fix commit:* every shadowed entity used to
+cost 768 bytes of the per-frame constant ring each frame - 256 for
+`CBPerObject`, 256 for `CBMaterial`, 256 for the shadow pass's copy, each
+rounded up to D3D12's 256-byte constant-buffer alignment. Against a fixed 256 KB
+`kCBRingSize` that put the ceiling at `(262144 - 256) / 768` = 341 entities, and
+a four-cascade shadow pass roughly halved it to about 170. Measured on current
+main at 10% of the ring with the demo scene's 17 renderables and 57% with the 97
+the smoke growth stress creates - against a harness that fails at 75%.
 
-A single station interior exceeds 170 draws comfortably, so for the target
-milestone this is a blocker rather than a limit. The fix is not a bigger ring: it
-is per-object data in a structured buffer indexed by draw, instead of a root CBV
-rebound per draw. That is the same architectural change SM 6.6 bindless wants,
-which is a reason to treat the two as one piece of work rather than two.
+Per-object and per-material data now live in growable, `kFrameCount`-instanced
+structured buffers bound as ROOT SRVs, with the per-draw record index supplied
+as a 2-uint root constant (`b3`). The view-projection moved to a per-PASS
+cbuffer (`b4`), uploaded once per pass rather than premultiplied into every
+per-object record. One draw call per entity is unchanged; only where the data
+lives changed.
+
+The ring now carries `CBPerFrame` plus one `CBPerPass` per pass - one per shadow
+cascade and one for the main pass: **1,792 bytes per frame, FLAT, independent of
+entity count** - measured at 1% on both smoke modes, down from 26,624 (raster)
+and 149,504 (DXR). Ring occupancy has stopped being a function of scene size at
+all, which is why this is a removal rather than a raise.
+
+New cost model, per shadowed entity, per frame slot:
+
+    96 (shadow object record) + 96 (main object record) + 80 (material) = 272 bytes
+
+Across `kFrameCount` = 3 slots that is 816 bytes per entity of persistently
+mapped UPLOAD memory. 5,000 entities - a station interior - costs 1.30 MB per
+slot, 3.9 MB total. That is not a constraint worth designing around, which is
+the point.
+
+Because the view-projection is per-pass rather than per-record, each additional
+shadow cascade costs one more 256-byte cbuffer, FLAT, rather than another 256
+bytes of ring per entity per cascade. That is not theoretical: the four cascades
+already on main share ONE set of object records. `RenderShadowCasters` runs once
+per cascade, but `BeginShadowCascade` rewinds the object cursor, which is legal
+precisely because `ObjectData` holds only the world matrix and its
+inverse-transpose - the cascade-dependent part is the light matrix, and that is
+what moved into `CBPerPass`. So object capacity stays at 2x the draw count
+rather than becoming (cascades + 1) x, and the cascade count no longer appears
+in the per-entity cost model at all.
+
+The remaining constraints are (1) CPU draw-call submission cost, since one
+`DrawIndexedInstanced` per entity is deliberately retained - instancing and
+merging are the next lever, and this change is a prerequisite for both rather
+than an obstacle; and (2) the 128-slot raster texture heap below, which real
+content exhausts far sooner. This change spends root DWORDs (8 -> 12 of 64)
+precisely so it spends ZERO heap slots and does not make (2) worse.
+
+Note the failure character changed rather than disappearing: from a hard cap at
+341 entities to upload memory that grows with draw count and never shrinks. The
+75% ring gate in `tools/smoke_test.ps1` is retained, and now doubles as proof
+that per-draw traffic has not leaked back into the ring.
 
 **Texture tables: 128 raster slots, 64 per DXR channel.** Fixed size, allocated
 from a generational allocator with slot 0 the null SRV and slot 1 the shadow map.
