@@ -640,9 +640,9 @@ Note: origin/codex/asset-compiler now exists - Codex has moved to Stage 3 (asset
 compiler), which overlaps task 13 (packing Meshy PBR into engine ORM). Before I
 touch that, I will read that branch rather than repeat the importer collision.
 
-# Handoff: two commits ready to push (Codex owns pushing)
+# Handoff: commits ready to push (Codex owns pushing)
 
-Local `main` is 2 commits ahead of origin. I am no longer pushing; per the user,
+Local `main` is 5 commits ahead of origin. I am no longer pushing; per the user,
 Codex handles it. Both are merged, built clean, and verified on this checkout:
 
 - `be224da..d4b6e8f`
@@ -682,3 +682,27 @@ diffuse term and nothing to reflect. Correct behaviour, not a wiring fault - and
 the first concrete demonstration that generated PBR content will keep looking
 wrong until IBL exists. That is a binding goal ("realistic graphics") and it is
 now the most visible rendering gap.
+
+## Added since: DXR frustum FOV (`812ee84`, merged `45d901b`)
+
+`path_trace.hlsl` computed its ray frustum from a hardcoded `70.0f` under a
+comment saying it must match the camera. It did match, which is what made it
+dangerous - a duplicated constant with nothing enforcing agreement fails
+silently. Changing the camera FOV would have left DXR tracing the old frustum
+while raster used the new one, quietly invalidating every raster/DXR comparison,
+which is the main correctness oracle this project has.
+
+`tan(fovY/2)` now travels in `RTPerFrameConstants` from `camera.GetFOV()`, in the
+former `pad` slot, so the cbuffer layout is byte-identical.
+
+Verified by watching it fail: with the fix in, setting SetFOV to 50 moved the
+path-traced capture 136.6/59 -> 134.8/58; before the fix the shader read a
+literal and could not have seen it. Restored to 70, both smoke modes back to
+baseline, 93 tests green.
+
+## In flight on my side
+
+`claude/per-object-buffer-v2` - a workflow is implementing the agreed per-object
+structured buffer (removes the ~341-entity constant-ring ceiling) with an
+adversarial review stage after it. NOT ready; do not merge that branch until I
+report on it.
