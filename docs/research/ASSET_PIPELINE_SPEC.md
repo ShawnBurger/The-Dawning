@@ -112,9 +112,9 @@ cost 768 bytes of the per-frame constant ring each frame - 256 for
 `CBPerObject`, 256 for `CBMaterial`, 256 for the shadow pass's copy, each
 rounded up to D3D12's 256-byte constant-buffer alignment. Against a fixed 256 KB
 `kCBRingSize` that put the ceiling at `(262144 - 256) / 768` = 341 entities, and
-a four-cascade shadow pass roughly halved it to about 170. Measured at 3% of the
-ring with the demo scene's 11 renderables and 26% with the 91 the smoke growth
-stress creates.
+a four-cascade shadow pass roughly halved it to about 170. Measured on current
+main at 10% of the ring with the demo scene's 17 renderables and 57% with the 97
+the smoke growth stress creates - against a harness that fails at 75%.
 
 Per-object and per-material data now live in growable, `kFrameCount`-instanced
 structured buffers bound as ROOT SRVs, with the per-draw record index supplied
@@ -123,11 +123,11 @@ cbuffer (`b4`), uploaded once per pass rather than premultiplied into every
 per-object record. One draw call per entity is unchanged; only where the data
 lives changed.
 
-The ring now carries `CBPerFrame` plus the two `CBPerPass` uploads: **768 bytes
-per frame, FLAT, independent of entity count** - measured at 0% on both smoke
-modes, down from 8,704 and 70,144 bytes. Ring occupancy has stopped being a
-function of scene size at all, which is why this is a removal rather than a
-raise.
+The ring now carries `CBPerFrame` plus one `CBPerPass` per pass - one per shadow
+cascade and one for the main pass: **1,792 bytes per frame, FLAT, independent of
+entity count** - measured at 1% on both smoke modes, down from 26,624 (raster)
+and 149,504 (DXR). Ring occupancy has stopped being a function of scene size at
+all, which is why this is a removal rather than a raise.
 
 New cost model, per shadowed entity, per frame slot:
 
@@ -139,9 +139,15 @@ slot, 3.9 MB total. That is not a constraint worth designing around, which is
 the point.
 
 Because the view-projection is per-pass rather than per-record, each additional
-shadow cascade now costs one more 256-byte cbuffer, FLAT, rather than another 96
-bytes per entity per cascade. The cascade upgrade has stopped being a scaling
-decision.
+shadow cascade costs one more 256-byte cbuffer, FLAT, rather than another 256
+bytes of ring per entity per cascade. That is not theoretical: the four cascades
+already on main share ONE set of object records. `RenderShadowCasters` runs once
+per cascade, but `BeginShadowCascade` rewinds the object cursor, which is legal
+precisely because `ObjectData` holds only the world matrix and its
+inverse-transpose - the cascade-dependent part is the light matrix, and that is
+what moved into `CBPerPass`. So object capacity stays at 2x the draw count
+rather than becoming (cascades + 1) x, and the cascade count no longer appears
+in the per-entity cost model at all.
 
 The remaining constraints are (1) CPU draw-call submission cost, since one
 `DrawIndexedInstanced` per entity is deliberately retained - instancing and
