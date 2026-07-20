@@ -1301,6 +1301,19 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
         m_verifyShadowThisFrame = false;
 
+    // The draw-index witness readback, on the same frame and under the same
+    // condition as the shadow probe: it costs a buffer copy and a GPU drain, and
+    // a path-traced frame runs neither raster pass so there is nothing to
+    // witness. Recorded HERE, after every pass has drawn, so the witness holds
+    // this frame's complete set of writes.
+    //
+    // Its own flag rather than m_verifyShadowThisFrame: the two probes fail
+    // independently, and folding them together would let a shadow-copy failure
+    // silently suppress a draw-index marker the harness asserts on.
+    bool probeDrawIndex = probeShadow;
+    if (probeDrawIndex && !m_renderer.RecordDrawIndexWitnessReadback(m_device))
+        probeDrawIndex = false;
+
     // Everything that records into this frame's arena has now done so. Clearing
     // the guard HERE is what makes it able to catch a pass added above
     // BeginFrameResources on a LATER frame; a flag set once and never cleared
@@ -1418,6 +1431,54 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         else
         {
             core::Log::Info("[SMOKE] shadow_map_written=unknown");
+        }
+    }
+
+    if (probeDrawIndex)
+    {
+        // EVERY DRAW READ ITS OWN OBJECT RECORD. This is the assertion that a
+        // root SRV makes otherwise unobservable: no descriptor, no stride,
+        // nothing for the debug layer to check, and a scene rendered entirely
+        // from record 0 still looks like a scene.
+        //
+        // It replaced a golden-value gate on the capture's mean luminance and
+        // colour-bucket count. That gate was measuring this invariant through
+        // the rendered image, which made it depend on which assets happened to
+        // sit in build/<Config> - build output, not tracked source - and it was
+        // mis-calibrated twice in one round on exactly that. It also could not
+        // do the job: pinning shadow_vs to record 0 moved the bucket count by
+        // ONE, less than the drift between two checkouts of the same commit.
+        // These markers are exact integers that depend on nothing but the draw
+        // loop.
+        uint32_t shadowRecords = 0, shadowDistinct = 0;
+        uint32_t mainRecords   = 0, mainDistinct   = 0;
+        uint32_t mismatches    = 0;
+        if (m_renderer.ReadDrawIndexWitness(m_device,
+                                            shadowRecords, shadowDistinct,
+                                            mainRecords, mainDistinct,
+                                            mismatches))
+        {
+            // Both counts and both distincts, per pass, because the two failure
+            // modes are one-sided: basic_vs reading record 0 leaves the shadow
+            // pass perfect, and shadow_vs reading record 0 leaves the main pass
+            // perfect. A single combined number would be dragged only halfway
+            // by either.
+            core::Log::Infof(
+                "[SMOKE] draw_index_shadow_records=%u draw_index_shadow_distinct=%u "
+                "draw_index_main_records=%u draw_index_main_distinct=%u",
+                shadowRecords, shadowDistinct, mainRecords, mainDistinct);
+            // The strong form: witness[i] == i + 1 for every allocated slot.
+            // Distinct counts alone would pass a PERMUTATION of records, which
+            // renders every object with a different object's transform - the
+            // exact failure the disjoint-range design in gpu_draw_records.h is
+            // built to prevent. Reported as a count so a failure says how bad.
+            core::Log::Infof("[SMOKE] draw_index_mismatches=%u", mismatches);
+            core::Log::Infof("[SMOKE] draw_index_identity=%s",
+                             mismatches == 0 ? "yes" : "no");
+        }
+        else
+        {
+            core::Log::Info("[SMOKE] draw_index_identity=unknown");
         }
     }
 

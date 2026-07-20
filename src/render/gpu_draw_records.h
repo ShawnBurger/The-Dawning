@@ -24,7 +24,31 @@
 // shader's computed struct size. A one-byte disagreement between these structs
 // and their HLSL counterparts reads shifted garbage for every element after the
 // first, silently. The static_asserts below and the unit tests beside them are
-// the whole of the defence.
+// the whole of the CPU-side defence.
+//
+// THE DRAW-INDEX WITNESS. The static_asserts pin the LAYOUT. They cannot pin
+// the thing that actually goes wrong, which is a draw reading the wrong
+// ELEMENT: the root constant at b3 failing to reach a shader, someone
+// "simplifying" it to SV_InstanceID (which at SM 5.1 excludes
+// StartInstanceLocation and hands every draw 0), or a shader hardcoding
+// objectBuffer[0]. All of those render a plausible image.
+//
+// So ObjectData carries `recordId`, which the CPU sets to the element's own
+// index, and both vertex shaders write the recordId they LOADED into a
+// u0/space2 UAV slot selected by the root constant they were GIVEN. Correct
+// indexing means witness[i] == i + 1 for every allocated record; any of the
+// failures above collapses the written values to a single one. The round trip
+// through GPU memory is the point - it closes the loop between "the index the
+// CPU allocated" and "the record the GPU read", which is precisely the gap a
+// root SRV leaves open. Renderer::ReadDrawIndexWitness does the reduction and
+// App emits it as the draw_index_* smoke markers.
+//
+// This replaced a golden-value gate on the rendered capture's mean luminance
+// and colour-bucket count. That gate measured the right invariant only
+// indirectly and depended on which assets happened to sit in build/<Config>,
+// which is build output rather than tracked source; it was mis-calibrated twice
+// in one round before being deleted. The witness depends on nothing but the
+// draw loop.
 // =============================================================================
 
 #include "../core/types.h"
@@ -69,12 +93,28 @@ struct ObjectData
     // InverseTranspose3x3 of that matrix, same transposed shape, w component 0.
     // Normals are covectors: reusing `world` skews them under non-uniform scale.
     float normalMatrix[12];   // 48..95
+    // THE ELEMENT'S OWN INDEX, written by the CPU, read back by the GPU. See
+    // "the draw-index witness" below: this field plus the u0/space2 UAV is what
+    // turns "each draw reads its own record" from an untestable claim into a
+    // measurement. It is not used for rendering and never should be.
+    uint32_t recordId;        // 96..99
+    // Explicit tail padding to a multiple of 16. NOT decorative: FXC computes a
+    // StructuredBuffer stride from the HLSL struct, and a bare trailing uint
+    // would leave the two sides agreeing only by luck about how a 100-byte
+    // element is padded. Spelling out uint3 on both sides makes the stride 112
+    // by construction. Verified against FXC: `dcl_resource_structured T0[0:0],
+    // 112, space=2`.
+    uint32_t recordPad[3];    // 100..111
 };
-static_assert(sizeof(ObjectData) == 96,
+static_assert(sizeof(ObjectData) == 112,
               "ObjectData must match struct ObjectData in basic_vs.hlsl / shadow_vs.hlsl");
 static_assert(offsetof(ObjectData, world) == 0, "ObjectData.world must sit at byte 0");
 static_assert(offsetof(ObjectData, normalMatrix) == 48,
               "ObjectData.normalMatrix must sit at byte 48");
+static_assert(offsetof(ObjectData, recordId) == 96,
+              "ObjectData.recordId must sit at byte 96");
+static_assert(offsetof(ObjectData, recordPad) == 100,
+              "ObjectData.recordPad must sit at byte 100");
 
 // =============================================================================
 // MaterialData — per-draw material record, 80 bytes
@@ -150,9 +190,15 @@ static_assert(sizeof(CBPerPass) == 64,
 // row-major-storage / row-vector-semantics convention (core/types.h), so
 // column r of the source becomes row r of the record and the shader's
 // dot(row[r], p) reproduces the row-vector product p * M componentwise.
+//
+// `recordIndex` is the element index this record is being written AT, and it is
+// a required parameter rather than something the caller may forget: the whole
+// value of the witness is that recordId is stamped by whoever chose the slot.
+// Both call sites already hold the index the cursor handed them.
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
-                       const core::Mat4x4& normalMatrix);
+                       const core::Mat4x4& normalMatrix,
+                       uint32_t recordIndex);
 
 // Element counts the two per-draw buffers need for a frame drawing at most
 // `maxDraws` meshes.

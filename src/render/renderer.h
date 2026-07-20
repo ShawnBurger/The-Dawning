@@ -305,6 +305,40 @@ public:
     bool ReadShadowMapCoverage(uint32_t cascade,
                                float& writtenFraction,
                                float& minDepth) const;
+
+    // =========================================================================
+    // The draw-index witness
+    // =========================================================================
+    // GPU-side evidence that every draw read ITS OWN per-object record.
+    //
+    // This is the invariant a root SRV leaves completely unguarded: it is a bare
+    // GPU virtual address with no descriptor and no StructureByteStride, so
+    // neither the runtime nor the debug layer can tell that basic_vs.hlsl
+    // indexed objectBuffer with the root constant it was handed rather than with
+    // a constant 0. The failure renders the whole scene with one entity's
+    // transform and still looks like a scene.
+    //
+    // The CPU-side markers next door - object_records_peak, shadow_records,
+    // main_records - cannot cover this. They count what was WRITTEN. Every one
+    // of them is still perfectly correct while the GPU reads the wrong element.
+    //
+    // Mechanism: ObjectData::recordId holds the element's own index; both vertex
+    // shaders write the recordId they LOADED into witness[root constant]. A
+    // correct frame therefore leaves the identity permutation, and every way of
+    // losing the per-draw index collapses it. Two phases, matching the
+    // back-buffer capture and the shadow probe: record the copy into the frame's
+    // command list, then read it once the GPU has retired that frame.
+    bool RecordDrawIndexWitnessReadback(D3D12Device& device);
+    // Reduces the readback. `shadowRecords` / `mainRecords` are the two passes'
+    // record counts latched when the copy was recorded; `*Distinct` counts the
+    // distinct non-zero values each range holds, which equals the record count
+    // exactly when each draw read its own record and collapses towards 1 when
+    // they share one. `mismatches` is the strictly stronger check: slots where
+    // witness[i] != i + 1, i.e. an outright wrong or missing record.
+    bool ReadDrawIndexWitness(D3D12Device& device,
+                              uint32_t& shadowRecords, uint32_t& shadowDistinct,
+                              uint32_t& mainRecords,   uint32_t& mainDistinct,
+                              uint32_t& mismatches);
     // Do the uploaded cascade texel sizes strictly increase with consecutive
     // ratios in (1, 8]? Computed from the table that is ACTUALLY in flight, so
     // it is a check of the live fit rather than a mirror of the constants.
@@ -532,6 +566,41 @@ private:
     static constexpr uint32_t    kShadowProbeSize = 256;
     ComPtr<ID3D12Resource>       m_shadowReadback;
     UINT64                       m_shadowReadbackBytes = 0;
+
+    // -------------------------------------------------------------------------
+    // Draw-index witness storage. See the two public entry points above.
+    // -------------------------------------------------------------------------
+    // One uint per object record, in a DEFAULT heap because UPLOAD heaps cannot
+    // carry ALLOW_UNORDERED_ACCESS. Kept in lockstep with m_objectBuffer.capacity
+    // and rebuilt through the same growth path, so a grown object buffer can
+    // never index past the witness.
+    //
+    // NOT kFrameCount-instanced, unlike the upload buffers. It is written by the
+    // GPU and read by the GPU, so the resource barriers around it mean what they
+    // say - the reason FrameUploadBuffer needs per-frame slots is that CPU
+    // writes to mapped UPLOAD memory are not covered by barriers at all. The
+    // readback copy is fence-guarded by WaitForGpu before anything maps it.
+    bool EnsureDrawIndexWitness(D3D12Device& device, uint32_t elementCount);
+    // Zero the witness at the top of every frame. Without this an unwritten slot
+    // holds the previous frame's value, and "the draw stopped happening" would
+    // read exactly like "the draw happened correctly".
+    void ClearDrawIndexWitness(D3D12Device& device);
+
+    ComPtr<ID3D12Resource> m_drawWitness;          // DEFAULT, UAV
+    // A permanently-zero UPLOAD buffer, the source of the per-frame clear.
+    // ClearUnorderedAccessViewUint is the obvious alternative and is not usable
+    // here: it needs the UAV in BOTH a shader-visible and a non-shader-visible
+    // heap, and only m_textureHeap is bindable. A buffer copy needs no
+    // descriptor at all. Written once at creation and never again, so it raises
+    // none of the mapped-UPLOAD synchronisation questions a per-frame write would.
+    ComPtr<ID3D12Resource> m_drawWitnessZeroes;
+    ComPtr<ID3D12Resource> m_drawWitnessReadback;  // READBACK
+    uint32_t               m_drawWitnessCapacity = 0;   // ELEMENTS
+    // The two passes' record counts as they stood when the readback copy was
+    // recorded. Latched there rather than read at reduction time because
+    // BeginFrameResources resets the cursor for the next frame in between.
+    uint32_t               m_witnessShadowRecords = 0;
+    uint32_t               m_witnessMainRecords   = 0;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
     // slot 1 the shadow map.

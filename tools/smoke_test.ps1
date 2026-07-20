@@ -295,8 +295,8 @@ foreach ($k in @("shadow_records", "main_records", "object_records_peak", "objec
 $shadowRecords = [uint32]$markers["shadow_records"]
 $mainRecords   = [uint32]$markers["main_records"]
 if ($shadowRecords -ne $mainRecords) {
-    throw ("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
-           "The two scene walks no longer issue the same draws." -f $shadowRecords, $mainRecords)
+    throw (("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+            "The two scene walks no longer issue the same draws.") -f $shadowRecords, $mainRecords)
 }
 if ($shadowRecords -lt 1) {
     throw "No per-object records were written by either pass; the raster path drew nothing."
@@ -304,13 +304,115 @@ if ($shadowRecords -lt 1) {
 # The object buffer is shared by both passes at disjoint index ranges, so its
 # peak occupancy must be exactly the two counts summed, and must fit.
 if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
-    throw ("object_records_peak={0} is below shadow+main={1}; the two passes are " +
-           "overlapping in the object buffer rather than taking disjoint ranges." -f `
-           $markers["object_records_peak"], ($shadowRecords + $mainRecords))
+    throw (("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+            "overlapping in the object buffer rather than taking disjoint ranges.") -f `
+            $markers["object_records_peak"], ($shadowRecords + $mainRecords))
 }
 if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
     throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
            $markers["object_records_peak"], $markers["object_capacity"])
+}
+
+# -----------------------------------------------------------------------------
+# The draw-index witness: every draw read ITS OWN per-object record
+# -----------------------------------------------------------------------------
+# THE assertion this harness exists to make about the per-object structured
+# buffer, and the one nothing else can make.
+#
+# Per-object and per-material data live in structured buffers indexed by a
+# per-draw root constant at b3. Those are ROOT SRVs: a bare GPU virtual address,
+# no descriptor, no StructureByteStride. Nothing in the runtime, the debug layer
+# or the PIX capture cross-checks that basic_vs.hlsl indexed objectBuffer with
+# the constant it was handed rather than with a literal 0 - and a scene rendered
+# entirely from record 0 draws every entity with the first entity's transform,
+# which still looks like a scene and passes every loose threshold above.
+#
+# The CPU-side counters next door cannot cover it either. shadow_records,
+# main_records and object_records_peak count what was WRITTEN; all three stay
+# perfectly correct while the GPU reads the wrong element.
+#
+# So the shaders write it down. ObjectData carries recordId, set by the CPU to
+# the element's own index; both vertex shaders write the recordId they LOADED
+# into a UAV slot chosen by the root constant they were GIVEN. Correct indexing
+# leaves the identity permutation. See gpu_draw_records.h.
+#
+# Raster only: the probe runs on the capture frame, and a path-traced frame runs
+# neither raster pass.
+if ($RasterOnly) {
+    foreach ($k in @("draw_index_identity", "draw_index_mismatches",
+                     "draw_index_shadow_records", "draw_index_shadow_distinct",
+                     "draw_index_main_records",   "draw_index_main_distinct")) {
+        if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+    }
+
+    $diShadowRecords  = [uint32]$markers["draw_index_shadow_records"]
+    $diShadowDistinct = [uint32]$markers["draw_index_shadow_distinct"]
+    $diMainRecords    = [uint32]$markers["draw_index_main_records"]
+    $diMainDistinct   = [uint32]$markers["draw_index_main_distinct"]
+
+    Write-Host ("Draw-index witness: shadow {0}/{1} distinct, main {2}/{3} distinct, {4} mismatches" -f `
+                $diShadowDistinct, $diShadowRecords, $diMainDistinct, $diMainRecords,
+                $markers["draw_index_mismatches"])
+
+    # Both passes must have drawn something, or the checks below are vacuous:
+    # zero records trivially give zero distinct and zero mismatches.
+    if ($diShadowRecords -lt 2) {
+        throw (("draw_index_shadow_records={0}; fewer than two shadow draws means the " +
+                "distinct-index check cannot distinguish correct indexing from every " +
+                "draw sharing one record.") -f $diShadowRecords)
+    }
+    if ($diMainRecords -lt 2) {
+        throw (("draw_index_main_records={0}; fewer than two main-pass draws means the " +
+                "distinct-index check cannot distinguish correct indexing from every " +
+                "draw sharing one record.") -f $diMainRecords)
+    }
+
+    # DISTINCT INDEX COUNT PER PASS. N draws must have read N different records.
+    # Checked per pass because the two failure modes are one-sided: basic_vs
+    # reading record 0 leaves the shadow pass flawless and vice versa, so a
+    # single combined count would be dragged only halfway by either.
+    #
+    # This is what collapses to 1 when the root constant stops reaching a shader.
+    if ($diShadowDistinct -ne $diShadowRecords) {
+        throw (("Shadow pass read {0} distinct object records across {1} draws. " +
+                "The per-draw root constant at b3 is not reaching shadow_vs.hlsl, or " +
+                "shadow_vs.hlsl is not indexing objectBuffer with it - so multiple " +
+                "shadow draws are rasterising with one entity's transform. A count of " +
+                "1 means every draw read the same record.") -f `
+                $diShadowDistinct, $diShadowRecords)
+    }
+    if ($diMainDistinct -ne $diMainRecords) {
+        throw (("Main pass read {0} distinct object records across {1} draws. " +
+                "The per-draw root constant at b3 is not reaching basic_vs.hlsl, or " +
+                "basic_vs.hlsl is not indexing objectBuffer with it - so multiple " +
+                "draws are shading with one entity's transform. A count of 1 means " +
+                "every draw read the same record.") -f $diMainDistinct, $diMainRecords)
+    }
+
+    # THE STRONG FORM: slot i holds record i, for every allocated slot in both
+    # passes. Asserted as well as the distinct counts because distinctness alone
+    # would accept a PERMUTATION - every draw reading a different record, but not
+    # its own - which renders every object with another object's transform and is
+    # exactly what the disjoint shadow/main ranges in gpu_draw_records.h exist to
+    # prevent. A permutation leaves both distinct counts perfect.
+    Assert-Marker "draw_index_identity" "yes"
+    if ([uint32]$markers["draw_index_mismatches"] -ne 0) {
+        throw (("draw_index_mismatches={0}: that many draws read a record other than " +
+                "the one the cursor allocated for them. Diff shaders/basic_vs.hlsl, " +
+                "shaders/shadow_vs.hlsl and src/render/gpu_draw_records.h - ObjectData " +
+                "must be byte-identical in all three, and a layout disagreement reads " +
+                "shifted garbage that nothing else validates.") -f `
+                $markers["draw_index_mismatches"])
+    }
+
+    # The witness must agree with the counters that are derived independently, or
+    # one of the two is measuring a different frame than it claims.
+    if ($diShadowRecords -ne $shadowRecords -or $diMainRecords -ne $mainRecords) {
+        throw (("Draw-index witness saw shadow={0} main={1} but the record counters " +
+                "reported shadow={2} main={3}. The witness readback and the record " +
+                "counters are describing different frames.") -f `
+                $diShadowRecords, $diMainRecords, $shadowRecords, $mainRecords)
+    }
 }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
@@ -421,75 +523,36 @@ if (!$NoCapture) {
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
 
     # -------------------------------------------------------------------------
-    # Golden-value gate for the RASTER capture
+    # There is DELIBERATELY no golden-value gate on these statistics.
     # -------------------------------------------------------------------------
-    # The loose thresholds above catch catastrophic failure and nothing else.
-    # They are not enough: forcing every draw to read per-object record 0 - the
-    # single highest-prior failure mode of per-draw structured-buffer indexing,
-    # and precisely what happens if someone "simplifies" the root constant to
-    # SV_InstanceID at SM 5.1 - renders the whole scene with the first entity's
-    # transform, and STILL passes every check above. That was verified, not
-    # assumed, by building both mutations and watching the harness pass.
+    # One used to live here: exact mean luminance and an exact colour-bucket
+    # count, +/-0.5. It was deleted rather than repaired, and the reasoning is
+    # worth keeping so nobody reintroduces it.
     #
-    # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
-    # so the capture is deterministic (confirmed identical across repeated runs):
+    # It was guarding a real invariant - that the per-draw root constant at b3
+    # reaches every draw path, so each draw reads its own object record, which a
+    # root SRV leaves completely unvalidated at runtime. But it guarded that
+    # invariant THROUGH THE RENDERED IMAGE, and the rendered image is a function
+    # of which assets happen to sit in build/<Config>. That is build output, not
+    # tracked source, so two checkouts of the same commit legitimately produce
+    # different numbers. The gate was mis-calibrated twice in a single round on
+    # exactly that: 128.3 measured before four-cascade shadows landed, then 122.9
+    # measured on a clean 17-entity clone, while the tree the harness actually
+    # runs in has a gitignored corridor GLB loaded and renders 64 buckets.
     #
-    #   correct                              mean 122.9   buckets 59
-    #   shadow_vs objectBuffer[0]            mean 123.6   buckets 58
-    #   basic_vs  objectBuffer[0]            mean 124.4   buckets 27
+    # It also could not do the job even when calibrated. Pinning shadow_vs.hlsl
+    # to record 0 was measured at mean 123.6 / 58 buckets against a correct
+    # 122.9 / 59 - one bucket and 0.7 luminance, well inside the cross-checkout
+    # drift that destabilised the gate. A tolerance loose enough to be stable
+    # could not see the failure; one tight enough to see it could not stay green.
     #
-    # Re-measured against THIS tree, not carried over: the mutation figures in
-    # the previous version of this block were taken before four-cascade shadows
-    # and no longer describe either failure.
-    #
-    # A +/-0.5 band on the mean catches both (0.7 and 1.5 off), and the bucket
-    # count catches both outright. Raster only: the path-traced capture depends
-    # on accumulation depth and is not a golden-value candidate.
-    #
-    # RECALIBRATED for four-cascade shadows. The previous figure, 128.3, was
-    # measured before cascades landed on main and was already stale when this
-    # gate was written - it failed on the first run after merge, against a
-    # correct image. If you are reading this because it failed again, see the
-    # message below.
-    if ($RasterOnly) {
-        $goldenMeanLum  = 122.9
-        $goldenBuckets  = 59
-        $meanTolerance  = 0.5
-
-        # DELIBERATELY does not tell you to update the numbers. The previous
-        # wording ("If that was intended, re-measure and update the golden
-        # values") is what a reader follows on autopilot, and doing that on a
-        # real regression silently retires the only check that pins the HLSL row
-        # layout against gpu_draw_records.h - the layout nothing validates at
-        # runtime, because a root SRV has no descriptor and no stride. Updating
-        # the constants is sometimes right, but it is the LAST step, not the
-        # first.
-        $fixHint = @"
-The rendered raster image changed. Work out WHY before touching these constants.
-  1. Check the bucket count in the same failure. 59 -> ~25 means most draws are
-     reading one object record: the per-draw root constant at b3 is not reaching
-     basic_vs.hlsl. 59 -> 58 points at shadow_vs.hlsl doing the same.
-  2. Diff shaders/basic_vs.hlsl, shaders/shadow_vs.hlsl and
-     src/render/gpu_draw_records.h against each other. ObjectData must be
-     byte-identical in all three; nothing checks this at runtime.
-  3. Compare the capture against a build of origin/main to see whether the
-     change is yours.
-Only once you can NAME the rendering change that moved the mean should you
-re-measure and update goldenMeanLum and goldenBuckets - and record what changed
-in the calibration block above. Widening meanTolerance is not a fix.
-"@
-
-        if ([math]::Abs($meanLum - $goldenMeanLum) -gt $meanTolerance) {
-            $msg = "Raster capture mean luminance is {0:N1}, expected {1:N1} +/- {2:N1}. {3}" -f `
-                   $meanLum, $goldenMeanLum, $meanTolerance, $fixHint
-            throw $msg
-        }
-        if ($distinct -ne $goldenBuckets) {
-            $msg = "Raster capture has {0} distinct colour buckets, expected {1}. {2}" -f `
-                   $distinct, $goldenBuckets, $fixHint
-            throw $msg
-        }
-    }
+    # The invariant is now asserted directly and on the GPU side, by the
+    # draw_index_* markers below. Those are exact integers produced by the draw
+    # loop and are independent of the scene, the assets and the lighting.
+    # DO NOT put a golden-value gate back here. If you want appearance
+    # regression testing, the right tool is a reference-image comparison against
+    # a committed image, which is a different mechanism with different
+    # requirements.
 }
 
 if ($RasterOnly) {

@@ -15,7 +15,8 @@ namespace render
 
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
-                       const core::Mat4x4& normalMatrix)
+                       const core::Mat4x4& normalMatrix,
+                       uint32_t recordIndex)
 {
     // TRANSPOSE on the way in. core::Mat4x4 is row-major storage with ROW-VECTOR
     // semantics: TransformPoint computes v * M, so component r of the result is
@@ -49,6 +50,15 @@ void WriteObjectRecord(ObjectData& out,
         out.normalMatrix[r * 4 + 2] = normalMatrix.m[2][r];
         out.normalMatrix[r * 4 + 3] = 0.0f;
     }
+
+    // The witness stamp. Deliberately the LAST thing written and deliberately
+    // not derived from anything else in the record: it is the element's own
+    // index, so the vertex shader reading it back through the root constant
+    // proves the two agree. See "the draw-index witness" in the header.
+    out.recordId      = recordIndex;
+    out.recordPad[0]  = 0;
+    out.recordPad[1]  = 0;
+    out.recordPad[2]  = 0;
 }
 
 uint32_t RequiredObjectCapacity(uint32_t maxDraws)

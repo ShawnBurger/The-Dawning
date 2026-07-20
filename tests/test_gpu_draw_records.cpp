@@ -56,7 +56,7 @@ core::Mat4x4 AwkwardWorld()
 // compile flag that vanished at build time.
 TEST_CASE(GpuDrawRecords_SizesMatchShaderStructs)
 {
-    CHECK_EQ(sizeof(render::ObjectData), size_t(96));
+    CHECK_EQ(sizeof(render::ObjectData), size_t(112));
     CHECK_EQ(sizeof(render::MaterialData), size_t(80));
     CHECK_EQ(sizeof(render::CBPerPass), size_t(64));
 
@@ -72,8 +72,11 @@ TEST_CASE(GpuDrawRecords_ObjectBlocksAbut)
 {
     CHECK_EQ(offsetof(render::ObjectData, world), size_t(0));
     CHECK_EQ(offsetof(render::ObjectData, normalMatrix), size_t(48));
-    CHECK_EQ(sizeof(render::ObjectData),
+    // The witness stamp starts exactly where the second matrix block ends.
+    CHECK_EQ(offsetof(render::ObjectData, recordId),
              offsetof(render::ObjectData, normalMatrix) + size_t(48));
+    CHECK_EQ(offsetof(render::ObjectData, recordId), size_t(96));
+    CHECK_EQ(offsetof(render::ObjectData, recordPad), size_t(100));
 }
 
 // =============================================================================
@@ -95,7 +98,7 @@ TEST_CASE(GpuDrawRecords_WorldRowsReproduceTransformPoint)
     const core::Mat4x4 nrm   = core::Mat4x4::InverseTranspose3x3(world);
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, world, nrm);
+    render::WriteObjectRecord(rec, world, nrm, 0u);
 
     const core::Vec3f p{ 0.37f, -1.9f, 4.25f };
     const core::Vec3f expected = world.TransformPoint(p);
@@ -126,7 +129,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsUseInverseTranspose)
     const core::Mat4x4 nrm   = core::Mat4x4::InverseTranspose3x3(world);
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, world, nrm);
+    render::WriteObjectRecord(rec, world, nrm, 0u);
 
     const core::Vec3f n{ 0.0f, 1.0f, 0.0f };
 
@@ -166,7 +169,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsZeroTheTranslationSlot)
 
     render::ObjectData rec;
     std::memset(&rec, 0xCD, sizeof(rec));   // poison, as a stale frame would
-    render::WriteObjectRecord(rec, world, normal);
+    render::WriteObjectRecord(rec, world, normal, 0u);
 
     CHECK_EQ(rec.normalMatrix[3], 0.0f);
     CHECK_EQ(rec.normalMatrix[7], 0.0f);
@@ -188,7 +191,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsZeroTheTranslationSlot)
     // the named members cannot reach.
     render::ObjectData other;
     std::memset(&other, 0xAB, sizeof(other));
-    render::WriteObjectRecord(other, world, normal);
+    render::WriteObjectRecord(other, world, normal, 0u);
 
     CHECK(std::memcmp(&rec, &other, sizeof(render::ObjectData)) == 0);
 }
@@ -201,11 +204,47 @@ TEST_CASE(GpuDrawRecords_WorldRowsCarryTranslationInW)
     const core::Mat4x4 t = core::Mat4x4::Translation({ 7.0f, -3.0f, 0.25f });
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, t, core::Mat4x4::InverseTranspose3x3(t));
+    render::WriteObjectRecord(rec, t, core::Mat4x4::InverseTranspose3x3(t), 0u);
 
     CHECK_APPROX_EPS(rec.world[3],  7.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[7], -3.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[11], 0.25f, 1e-6);
+}
+
+// =============================================================================
+// The draw-index witness stamp
+// =============================================================================
+
+// recordId must be the index the caller allocated, verbatim. This is the CPU
+// half of the GPU-side assertion described in gpu_draw_records.h: the vertex
+// shaders write back the recordId they LOADED, so a stamp that did not match
+// the slot would make the witness lie in the safe direction - it would report
+// correct indexing while the GPU read the wrong element.
+//
+// Distinct indices must produce distinct stamps and identical geometry, which
+// is what makes the witness a check on INDEXING rather than on the transforms:
+// the two records below differ in exactly one field.
+TEST_CASE(GpuDrawRecords_RecordIdStampsTheAllocatedIndex)
+{
+    const core::Mat4x4 world  = AwkwardWorld();
+    const core::Mat4x4 normal = core::Mat4x4::InverseTranspose3x3(world);
+
+    render::ObjectData a = {};
+    render::ObjectData b = {};
+    render::WriteObjectRecord(a, world, normal, 0u);
+    render::WriteObjectRecord(b, world, normal, 41u);
+
+    CHECK_EQ(a.recordId, 0u);
+    CHECK_EQ(b.recordId, 41u);
+
+    // Same geometry, so everything before the stamp is byte-identical.
+    CHECK(std::memcmp(&a, &b, offsetof(render::ObjectData, recordId)) == 0);
+
+    // The pad is written, not inherited. gpu_draw_records.h explains why the
+    // three uints are spelled out on both sides rather than left implicit.
+    CHECK_EQ(b.recordPad[0], 0u);
+    CHECK_EQ(b.recordPad[1], 0u);
+    CHECK_EQ(b.recordPad[2], 0u);
 }
 
 // =============================================================================

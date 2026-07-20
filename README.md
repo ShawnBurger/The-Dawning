@@ -98,6 +98,44 @@ verifies proves the engine did not crash; only this proves it drew something. A
 black frame, inverted culling, a shader emitting nothing, or NaN-poisoned output
 would pass every other assertion.
 
+### The draw-index witness
+
+In raster mode the harness also asserts that **every draw read its own
+per-object record**, via the `draw_index_*` markers.
+
+Per-object and per-material data live in structured buffers indexed by a
+per-draw root constant at `b3`. Those are root SRVs — a bare GPU virtual
+address, no descriptor, no `StructureByteStride` — so nothing in the runtime or
+the debug layer can tell that `basic_vs.hlsl` indexed `objectBuffer` with the
+constant it was handed rather than with a literal `0`. That failure renders the
+entire scene with the first entity's transform and still looks like a scene.
+The CPU-side counters (`shadow_records`, `main_records`,
+`object_records_peak`) cannot see it either: they count what was *written*, and
+all of them stay correct while the GPU reads the wrong element.
+
+So the shaders write it down. `ObjectData` carries a `recordId` field that the
+CPU sets to the element's own index; both vertex shaders write the `recordId`
+they actually *loaded* into a UAV slot chosen by the root constant they were
+*given*. A correct frame leaves the identity permutation, and the harness
+asserts both the per-pass distinct-index count and the exact identity. See
+`src/render/gpu_draw_records.h`.
+
+Verified by watching it fail, in both directions: pinning `basic_vs.hlsl` to
+`objectBuffer[0]` drops the main pass to 1 distinct record out of 17 with 17
+mismatches, and pinning `shadow_vs.hlsl` drops the shadow pass to 1 out of 17
+with 16 mismatches — while the other pass stays perfect in each case, which is
+why the two passes are counted separately.
+
+This replaced a golden-value gate on the capture's mean luminance and
+colour-bucket count. That gate was measuring the same invariant *through the
+rendered image*, which made it depend on which assets happened to sit in
+`build\<Config>` — build output, not tracked source — and it was mis-calibrated
+twice in one round on exactly that. It also could not do the job: pinning
+`shadow_vs.hlsl` to record 0 moved the bucket count by one and the mean by 0.7,
+less than the legitimate drift between two checkouts of the same commit. The
+witness is exact integers produced by the draw loop, independent of the scene,
+the assets and the lighting.
+
 The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any
 legitimate lighting change. Pass `-NoCapture` to skip this section.

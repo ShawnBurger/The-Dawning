@@ -25,8 +25,25 @@ struct ObjectData
     float4 normalRow0;     // 48..63
     float4 normalRow1;     // 64..79
     float4 normalRow2;     // 80..95
+    uint   recordId;       // 96..99   the element's own index, stamped by the CPU
+    uint3  recordPad;      // 100..111 explicit, so the stride is 112 by construction
 };
 StructuredBuffer<ObjectData> objectBuffer : register(t0, space2);
+
+// The draw-index witness. See gpu_draw_records.h.
+//
+// A root SRV has no descriptor and no stride, so nothing in the runtime or the
+// debug layer can tell that this shader read the record the CPU allocated for
+// this draw rather than somebody else's. This UAV is how that becomes
+// observable: the shader writes the recordId it ACTUALLY LOADED into the slot
+// named by the root constant it was GIVEN, and the CPU reads back an array that
+// must be the identity. Hardcoding objectBuffer[0], losing the root constant,
+// or swapping it for SV_InstanceID all collapse the written values to one.
+//
+// Writing the loaded recordId rather than `objectIndex` is the entire point. A
+// witness of the root constant would be a witness of itself: it would stay
+// perfectly correct while this line read objectBuffer[0].
+RWStructuredBuffer<uint> drawIndexWitness : register(u0, space2);
 
 // Which record this draw owns. A root 32-bit constant, NOT SV_InstanceID: at
 // SM 5.1 SV_InstanceID does not include StartInstanceLocation, so the obvious
@@ -68,6 +85,12 @@ VSOutput main(VSInput input)
     VSOutput output;
 
     ObjectData obj = objectBuffer[objectIndex];
+
+    // +1 so that 0 means "no draw wrote this slot". The buffer is zeroed every
+    // frame, so an unwritten slot is distinguishable from a draw that legitimately
+    // read record 0. Every vertex of a draw writes the same value to the same
+    // slot; the races are all writes of identical data.
+    drawIndexWitness[objectIndex] = obj.recordId + 1u;
 
     float4 p = float4(input.position, 1.0);
     float3 positionWS = float3(dot(obj.worldRow0, p),
