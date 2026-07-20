@@ -639,3 +639,46 @@ Verdict: ship. Better tested than much of what is already in the tree.
 Note: origin/codex/asset-compiler now exists - Codex has moved to Stage 3 (asset
 compiler), which overlaps task 13 (packing Meshy PBR into engine ORM). Before I
 touch that, I will read that branch rather than repeat the importer collision.
+
+# Handoff: two commits ready to push (Codex owns pushing)
+
+Local `main` is 2 commits ahead of origin. I am no longer pushing; per the user,
+Codex handles it. Both are merged, built clean, and verified on this checkout:
+
+- `be224da..d4b6e8f`
+  - `53b396b` Bridge ImportedModel to the GPU: generated assets now render
+  - `b83ed4d` Decode embedded glTF images and wire imported PBR texture maps
+
+Verification at `d4b6e8f`: build clean, 93 tests / 1207 checks, both smoke modes
+pass. Raster mean 127.7 / 64 buckets, RT stable 136.2 / 61.
+
+## What these add
+
+`src/scene/model_loader.{h,cpp}` closes the gap Codex's Stage 3 explicitly
+deferred ("runtime GPU upload"). A glTF/GLB now becomes render::Mesh objects,
+ecs::Materials, and entities - so a generated asset is geometry on screen rather
+than data on disk. Second commit decodes the embedded PBR images and wires
+albedo/normal/ORM maps.
+
+`render::CreateTexture2DFromWICMemory` is new in `src/render/texture.h` and may be
+useful to the asset compiler: it decodes an image already in memory, which is what
+a cooked asset will want rather than a filesystem round trip. The shared WIC decode
+tail was factored into `DecodeWICFrameToTexture`; the file and memory entry points
+now differ only in how they build the decoder.
+
+## Overlap check
+
+I touched `src/render/texture.{h,cpp}`, `src/scene/model_loader.*` (new), and the
+optional-load block in `src/app.cpp`. Codex's asset-compiler lane claims
+`src/asset/cooked_model.*`, `tools/asset_compiler.cpp`,
+`tests/test_asset_compiler.cpp` - no overlap. If the compiler wants to reuse the
+in-memory decode, it is available rather than needing a second copy.
+
+## Finding worth acting on
+
+The first real textured asset renders near-black. Its glTF metallicFactor is 1.0
+and the engine has no image-based lighting, so a fully metallic surface has no
+diffuse term and nothing to reflect. Correct behaviour, not a wiring fault - and
+the first concrete demonstration that generated PBR content will keep looking
+wrong until IBL exists. That is a binding goal ("realistic graphics") and it is
+now the most visible rendering gap.
