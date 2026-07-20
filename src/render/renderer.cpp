@@ -37,6 +37,9 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateBloomPipeline(device.Device())) return false;
     if (!CreateShadowResources(device.Device())) return false;
     if (!CreateShadowPSO(device.Device())) return false;
+    // Resources, RTVs and PSOs only - EnsureEnvironmentIBL below records the GPU
+    // work, because it needs its own command list and Init has none open.
+    if (!m_environmentIBL.Init(device.Device())) return false;
 
     // Per-draw structured buffers, created HERE at exactly the capacity floors
     // rather than lazily on the first BeginFrameResources. Two reasons, and the
@@ -60,7 +63,49 @@ bool Renderer::Init(D3D12Device& device)
                                      sizeof(MaterialData), L"MaterialDataBuffer"))
         return false;
 
+    // Bake the environment cubemap. This opens its own command list, so it comes
+    // after every resource that Init creates and before App opens one of its
+    // own. IBL_DESIGN.md section 12 flagged the composition of two independent
+    // WaitForCurrentFrame/ResetCommandList/Close/Execute/WaitForGpu sequences as
+    // traced-but-not-run; it is run now, and it composes.
+    if (!EnsureEnvironmentIBL(device)) return false;
+
     core::Log::Info("Renderer initialized");
+    return true;
+}
+
+// =============================================================================
+// EnsureEnvironmentIBL
+// =============================================================================
+bool Renderer::EnsureEnvironmentIBL(D3D12Device& device)
+{
+    if (!m_environmentIBL.EnsureBuilt(device, m_skyRevision))
+    {
+        core::Log::Error("Environment IBL bake failed");
+        return false;
+    }
+
+    // Publish the SRV at the reserved slot. Written AFTER the bake, so the
+    // descriptor never points at a resource that has not been rendered.
+    D3D12_CPU_DESCRIPTOR_HANDLE cubeSrv = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    cubeSrv.ptr += static_cast<SIZE_T>(kEnvCubeDescriptorIndex) * m_textureDescSize;
+    m_environmentIBL.WriteCubeSRV(device.Device(), cubeSrv);
+
+    // The slot reported is the one just written, and the allocator's LIVE
+    // firstIndex is reported beside it - so assertion 1.1 cannot pass while the
+    // descriptor went somewhere else, nor while the reservation that protects it
+    // has quietly been given away.
+    //
+    // A FAILED ASSERTION IS NOT FATAL HERE, AND THAT IS DELIBERATE. LogMarkers
+    // logs core::Log::Error and emits a "fail" verdict marker; the smoke harness
+    // turns both into a hard failure, because it throws on any [ERR ] line AND
+    // asserts each verdict by name. But this code runs on every launch in every
+    // mode, including a player's, and refusing to boot the engine because a
+    // prefilter statistic drifted on some driver is the wrong trade for a
+    // resource that nothing samples yet. Infrastructure failures - a bake that
+    // could not record or a readback that could not map - DO abort, above.
+    (void)m_environmentIBL.LogMarkers(kEnvCubeDescriptorIndex,
+                                      m_textureAllocator.FirstIndex());
     return true;
 }
 
@@ -87,6 +132,7 @@ void Renderer::Shutdown()
     m_drawProbeCapacity = 0;
     m_drawProbeReadbackBytes = 0;
     m_drawProbeReadbackPending = false;
+    m_environmentIBL.Shutdown();
     m_bloomBlurPSO.Reset();
     m_bloomPrefilterPSO.Reset();
     m_bloomRootSig.Reset();
@@ -1384,13 +1430,22 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     for (uint32_t i = 0; i < kMaxRasterTextures; ++i)
         WriteNullTextureDescriptor(device, i);
 
-    // Slot 0 stays the null-SRV fallback and slot 1 the shadow map, so
-    // allocation starts at 2 and the allocator can never recycle either.
-    m_textureAllocator.Init(kMaxRasterTextures, kShadowDescriptorIndex + 1);
+    // Slot 0 stays the null-SRV fallback, slot 1 the shadow map and slot 2 the
+    // prefiltered environment cube, so allocation starts at 3 and the allocator
+    // can never recycle any of them.
+    //
+    // The firstIndex is derived from kEnvCubeDescriptorIndex rather than written
+    // as a literal 3, so reserving a further slot later is one edit and cannot
+    // leave the allocator handing out a reserved index.
+    static_assert(kEnvCubeDescriptorIndex == kShadowDescriptorIndex + 1,
+                  "The environment cube must sit immediately after the shadow map; "
+                  "the allocator's firstIndex below assumes the reserved slots are "
+                  "contiguous from 0.");
+    m_textureAllocator.Init(kMaxRasterTextures, kEnvCubeDescriptorIndex + 1);
 
     core::Log::Infof("Raster texture heap created (%u descriptors, %u usable)",
                      kMaxRasterTextures,
-                     kMaxRasterTextures - (kShadowDescriptorIndex + 1));
+                     kMaxRasterTextures - (kEnvCubeDescriptorIndex + 1));
     return true;
 }
 

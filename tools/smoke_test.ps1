@@ -148,6 +148,82 @@ Assert-Marker "shadow_map_slot" "1"
 # without the descriptor moving, and vice versa. %u on the C++ side, never
 # %.1f - this is a string compare, so "4.0" would not match "4".
 Assert-Marker "shadow_cascades" "4"
+
+# =============================================================================
+# Environment IBL - docs/research/IBL_DESIGN.md section 11, Stage 1
+# =============================================================================
+# The prefiltered environment cubemap. NOTHING SAMPLES IT YET: Stage 1 builds
+# and proves the resource, Stages 2-4 consume it, and the capture statistics are
+# expected to be byte-identical to the pre-IBL run. Do not read "the image did
+# not change" as these assertions being inert - they are about the resource, and
+# every one of them has been watched failing.
+#
+# BOTH MODES, unconditionally. The prefilter runs once at startup, before the
+# raster/path-tracing branch exists, so unlike the shadow and draw probes there
+# is no frame to arm it on and no mode that can skip it. That is deliberate: two
+# probes in this repo were previously fixed for running only on a path-traced
+# final frame or only under -RasterOnly, and the cheapest way not to repeat that
+# is to gate this on nothing at all.
+#
+# Assert-Marker throws on a MISSING key as well as a wrong one, which is the
+# point of listing them here rather than relying on the engine logging [ERR ].
+# If EnsureEnvironmentIBL stopped being called, the engine would log no error
+# and the run would go green; these lines are what make that a failure.
+Assert-Marker "ibl_env" "ok"
+# 1.1 - the reservation. The cube takes slot 2, immediately after the shadow map,
+# and the allocator's firstIndex moved 2 -> 3 to keep it. If that slips, a
+# material texture lands on top of the cube (or the cube on top of the shadow
+# map) and the failure reads as "reflections are wrong", not "descriptors are
+# wrong". shadow_map_slot=1 above is the other half of the same claim: both must
+# hold, and asserting only one lets the pair slide together.
+Assert-Marker "ibl_env_slot" "2"
+Assert-Marker "ibl_env_size" "128"
+Assert-Marker "ibl_env_mips" "8"
+# The half of 1.1 that actually bites in Stage 1. NOTHING SAMPLES THE CUBE YET,
+# so if the allocator's firstIndex slipped back to 2 a material texture would
+# overwrite the cube's SRV and no runtime check would see it - the damage would
+# surface two stages later as "reflections are wrong". This is the allocator's
+# own live FirstIndex(), not the constant it was derived from, so reverting the
+# reservation fails here rather than in Stage 3.
+Assert-Marker "ibl_env_first_material_slot" "3"
+# 1.2 - the direction round trip. Catches the cube face table in
+# shaders/ibl_environment.hlsli being wrong in ANY way: a permutation, a sign
+# flip, a v-flip, or a "handedness fix" applied for RULE 7 that should not have
+# been. The table was written from the D3D spec and never verified against a run,
+# so this is a round trip rather than a comparison against the table - it is
+# correct even if the table is a permutation of the truth, and it fails if the
+# implementation is internally inconsistent.
+Assert-Marker "ibl_direction_roundtrip" "pass"
+# 1.3 - the sky agreement probe, and the reason Stage 2 is allowed to put
+# spherical harmonics on the CPU at all. src/core/sky_radiance.h says of its own
+# hash tripwire that it "pins agreement in TIME, not in VALUE" and names this
+# probe as the thing that closes the gap. It is built now: the shipped HLSL
+# evaluates 64 directions on the GPU and the CPU compares against
+# core::SkyRadiance.
+Assert-Marker "ibl_sky_agreement" "pass"
+# Vacuity guards for 1.2 and 1.3, and they are NOT redundant with the verdicts
+# above. The probe target is cleared to a -1 poison and the shaders write w=+1,
+# so these counts say the draws actually ran. A comparison neither side reached
+# is not a comparison - the poison-sentinel lesson, applied before it was needed
+# rather than after.
+Assert-Marker "ibl_direction_slots" "64"
+Assert-Marker "ibl_sky_slots" "64"
+# The other half of 1.2's vacuity guard, and NOT implied by the slot count. A
+# direction set that degenerated to 64 copies of one direction would write all 64
+# slots and round-trip perfectly while exercising a single cube face - the face
+# table could then be wrong on the other five and nothing here would notice.
+# "Covering all six faces and both signs of every axis" is the design's own
+# wording for this assertion; this is that clause asserted rather than assumed.
+Assert-Marker "ibl_probe_faces" "6"
+# 1.4 - per-mip mean luminance within 5% of mip 0. Catches an UNNORMALISED
+# prefilter: dropping the "/ sum(NdotL)" makes every rough surface in the engine
+# systematically wrong in a way that looks like an art choice rather than a bug.
+Assert-Marker "ibl_mip_energy" "pass"
+# 1.5 - variance falls as roughness rises, with a variance[0] > 1e-6 floor. The
+# floor is the load-bearing half: an all-zero cube satisfies "decreasing"
+# trivially, so without it this assertion passes on a cube that was never
+# rendered at all.
+Assert-Marker "ibl_mip_variance_decreasing" "yes"
 # BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
 # skipped in path-tracing runs, which do not use the shadow map at all" - an
 # accurate description of a hole, not a reason for one. The shadow probe rode the
