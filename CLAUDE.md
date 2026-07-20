@@ -137,13 +137,32 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            materialBuffer[0]. All four mutations are watched failing: object
            indexing in each vertex shader, material indexing in the pixel
            shader, and the deferred-release fence tagging.
-           The probe runs on the LAST RASTER FRAME of the run, not the final
-           frame. The final frame is path-traced in the default mode, which runs
-           none of the three shaders, so probing there gave the default run zero
-           probe coverage - an assertion that existed and was never reached. In
-           the default mode the probe frame is now frame 14, ahead of the RT
-           switch and inside the frame 8..16 growth churn, so it also reads a
-           buffer that has already been grown and deferred-released mid-run.
+           BOTH GPU PROBES - the draw-record probe and the SHADOW-MAP probe -
+           run on the LAST RASTER FRAME of the run, not the final frame, and
+           that frame is decoupled from the CAPTURE frame. The final frame is
+           path-traced in the default mode, which runs none of the three raster
+           shaders and skips the shadow pass entirely, so probing there gave the
+           default run zero probe coverage - assertions that existed and were
+           never reached. In the default mode the probe frame is now frame 14,
+           ahead of the RT switch and inside the frame 8..16 growth churn, so
+           the draw probe also reads a buffer that has already been grown and
+           deferred-released mid-run. The capture stays on the end frame and
+           still asserts the default mode's final path-traced image - the frame
+           an image is taken on and the frame correctness is verified on are
+           separate concerns, and separating them is what closed the hole.
+           The shadow probe was the second half of this fix and lagged the
+           first: after the draw probe moved, every shadow and cascade assertion
+           was still armed on the capture frame, with the harness's
+           `if ($RasterOnly)` gate documenting the hole rather than closing it.
+           MEASURED before the fix, the default run emitted ZERO
+           shadow_map_written and ZERO shadow_cascade_* markers. Now both modes
+           emit all sixteen and the gate is gone. Watched failing IN THE DEFAULT
+           MODE: pinning BeginShadowCascade's CBPerPass to m_lightViewProj[0]
+           flips shadow_cascade_depths_distinct to "no" and fails the default
+           run, where the identical mutation passed green before. probeShadow is
+           gated on !renderedPathTracing - the same predicate that selects the
+           render branch - not on !m_usePathTracing, so it runs exactly when
+           there is a shadow pass to observe.
            A third b3 constant gates the writes to that frame, so ordinary
            frames pay no per-invocation witness cost. The UAV DECLARATION in
            basic_ps is GATED TOO, behind DAWNING_DRAW_PROBE: declaring a UAV in

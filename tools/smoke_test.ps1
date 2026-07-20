@@ -148,55 +148,81 @@ Assert-Marker "shadow_map_slot" "1"
 # without the descriptor moving, and vice versa. %u on the C++ side, never
 # %.1f - this is a string compare, so "4.0" would not match "4".
 Assert-Marker "shadow_cascades" "4"
-# Raster only - the probe is skipped in path-tracing runs, which do not use the
-# shadow map at all. This is the assertion with teeth: shadow_map=ok only proves
-# the resource was created, and deleting the shadow pass entirely leaves the map
-# at its cleared value with every pixel reading fully lit, which nothing else
-# here would notice. Verified by deleting the caster draw and watching this flip
-# to "no".
-if ($RasterOnly) {
-    Assert-Marker "shadow_map_written" "yes"
-
-    # The pass began every cascade. This is asserted SEPARATELY from the
-    # per-slice coverage below because coverage cannot see a skipped cascade:
-    # measured, not assumed - changing the app's loop bound to c < N-1 leaves
-    # shadow_cascade_written_3 reading "yes", since an uncleared, never-rendered
-    # depth slice holds arbitrary values under the 1.0 clear and is
-    # indistinguishable from real depth. This counter is the only check here that
-    # flips when a cascade is skipped.
-    Assert-Marker "shadow_cascades_rendered" "4"
-
-    # EVERY cascade holds depth, not just cascade 0. The index is in the KEY on
-    # purpose: markers are stored in a hashtable, so a shared "cascade_written"
-    # key would be overwritten by each loop iteration and collapse to the last
-    # cascade - passing while cascades 0..2 were empty.
-    foreach ($c in 0..3) { Assert-Marker "shadow_cascade_written_$c" "yes" }
-
-    # Each cascade stored a DIFFERENT depth for the scene. Cascade c's slab is
-    # 120/325/875/2350 units deep, so the same geometry must normalise to a
-    # different NDC depth in every slice - four equal values mean the slices did
-    # not each get their own matrix. Structural, not a tuned threshold.
-    #
-    # Verified by pinning DrawMeshShadow to m_lightViewProj[0]: this flips to
-    # "no" while every shadow_cascade_written_* marker stays "yes".
-    #
-    # It does NOT catch a permutation of matrices across slices - all four stay
-    # distinct. Nothing here does; the CPU cases in tests/test_shadow_cascades.cpp
-    # are what constrain the matrices themselves.
-    #
-    # Deliberately NOT asserted: the coverage-fraction ordering. The probe window
-    # is 1/8 of each footprint, so even cascade 3's is 117 world units across and
-    # sits entirely on the 200x200 ground plane - all four fractions are 1.0. An
-    # assertion on them would pass unconditionally, which is worse than none.
-    Assert-Marker "shadow_cascade_depths_distinct" "yes"
-
-    # The live cascade fit, not a mirror of the constant table: strictly
-    # increasing texel size with consecutive ratios in (1, 8]. Catches the whole
-    # family of "all cascades ended up the same size" and "the table got
-    # reversed". Verified by setting the extents to {24,24,24,24} and watching
-    # this flip to "no".
-    Assert-Marker "shadow_cascade_texel_monotonic" "yes"
+# BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
+# skipped in path-tracing runs, which do not use the shadow map at all" - an
+# accurate description of a hole, not a reason for one. The shadow probe rode the
+# CAPTURE frame, the default mode path-traces the capture frame, so the default
+# run - the one that gets run when nobody passes a switch - emitted not one of
+# these markers and every assertion below was skipped. Everything here passed
+# review and was never reached, which is the same class of gap as the draw probe's
+# and as "a startup grow is not coverage".
+#
+# App::Run now arms the shadow probe on the last RASTER frame (see
+# smokeRasterVerifyFrame), separately from the capture, so both modes carry it and
+# the gate is gone. The capture frame is untouched: it still takes the default
+# mode's final path-traced image.
+#
+# These are the assertions with teeth. shadow_map=ok only proves the resource was
+# created, and deleting the shadow pass entirely leaves the map at its cleared
+# value with every pixel reading fully lit, which nothing else here would notice.
+# Verified by deleting the caster draw and watching this flip to "no".
+if (-not $markers.ContainsKey("shadow_probe_frame")) {
+    throw ("Smoke test did not emit 'shadow_probe_frame'. The shadow-map probe was " +
+           "never armed. It must run on the last raster frame in BOTH smoke modes - " +
+           "see smokeRasterVerifyFrame in App::Run. A missing marker here means the " +
+           "probe went back to riding the capture frame, which is path-traced in the " +
+           "default mode and renders no shadow pass at all.")
 }
+Write-Host "Shadow probe frame: $($markers['shadow_probe_frame'])"
+if (-not $RasterOnly -and [uint64]$markers["shadow_probe_frame"] -ge [uint64]$markers["frames"]) {
+    throw ("shadow_probe_frame=$($markers['shadow_probe_frame']) is not before the end " +
+           "of the run ($($markers['frames']) frames). In the default mode the shadow " +
+           "probe must land on a raster frame, which means BEFORE path tracing starts.")
+}
+
+Assert-Marker "shadow_map_written" "yes"
+
+# The pass began every cascade. This is asserted SEPARATELY from the
+# per-slice coverage below because coverage cannot see a skipped cascade:
+# measured, not assumed - changing the app's loop bound to c < N-1 leaves
+# shadow_cascade_written_3 reading "yes", since an uncleared, never-rendered
+# depth slice holds arbitrary values under the 1.0 clear and is
+# indistinguishable from real depth. This counter is the only check here that
+# flips when a cascade is skipped.
+Assert-Marker "shadow_cascades_rendered" "4"
+
+# EVERY cascade holds depth, not just cascade 0. The index is in the KEY on
+# purpose: markers are stored in a hashtable, so a shared "cascade_written"
+# key would be overwritten by each loop iteration and collapse to the last
+# cascade - passing while cascades 0..2 were empty.
+foreach ($c in 0..3) { Assert-Marker "shadow_cascade_written_$c" "yes" }
+
+# Each cascade stored a DIFFERENT depth for the scene. Cascade c's slab is
+# 120/325/875/2350 units deep, so the same geometry must normalise to a
+# different NDC depth in every slice - four equal values mean the slices did
+# not each get their own matrix. Structural, not a tuned threshold.
+#
+# Verified by pinning DrawMeshShadow to m_lightViewProj[0]: this flips to
+# "no" while every shadow_cascade_written_* marker stays "yes". Watched failing in
+# the DEFAULT mode, not only under -RasterOnly - proving it in the mode that was
+# already covered would prove nothing about the mode that was not.
+#
+# It does NOT catch a permutation of matrices across slices - all four stay
+# distinct. Nothing here does; the CPU cases in tests/test_shadow_cascades.cpp
+# are what constrain the matrices themselves.
+#
+# Deliberately NOT asserted: the coverage-fraction ordering. The probe window
+# is 1/8 of each footprint, so even cascade 3's is 117 world units across and
+# sits entirely on the 200x200 ground plane - all four fractions are 1.0. An
+# assertion on them would pass unconditionally, which is worse than none.
+Assert-Marker "shadow_cascade_depths_distinct" "yes"
+
+# The live cascade fit, not a mirror of the constant table: strictly
+# increasing texel size with consecutive ratios in (1, 8]. Catches the whole
+# family of "all cascades ended up the same size" and "the table got
+# reversed". Verified by setting the extents to {24,24,24,24} and watching
+# this flip to "no".
+Assert-Marker "shadow_cascade_texel_monotonic" "yes"
 
 # -----------------------------------------------------------------------------
 # Constant-ring FLATNESS
