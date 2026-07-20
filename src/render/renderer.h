@@ -366,6 +366,20 @@ public:
     // reset cannot leave the environment off for the rest of a run.
     void SetIBLDisabledForFrame(bool disabled) { m_iblDisabledThisFrame = disabled; }
 
+    // The environment the raster path shades with, exposed so the DXR STABLE
+    // PREVIEW can shade with THE SAME ONE. Both the cube and the SH coefficients
+    // come from this single object, so there is no second bake, no second
+    // projection, and nothing for the two paths to disagree about - which is the
+    // structural half of IBL_DESIGN.md 8.3's anti-divergence argument.
+    //
+    // The Renderer owns it because it is baked during Renderer::Init, before the
+    // raster/RT branch exists. The PathTracer is owned by the Scene and cannot
+    // reach the Renderer, so App::RenderFrame is what joins them.
+    const EnvironmentIBL& Environment() const { return m_environmentIBL; }
+    // Uploaded as iblParams.y on BOTH paths. If these ever come from different
+    // places, F1 changes the environment's exposure.
+    float IBLIntensity() const { return m_iblIntensity; }
+
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
     uint32_t TextureDescriptorHighWater() const { return m_textureAllocator.HighWater(); }

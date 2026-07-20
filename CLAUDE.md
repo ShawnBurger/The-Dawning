@@ -23,11 +23,14 @@ Layer 3 provides ECS architecture; the RT extension adds full DXR path tracing:
   - TLAS rebuilt every frame from ECS entity transforms
   - State object: ray generation + primary closest-hit + shadow hit + 2 miss shaders
   - Shader Binding Table with proper 64/32-byte alignment
-  - Global root signature, 9 parameters (rt_pipeline.cpp:55-131): TLAS SRV (t0),
+  - Global root signature, 10 parameters, 18 of 64 DWORDs: TLAS SRV (t0),
     output UAV table (u0-u1), per-frame CB (b0), material StructuredBuffer (t1),
     triangle normals (t2), instance metadata (t3), triangle UVs (t4), triangle
-    positions (t5), and an SRV table for albedo (t0/space4), normal (t0/space5)
-    ORM (t0/space6) and emissive (t0/space7) textures
+    positions (t5), an SRV table for albedo (t0/space4), normal (t0/space5),
+    ORM (t0/space6), emissive (t0/space7) textures and the prefiltered
+    environment cube (t0/space8), and a root UAV for the IBL consumption probe
+    (u0/space4). Two static samplers: s0 for material textures, s1 (trilinear,
+    CLAMP) for the environment cube
   - Per-instance material lookup: global material StructuredBuffer indexed by
     InstanceID(). This is a root SRV, not SM 6.6 bindless — no
     ResourceDescriptorHeap anywhere in the project
@@ -174,9 +177,112 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            opaque pass keeps early-Z in Release and the probe is still compiled
            into shipping builds; the cost is one extra PSO. The vertex shaders
            are not permuted - early-Z is a pixel-stage property
-           IMAGE-BASED LIGHTING IS AT STAGE 3 OF SIX
+           IMAGE-BASED LIGHTING IS AT STAGE 4 OF SIX
            (docs/research/IBL_DESIGN.md section 11). Stages 1-3 are done in the
-           RASTER path; Stage 4 (DXR) is not.
+           RASTER path and Stage 4 has landed in the DXR STABLE PREVIEW.
+           STAGE 4 IS WHERE F1 STOPPED CHANGING THE LIGHTING MODEL. The DXR
+           stable preview ran an ad-hoc environment with a magic 2.5 diffuse
+           multiplier, a magic 0.25 bounce damper, a mirror reflection that
+           ignored roughness entirely, and a gloss ramp with no physical basis -
+           so toggling F1 changed how surfaces respond to the environment, not
+           just which renderer drew them. It now calls the SAME
+           shaders/ibl_common.hlsli basic_ps.hlsl calls, against the same cube
+           and the same nine SH coefficients from the same EnvironmentIBL. All
+           four constants are gone. The bounce damper survives deliberately
+           (IBL_DESIGN.md 8.2): the preview traces no secondary bounce, and
+           removing it is an appearance change that would make any luminance
+           shift unattributable in the same stage.
+           THE FULL PATH TRACER IS UNTOUCHED, deliberately. It samples
+           DawningSkyRadiance on every miss - it evaluates the very integral the
+           split-sum approximates - so substituting the prefiltered cube would
+           replace the reference with the approximation, and
+           ASSET_PIPELINE_SPEC makes DXR the reference. Terminating the last
+           bounce into the cube is rejected on the same ground plus a second
+           one: it biases the estimator, and this project names its two biases
+           (throughput clamp 4.0, firefly clamp) rather than accumulating
+           unlisted ones. PROOF THAT THE BLAST RADIUS IS WHAT IT CLAIMS: the
+           raster and DXR-FULL captures are BYTE-IDENTICAL across this change.
+           Only DXR stable's image moved.
+           CONVERGENCE, MEASURED. Whole-frame mean luminance |DXR-stable - X|
+           before -> after: vs raster 5.499 -> 1.163, vs DXR-full 7.000 ->
+           0.339. On the corridor region: vs raster 2.944 -> 1.057. DXR stable
+           moved decisively toward raster on both, and toward the DXR-full
+           reference on the whole frame.
+           IT MOVED AWAY FROM DXR-FULL ON THE CORRIDOR, 22.608 -> 24.496, and
+           that is not a regression - it is an INHERITED, already-named gap. The
+           corridor now agrees with raster to 1.057, so it inherits raster's own
+           overshoot against the reference, which CLAUDE.md already records
+           (15.57 -> 16.07) with the same cause: the split-sum has no visibility
+           term, the Meshy asset ships no occlusion map, and the corridor is
+           concave. Specular occlusion is IBL_DESIGN.md 9.3's deliberately
+           deferred item. Converging DXR stable ONTO raster necessarily
+           transports raster's known limitation with it.
+           COSTS, COUNTED FROM THE TREE rather than taken from the design.
+           RTPerFrameConstants 212 -> 384 with a MANDATORY pad0[3] at 212..223:
+           HLSL rounds the float4 SH array to offset 224 and C++ would place it
+           at 212, a 12-byte shear with no compile error on either side that
+           would produce a smooth, plausible, wrong ambient. Three static_asserts
+           pin sizeof==384, offsetof(iblSH)==224 and offsetof(iblParams)==368;
+           deleting pad0[3] fails all three at BUILD time, watched.
+           RT descriptor heap 258 -> 259 per frame slot. DXR root DWORDs 16 ->
+           18, and the split matters: the env cube costs ZERO, because it is a
+           fifth range inside the table root parameter 8 already binds, and both
+           DWORDs go to the consumption probe's root UAV at u0/space4. Exactly
+           the trade the raster path made at 16 -> 18 for the same probe.
+           TWO DESIGN CLAIMS WERE WRONG AND ARE CORRECTED IN PLACE. The design
+           gave the cube OffsetInDescriptorsFromTableStart = 258; the table is
+           bound at the ALBEDO base (heap index 2), not the heap start, so the
+           table-relative offset is 256 - the design's value indexes one past the
+           end of a 259-entry heap. A static_assert now pins the relation. The
+           design also attributed the +2 DWORDs to a Stage 5 numeric-agreement
+           probe at u0/space9; they were needed at Stage 4, for a consumption
+           probe, at u0/space4. The 16-DWORD baseline and the 258 -> 259 heap
+           figures were both verified CORRECT.
+           DXR NOW HAS CONSUMPTION EVIDENCE, which it had none of before. Same
+           pattern as the raster probe and reduced by the SAME SHIPPED
+           ReduceIBLConsumeProbe on the same 64-byte block, so the two paths'
+           markers are the same quantities computed the same way.
+           path_trace.hlsl writes what it ACTUALLY LOADED and ACTUALLY ADDED into
+           a root UAV, AT BOUNCE 0 ONLY - where throughput and the damper are
+           both exactly 1, so the numbers are directly comparable to raster's and
+           the cubeSamples == shadedPixels equality holds by construction.
+           MEASURED live: spec 0.322357, diffuse 0.287125, in-final 0.322540,
+           sky_rel_err 0.001007 over 10.19M primary path vertices.
+           IT RUNS A NEGATIVE CONTROL DISPATCH, one frame ahead of the live one,
+           with iblParams.z forced to 0: every word asserted zero while 10.19M
+           vertices are still shaded. Both verdicts are demanded.
+           THE DIFFUSE MAXIMA AGREE EXACTLY - raster 0.287125, DXR 0.287125,
+           delta 0 - and the harness asserts it. That is the cross-path
+           assertion: the diffuse term rides the constant buffer, so it is what
+           the pad0[3] shear would corrupt, and no probe verdict would notice.
+           WATCHED FAILING, each broken -> watched failing -> restored -> green:
+             (a) stable preview stops sampling the environment ->
+                 rt_ibl_consume reached/consumption/identity ALL fail,
+                 0.322357/0.287125/0.322540 -> 0. Every startup marker AND the
+                 entire raster consumption probe STAY GREEN, which is the gap
+                 measured rather than argued
+             (b) bind the wrong descriptor as the DXR env cube ->
+                 rt_ibl_consume_identity fails, sky_rel_err 0.001007 -> 1.000000,
+                 spec -> 0, while DIFFUSE STAYS AT 0.287125 because it touches no
+                 descriptor. Raster stays green
+             (c) neuter RTEnvironmentInputs::disabled -> the CONTROL fails and
+                 the live verdict stays green, the pair doing its job
+             (d) delete pad0[3] -> three static_asserts fail at build time
+             (e) feed the DXR path different SH (x0.9) -> the raster/DXR
+                 agreement assertion fails at delta 0.005051 while EVERY probe
+                 verdict stays ok, which is the gap that assertion exists for
+           The probe is armed ONLY in the default stable mode. Under -RasterOnly
+           there is no dispatch and under -FullQuality the branch does not
+           execute, so the harness asserts the markers are ABSENT in both -
+           a probe armed on a mode it cannot observe would read an empty block
+           as a pass.
+           A HARNESS ASSERTION WAS WRITTEN DEAD AND WAS CAUGHT. The raster/DXR
+           agreement check was first wrapped in a bare `{ ... }`, which in
+           PowerShell is a script-block LITERAL, not a scope: constructed,
+           discarded, never executed. It was noticed because its Write-Host line
+           never appeared in the output. Same never-reached-assertion failure
+           this file documents for the shadow and draw probes, reproduced in the
+           harness itself.
            STAGE 3 IS WHERE THE IMAGE CHANGED. basic_ps.hlsl's hemisphere ambient
            (ambientDiffuse / ambientSpecular) is DELETED - not scaled down, which
            would have been a straight double count - and replaced by L2 spherical

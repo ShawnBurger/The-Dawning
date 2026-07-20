@@ -369,7 +369,8 @@ void Scene::PathTraceEntities(
     const core::Vec3f& lightDir,
     const core::Vec3f& lightColor,
     const core::Vec3f& ambientColor,
-    render::RTQualityMode qualityMode)
+    render::RTQualityMode qualityMode,
+    const render::RTEnvironmentInputs& environment)
 {
     if (!m_rtReady) return;
 
@@ -561,7 +562,8 @@ void Scene::PathTraceEntities(
                           static_cast<uint32_t>(emissiveTextures.size()),
                           static_cast<uint32_t>(materials.size()),
                           sceneSignature,
-                          qualityMode);
+                          qualityMode,
+                          environment);
 }
 
 void Scene::CopyPathTraceToBackBuffer(render::D3D12Device& device)

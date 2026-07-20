@@ -17,12 +17,51 @@
 #include "camera.h"
 #include "d3d12_device.h"
 #include "texture.h"
+#include "environment_ibl.h"      // the cube and its SH, shared with the raster path
+#include "ibl_consume_probe.h"    // the SHIPPED reduction, shared with the raster probe
 #include "../core/types.h"
 #include <array>
 #include <cstdint>
 
 namespace render
 {
+
+// =============================================================================
+// What the DXR stable preview needs in order to light with the SAME environment
+// the raster path lights with.
+// =============================================================================
+// Bundled into a struct rather than appended to Dispatch's already-enormous
+// parameter list, and passed by const reference because the EnvironmentIBL is
+// owned by the Renderer while the PathTracer is owned by the Scene - neither can
+// reach the other, so App is what joins them.
+//
+// The FULL path tracer reads none of this. It samples DawningSkyRadiance on
+// every miss, which is the integral the prefiltered cube approximates; feeding
+// it the approximation would replace the reference with it.
+struct RTEnvironmentInputs
+{
+    // Null on the frames before Renderer::Init has baked the cube. The path
+    // tracer writes a null cube SRV and clears the enable flag in that case, so
+    // the shader's `if (g_IblParams.z != 0)` is the single place the absence is
+    // handled - the same shape the raster path uses.
+    const EnvironmentIBL* ibl = nullptr;
+
+    // Uploaded as iblParams.y, matching CBPerFrame::iblParams.y exactly. If the
+    // two ever differ, F1 changes the exposure of the environment and this whole
+    // stage is undone.
+    float intensity = 1.0f;
+
+    // THE NEGATIVE CONTROL'S LEVER. Forces iblParams.z to 0 for one dispatch, so
+    // the probe frame before the live one renders with the environment absent
+    // and every probe word is asserted to read zero while paths are still being
+    // traced. Without a reachable "off" state the live assertion beside it would
+    // be an assertion nobody has watched fail.
+    bool disabled = false;
+
+    // Gates iblParams.w, which gates every UAV write in the shader. Raised on
+    // exactly the two probe frames; ordinary frames pay one wave-uniform branch.
+    bool probeWrite = false;
+};
 
 enum class RTQualityMode : uint32_t
 {
@@ -83,10 +122,36 @@ public:
                   uint32_t emissiveTextureCount,
                   uint32_t instanceCount,
                   uint64_t sceneSignature,
-                  RTQualityMode qualityMode);
+                  RTQualityMode qualityMode,
+                  const RTEnvironmentInputs& environment);
 
     // Copy the RT output to the back buffer for display
     void CopyToBackBuffer(D3D12Device& device);
+
+    // -------------------------------------------------------------------------
+    // The DXR IBL CONSUMPTION probe
+    // -------------------------------------------------------------------------
+    // The DXR twin of Renderer::{Prepare,RecordReadback,Read}IBLConsumeProbe,
+    // and it exists for the reason the raster one does: before it, the brief on
+    // the merged Stage 3 work said in as many words that "DXR still has no
+    // consumption evidence". Every startup assertion in environment_ibl.h and
+    // every marker of the raster probe stays green with the DXR stable preview
+    // sampling no environment at all, and stays green with the WRONG DESCRIPTOR
+    // bound at t0/space8. Both were measured, not argued - see the watched
+    // failures recorded in tools/smoke_test.ps1.
+    //
+    // Reduced by the SAME ReduceIBLConsumeProbe the raster path uses, on the
+    // same 64-byte block, at the same fixed-point scale. That is deliberate: it
+    // means the two paths' markers are directly comparable numbers rather than
+    // two verdicts computed two ways, and the nine CPU cases over the reduction
+    // cover both.
+    //
+    // Call order per probed dispatch: PrepareIBLProbe (zero the block) before
+    // Dispatch, RecordIBLProbeReadback after, ReadIBLProbe once the queue has
+    // retired.
+    bool PrepareIBLProbe(D3D12Device& device);
+    bool RecordIBLProbeReadback(D3D12Device& device);
+    bool ReadIBLProbe(IBLConsumeValidation& validation, bool iblExpectedActive);
 
     bool IsInitialized() const { return m_initialized; }
     uint32_t AccumulationFrameIndex() const { return m_accumFrameIndex; }
@@ -134,6 +199,11 @@ private:
     bool CreateOutputTexture(ID3D12Device5* device, uint32_t width, uint32_t height);
     bool CreateDescriptorHeap(ID3D12Device5* device);
     bool CreateConstantBuffer(ID3D12Device5* device);
+    bool CreateIBLProbeResources(ID3D12Device5* device);
+    // Writes the environment cube's SRV into this frame slot's reserved
+    // descriptor, or a null cube SRV when there is no cube yet. Returns whether a
+    // real cube landed there, which is what drives iblParams.z.
+    bool UpdateEnvironmentDescriptor(ID3D12Device5* device, const EnvironmentIBL* ibl);
     // One growth path for all five per-frame upload buffers. Allocates
     // kFrameCount instances so each frame in flight writes its own copy.
     bool EnsureFrameUploadBuffer(D3D12Device& device,
@@ -174,6 +244,20 @@ private:
     uint32_t m_boundEmissiveTextureCount[kFrameCount] = {};
     std::array<ID3D12Resource*, kMaxRTEmissiveTextures>
         m_boundEmissiveTextureResources[kFrameCount] = {};
+
+    // Which resource this frame slot's env-cube descriptor currently describes.
+    // The SRV is rewritten only when it changes, matching how the material
+    // texture tables avoid rewriting an unchanged descriptor every frame.
+    ID3D12Resource* m_boundEnvCube[kFrameCount] = {};
+
+    // The IBL consumption probe's GPU block, one per frame in flight for the
+    // reason the FrameUploadBuffer comment above gives: barriers order GPU work,
+    // they do not synchronise CPU writes to mapped memory, and the readback
+    // copies out of whichever slot the probed dispatch actually wrote.
+    ComPtr<ID3D12Resource> m_iblProbeBuffer[kFrameCount];
+    ComPtr<ID3D12Resource> m_iblProbeZeroUpload;
+    ComPtr<ID3D12Resource> m_iblProbeReadback;
+    bool                   m_iblProbeReadbackPending = false;
 
     // Per-frame constant buffer (upload heap, persistently mapped)
     ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight

@@ -15,6 +15,7 @@
 #include <wrl/client.h>
 #include <vector>
 #include <cstdint>
+#include <cstddef>          // offsetof — see the RTPerFrameConstants assertions
 #include "d3d12_device.h"   // kFrameCount
 
 using Microsoft::WRL::ComPtr;
@@ -65,12 +66,51 @@ struct RTPerFrameConstants
     // not cover. Sits at offset 208, the start of a fresh 16-byte cbuffer row,
     // so no earlier field moves and HLSL packing needs no explicit padding.
     float primaryConeSpread;
+
+    // -------------------------------------------------------------------------
+    // 212..223 — MANDATORY PADDING. Do not delete to be tidy.
+    // -------------------------------------------------------------------------
+    // primaryConeSpread ends the struct at 212, which is NOT a 16-byte boundary.
+    // HLSL places a float4 array on the next one, 224; C++ would place iblSH at
+    // 212. That is a 12-byte SHEAR with no compile error on either side - the SH
+    // coefficients would be read one row late and three floats offset, producing
+    // a smooth, plausible, wrong ambient that reads as "the sky needs tuning".
+    //
+    // This is the same class of layout trap CBPerFrame's packoffset assertions
+    // guard on the raster side, and the offsetof assertions below are what make
+    // it a build error rather than an image artefact.
+    float pad0[3];
+
+    // -------------------------------------------------------------------------
+    // Image-based lighting, consumed by the STABLE PREVIEW only.
+    // -------------------------------------------------------------------------
+    // Byte-identical in meaning to CBPerFrame::iblSH / iblParams on the raster
+    // side, because both paths now call the SAME shaders/ibl_common.hlsli with
+    // the same inputs. The full path tracer ignores every field here: it samples
+    // DawningSkyRadiance on every miss, which is the integral these coefficients
+    // approximate, and substituting the approximation for the reference is
+    // exactly the divergence this stage exists to remove rather than create.
+    //
+    // Nine L2 coefficients with the Lambertian transfer constants already folded
+    // in by core::PackIrradianceCoefficients. w is unused padding per row.
+    float iblSH[9][4];              // 224..367
+    // x = cube mip count, y = intensity, z = enable (the kill switch and the
+    // negative control's lever), w = probe write gate.
+    float iblParams[4];             // 368..383
 };
 
 // Must stay byte-identical to cbuffer PerFrameConstants in shaders/path_trace.hlsl.
 // A silent mismatch here misaligns every field after the divergence point.
-static_assert(sizeof(RTPerFrameConstants) == 212,
+static_assert(sizeof(RTPerFrameConstants) == 384,
               "RTPerFrameConstants layout changed — update path_trace.hlsl to match");
+// The two that catch the 212 -> 224 shear specifically. Deleting pad0[3] leaves
+// sizeof() at 372 and both of these fail at BUILD time, which is the only place
+// this defect is cheap to find.
+static_assert(offsetof(RTPerFrameConstants, iblSH) == 224,
+              "HLSL rounds float4 g_IblSH[9] to offset 224; pad0[3] is what makes "
+              "the C++ struct agree. Do not remove it.");
+static_assert(offsetof(RTPerFrameConstants, iblParams) == 368,
+              "g_IblParams must follow the nine SH rows exactly");
 
 // =============================================================================
 // Per-instance material data (in a StructuredBuffer, indexed by InstanceID)

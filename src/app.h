@@ -103,6 +103,20 @@ private:
     bool m_verifyIBLControlThisFrame = false;
     bool m_verifyIBLConsumeThisFrame = false;
     bool m_smokeIBLControlRequested  = false;
+    // The DXR twins. A SEPARATE PAIR on separate frames, not a reuse of the two
+    // above, because the raster probe needs a raster frame and this one needs a
+    // path-traced dispatch - in the default smoke mode those are never the same
+    // frame. Sharing the flags would have re-created exactly the defect the
+    // shadow probe was rebuilt to remove: one schedule serving two shaders, one
+    // of which never runs on it.
+    //
+    // Absent entirely under -RasterOnly, where no dispatch exists to probe. The
+    // harness asserts the markers' presence only in the RT modes, and their
+    // ABSENCE is visible rather than silently green.
+    bool m_verifyRTIBLControlThisFrame = false;
+    bool m_verifyRTIBLConsumeThisFrame = false;
+    bool m_smokeRTIBLControlRequested  = false;
+    bool m_smokeRTIBLConsumeRequested  = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;

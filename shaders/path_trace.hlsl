@@ -31,6 +31,13 @@ cbuffer PerFrameConstants : register(b0, space0)
     float4   g_CameraForward;
     float4   g_LightDir;
     float4   g_LightColor;
+    // VESTIGIAL as of IBL Stage 4, and deliberately NOT removed. The stable
+    // preview was its last reader; it now evaluates the same physically-derived
+    // environment the raster path does. The field stays because this cbuffer is
+    // mirrored byte-for-byte by RTPerFrameConstants and removing a float4 from
+    // the middle would shift every field after it - a layout change with no
+    // benefit. CBPerFrame's ambientColor is vestigial for the same reason on the
+    // raster side. Keep uploading it.
     float4   g_AmbientColor;
     uint     g_FrameIndex;
     uint     g_MaxBounces;
@@ -43,6 +50,16 @@ cbuffer PerFrameConstants : register(b0, space0)
     // Primary ray-cone spread angle in radians per pixel of output height,
     // computed CPU-side by render::PrimaryRayConeSpreadAngle. See rt_texture_lod.h.
     float    g_PrimaryConeSpread;
+    // 212..223. The C++ twin carries an explicit pad0[3] here because HLSL
+    // rounds the float4 array below up to offset 224 and C++ would not. See the
+    // static_asserts on RTPerFrameConstants in src/render/rt_pipeline.h - they
+    // are what turn that 12-byte shear into a build error.
+    float3   g_Pad0;
+    // Image-based lighting. Read by the STABLE PREVIEW only; the full path
+    // tracer samples DawningSkyRadiance on every miss instead, which is the
+    // integral these coefficients approximate. See the stable-preview block.
+    float4   g_IblSH[9];        // 224..367
+    float4   g_IblParams;       // 368..383  x=mipCount y=intensity z=enable w=probe
 };
 
 struct MaterialData
@@ -120,6 +137,42 @@ Texture2D<float4> g_EmissiveTextures[64] : register(t0, space7);
 // the isotropic-filtering trade, and it is a known residual difference from the
 // raster path's anisotropic filtering.
 SamplerState g_TextureSampler : register(s0, space0);
+
+// =============================================================================
+// The prefiltered environment cubemap — THE SAME RESOURCE THE RASTER PATH USES
+// =============================================================================
+// basic_ps.hlsl declares this cube at t0/space6 with sampler s2; this file
+// declares it at t0/space8 with sampler s1. THE DECLARATIONS DIFFER AND THE
+// EVALUATION DOES NOT, which is the entire point of shaders/ibl_common.hlsli
+// taking its resources as function PARAMETERS: two root signatures, two
+// toolchains (FXC ps_5_1 and DXC lib_6_3), one copy of the split-sum integral.
+//
+// The register spaces differ because space6 is already the ORM texture table
+// here. There is no shared numbering to preserve - the anti-divergence claim is
+// about the CODE that reads the resource, not about where it is bound.
+//
+// Sampler s1 is trilinear/CLAMP, matching the raster s2. The address mode is
+// documented as inert for cube sampling (CLAUDE.md records that assertion 3.3
+// cannot catch a WRAP sampler because cube lookups never consult the 2-D address
+// modes) and is set to match anyway rather than leave the two paths differing on
+// a line a reader would have to check.
+TextureCube<float4> g_EnvCube     : register(t0, space8);
+SamplerState        g_EnvSampler  : register(s1, space0);
+
+// The DXR IBL CONSUMPTION probe's target. See shaders/ibl_consume_probe.hlsli
+// for what it claims; this is the DXR twin of basic_ps.hlsl's u1/space4.
+//
+// A ROOT UAV rather than a descriptor-table entry: it costs 2 root DWORDs and
+// zero heap slots, and a raw buffer is exactly what a root UAV supports. It is
+// bound on EVERY dispatch - a root descriptor cannot be left unbound - and the
+// WRITES are gated on g_IblParams.w, so ordinary frames pay one wave-uniform
+// branch and no traffic.
+//
+// Unlike the raster side there is no PSO permutation here. That gating exists in
+// basic_ps because a UAV declaration in a PIXEL shader defeats early-Z for the
+// whole PSO; a DXR raygen shader has no early-Z to lose, so the declaration is
+// unconditional and the cost is genuinely just the branch.
+RWByteAddressBuffer g_IBLProbe : register(u0, space4);
 
 // =============================================================================
 // Ray cone texture LOD
@@ -251,6 +304,13 @@ struct ShadowPayload
 // Utility functions
 // =============================================================================
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with basic_ps.hlsl
+// The ONE image-based-lighting evaluation, shared with basic_ps.hlsl. Must come
+// after brdf_common.hlsli, which defines PI. IBL_DESIGN.md 8.3 layer 2.
+#include "ibl_common.hlsli"
+// The consumption probe's writers, shared with basic_ps.hlsl for the same
+// reason: the evidence format and the fixed-point scale have one definition, so
+// the raster and DXR blocks are reduced by the SAME ReduceIBLConsumeProbe.
+#include "ibl_consume_probe.hlsli"
 
 float3 SafeNormalize(float3 value, float3 fallback)
 {
@@ -641,24 +701,132 @@ void RayGen()
 
         if (g_StablePreview != 0)
         {
-            // Stable preview fill: approximate missing diffuse GI and sky reflection
-            // without tracing another noisy secondary bounce.
-            float3 envDiffuse = albedo * g_AmbientColor.rgb * (1.0f - mat.metallic) * 2.5f * ambientOcclusion;
-            float3 envReflection = DawningSkyRadiance(reflect(-V, N));
-            float3 envF0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, mat.metallic);
-            float3 envF = DawningFresnelSchlick(saturate(dot(N, V)), envF0);
-            float envGloss = lerp(0.25f, 1.0f, saturate(1.0f - mat.roughness));
-            float3 envSpecular = envReflection * envF * envGloss * ambientOcclusion;
-            radiance += throughput * (envDiffuse + envSpecular) * (bounce == 0 ? 1.0f : 0.25f);
+            // =========================================================
+            // Stable preview environment — THE SAME EVALUATION AS RASTER
+            // =========================================================
+            // IBL_DESIGN.md 8.2. What used to sit here was an ad-hoc fill with a
+            // magic 2.5 diffuse multiplier, a mirror reflection that ignored
+            // roughness entirely, and a gloss ramp corresponding to no physical
+            // quantity. It shared nothing with the raster environment but the sky
+            // function, so F1 changed the LIGHTING MODEL and not just the
+            // renderer - and this project treats raster/DXR divergence as a
+            // defect. All four constants are gone.
+            //
+            // WHAT REPLACES THEM is line-for-line basic_ps.hlsl's block: the
+            // roughness-aware environment Fresnel, the kD split, L2 SH
+            // irradiance, and the split-sum specular, through the same
+            // shaders/ibl_common.hlsli functions with the same arguments.
+            //
+            // THE FULL PATH TRACER IS DELIBERATELY UNTOUCHED and must stay so.
+            // It collects DawningSkyRadiance on every miss - it evaluates the
+            // very integral the split-sum approximates - so substituting the
+            // prefiltered cube would replace the reference with the
+            // approximation. ASSET_PIPELINE_SPEC.md makes DXR the reference.
+            // Terminating the last bounce into the cube is rejected for the same
+            // reason plus a second one: it biases the estimator, and CLAUDE.md
+            // tracks this project's two biases by name rather than accumulating
+            // unlisted ones.
+            //
+            // Single `if`, both outputs initialised above it, one exit - the same
+            // shape basic_ps keeps for FXC's X4000 analysis. DXC does not require
+            // it; matching the raster source line for line does.
+            float3 envDiffuse  = (float3)0.0f;
+            float3 envSpecular = (float3)0.0f;
+            float3 envRadiance = (float3)0.0f;
+            float3 envR        = float3(0.0f, 1.0f, 0.0f);
+            bool   sampledCube = false;
+
+            float  envNdotV = saturate(dot(N, V));
+            float3 envF0    = DawningF0(albedo, mat.metallic);
+
+            if (g_IblParams.z != 0.0f)
+            {
+                float3 F_env  = DawningFresnelSchlickRoughness(envNdotV, envF0, mat.roughness);
+                float3 kD_env = (1.0f - F_env) * (1.0f - mat.metallic);
+
+                float3 irradiance = DawningIrradianceSH(g_IblSH, N);
+                envDiffuse = kD_env * albedo * irradiance / PI;
+
+                envSpecular = DawningSpecularIBLWitnessed(g_EnvCube, g_EnvSampler, N, V,
+                                                          mat.roughness, envF0, g_IblParams.x,
+                                                          envRadiance, envR);
+                sampledCube = true;
+            }
+
+            // ORM occlusion multiplies the environment only, never direct light -
+            // the same rule basic_ps.hlsl states, inherited unchanged, including
+            // the same known imprecision about applying diffuse AO to specular.
+            envDiffuse  *= ambientOcclusion * g_IblParams.y;
+            envSpecular *= ambientOcclusion * g_IblParams.y;
+
+            // The (bounce == 0 ? 1 : 0.25) damper is KEPT, on purpose. It is a
+            // preview heuristic rather than a magic constant standing in for a
+            // physical quantity: the stable preview traces no secondary bounce,
+            // so it damps the environment fill at later vertices. IBL_DESIGN.md
+            // 8.2 says to keep it for now - removing it is an appearance change,
+            // not a correctness one, and folding both into one stage would make
+            // any luminance shift unattributable.
+            float  envDamp = (bounce == 0 ? 1.0f : 0.25f);
+            float3 radianceBeforeEnv = radiance;
+            radiance += throughput * (envDiffuse + envSpecular) * envDamp;
+
+            // -----------------------------------------------------------------
+            // The DXR IBL CONSUMPTION probe. AFTER the combine, deliberately.
+            // -----------------------------------------------------------------
+            // This is the only evidence in the tree that the DXR STABLE PREVIEW
+            // consumes the environment cube, as opposed to ibl_common.hlsli
+            // computing it correctly when asked. Every startup assertion and the
+            // whole raster consumption probe stay green with this entire block
+            // deleted and with the wrong descriptor bound at t0/space8.
+            //
+            // The in-final witness is recovered from `radiance` BY SUBTRACTION,
+            // exactly as basic_ps recovers it from finalColor: written as
+            // envDiffuse + envSpecular it would stay green with the terms deleted
+            // from the line above while both variables kept their values. That is
+            // the specific edit the third word exists to catch.
+            //
+            // WRITTEN ONLY AT bounce == 0, and that is what makes the numbers
+            // mean anything. There, throughput is exactly 1 and envDamp is
+            // exactly 1, so the subtraction recovers envDiffuse + envSpecular
+            // with NO division and the values are directly comparable to the
+            // raster probe's - same quantity, same fixed-point scale, same
+            // reduction, so the two paths' markers can be read side by side.
+            // Writing at every vertex would scale the witness by an
+            // accumulated throughput and turn the floors into a claim about
+            // path weights rather than about the environment.
+            //
+            // It also keeps the LIVENESS claim exact: every invocation that
+            // reaches this combine at bounce 0 also fetched the cube, so the
+            // reduction's cubeSamples == shadedPixels equality holds by
+            // construction rather than by luck.
+            if (g_IblParams.w != 0.0f && bounce == 0)
+            {
+                DawningWriteIBLConsumption(g_IBLProbe, envDiffuse, envSpecular,
+                                           radiance - radianceBeforeEnv, sampledCube);
+                if (sampledCube)
+                    DawningWriteIBLIdentity(g_IBLProbe, g_EnvCube, g_EnvSampler,
+                                            envR, envRadiance);
+            }
         }
         // Full path tracing adds no ad-hoc ambient. BSDF rays that escape the scene
         // already collect environment radiance from the sky miss shader, so adding
         // an ambient term at every path vertex double-counted it - with magic
         // constants corresponding to no physical quantity. Worse, it defeated the
         // bounce loop: the error was added per bounce rather than reduced per
-        // bounce, so no bounce count converged to ground truth. The stable-preview
-        // branch above keeps its fill deliberately, because it traces no secondary
-        // bounce and needs an approximation to stand in for one.
+        // bounce, so no bounce count converged to ground truth.
+        //
+        // The stable-preview branch above keeps a fill deliberately, because it
+        // traces no secondary bounce and needs an approximation to stand in for
+        // one - but as of IBL Stage 4 that approximation is the SAME split-sum
+        // plus SH the raster path evaluates, not an invented one.
+        //
+        // THIS branch stays empty, and that is a decision rather than an
+        // omission: the prefiltered cube approximates the integral this path
+        // evaluates by sampling, so binding it here would substitute the
+        // approximation for the reference. Terminating the last bounce into it is
+        // rejected on the same ground plus a second one - it biases the
+        // estimator, and CLAUDE.md names this project's two biases rather than
+        // accumulating unlisted ones.
 
         if (bounce + 1 >= g_MaxBounces)
             break;

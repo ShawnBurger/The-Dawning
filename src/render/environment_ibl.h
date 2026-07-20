@@ -21,12 +21,30 @@
 // and split-sum specular terms; that is what stops a glTF asset with
 // metallicFactor 1.0 rendering near-black.
 //
-// STAGE 4 IS NOT DONE. path_trace.hlsl still evaluates its own environment - the
-// full path tracer by TRACING it, which is correct and deliberate (it is the
-// reference these terms approximate), and the STABLE PREVIEW by an ad-hoc
-// approximation with a magic 2.5 and a magic 0.25 that shares nothing with this
-// code but the sky function. That preview divergence is real, it is named, and
-// it is Stage 4's job.
+// STAGE 4 IS DONE, and it is where the two RENDER PATHS stopped disagreeing.
+// path_trace.hlsl's STABLE PREVIEW used to run an ad-hoc environment with a
+// magic 2.5 diffuse multiplier, a magic 0.25 bounce damper, a mirror reflection
+// that ignored roughness entirely and a gloss ramp corresponding to no physical
+// quantity - so F1 changed the LIGHTING MODEL, not just the renderer. It now
+// calls the same shaders/ibl_common.hlsli basic_ps.hlsl calls, with the same
+// arguments, against this same cube and these same SH coefficients. All four
+// constants are gone; only the bounce damper survives, deliberately, because the
+// preview traces no secondary bounce (IBL_DESIGN.md 8.2).
+//
+// THE FULL PATH TRACER IS DELIBERATELY UNTOUCHED and must stay so. It collects
+// DawningSkyRadiance on every miss - it evaluates the very integral the split-sum
+// approximates - so feeding it the prefiltered cube would replace the reference
+// with the approximation. Terminating the last bounce into the cube is rejected
+// for the same reason plus a second one: it biases the estimator, and CLAUDE.md
+// names this project's two biases rather than accumulating unlisted ones.
+// MEASURED: the DXR-full and raster captures are BYTE-IDENTICAL across this
+// change; only the stable preview's image moved.
+//
+// The DXR side now carries its own CONSUMPTION evidence, which it had none of
+// before - see PathTracer::ReadIBLProbe and the rt_ibl_consume_* markers. It is
+// reduced by the SAME ReduceIBLConsumeProbe the raster probe uses, so the two
+// paths' numbers are directly comparable; the SH diffuse maxima agree exactly, at
+// 0.287125, and the harness asserts that agreement.
 //
 // WHY THE SOURCE IS THE PROCEDURAL SKY RATHER THAN A LOADED HDR
 // -----------------------------------------------------------------------------

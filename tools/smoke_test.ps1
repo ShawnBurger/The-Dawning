@@ -438,6 +438,154 @@ if ([uint64]$markers["ibl_consume_control_shaded_pixels"] -eq 0) {
            "'every word reads zero' is satisfied by an empty frame rather than by the " +
            "environment being switched off. The control proves nothing in that state.")
 }
+
+# -----------------------------------------------------------------------------
+# THE DXR IBL CONSUMPTION PROBE — IBL Stage 4
+# -----------------------------------------------------------------------------
+# The block above is evidence about basic_ps.hlsl and NO evidence about the DXR
+# path. Until Stage 4 the merged Stage 3 work said so in as many words: "DXR
+# still has no consumption evidence."
+#
+# What Stage 4 changed is that the DXR STABLE PREVIEW now evaluates the same
+# shaders/ibl_common.hlsli the raster path does, in place of an ad-hoc fill with
+# a magic 2.5 diffuse multiplier, a magic 0.25 damper on the bounce, a mirror
+# reflection that ignored roughness entirely and a gloss ramp corresponding to no
+# physical quantity. F1 no longer changes the lighting model.
+#
+# This block is the evidence for that claim, and it is the SAME KIND the raster
+# side uses, reduced by the SAME ReduceIBLConsumeProbe: path_trace.hlsl writes
+# what it ACTUALLY LOADED and ACTUALLY ADDED into a root UAV at u0/space4, at
+# bounce 0 where throughput and the damper are both exactly 1, so the numbers are
+# directly comparable to the raster probe's above.
+#
+# THE DEFAULT RT MODE ONLY, and both exclusions are asserted rather than assumed.
+#
+#   -RasterOnly   no dispatch exists to probe
+#   -FullQuality  the stable-preview branch does not execute, so there is no
+#                 environment evaluation to witness. The full path tracer
+#                 deliberately samples DawningSkyRadiance on every miss instead -
+#                 it evaluates the integral the split-sum approximates, and
+#                 substituting the approximation for the reference is the change
+#                 Stage 4 explicitly does NOT make
+#
+# In both of those the markers must be ABSENT. Asserting the absence is what stops
+# a future edit from arming the probe on a mode it cannot observe and reading the
+# resulting empty block as a pass.
+if ($RasterOnly -or $FullQuality) {
+    foreach ($absent in @("rt_ibl_consume_frame", "rt_ibl_consume_control_frame")) {
+        if ($markers.ContainsKey($absent)) {
+            throw ("Marker '$absent' is present in a mode that cannot observe the DXR " +
+                   "stable preview's environment block. Under -RasterOnly there is no " +
+                   "dispatch; under -FullQuality the branch does not execute. A probe " +
+                   "armed here would report a verdict about a feature that is correctly " +
+                   "absent.")
+        }
+    }
+    Write-Host "DXR IBL consumption probe: correctly not armed in this mode."
+} else {
+    if (-not $markers.ContainsKey("rt_ibl_consume_frame")) {
+        throw ("Smoke test did not emit 'rt_ibl_consume_frame'. The DXR IBL consumption " +
+               "probe was never armed. It must run on a PATH-TRACED frame - see the " +
+               "smokeRTStartFrame arming block in App::Run. A missing marker here means " +
+               "the only evidence that path_trace.hlsl's stable preview samples the " +
+               "environment cube at all has gone away.")
+    }
+    if (-not $markers.ContainsKey("rt_ibl_consume_control_frame")) {
+        throw ("Smoke test did not emit 'rt_ibl_consume_control_frame'. The DXR probe's " +
+               "NEGATIVE CONTROL was never armed, so the live verdict beside it proves " +
+               "nothing: it has not been shown to fail with the feature absent.")
+    }
+    Write-Host ("DXR IBL consumption frames: control $($markers['rt_ibl_consume_control_frame']), " +
+                "live $($markers['rt_ibl_consume_frame'])")
+    if ([uint64]$markers["rt_ibl_consume_control_frame"] -ge [uint64]$markers["rt_ibl_consume_frame"]) {
+        throw ("rt_ibl_consume_control_frame=$($markers['rt_ibl_consume_control_frame']) must " +
+               "come BEFORE rt_ibl_consume_frame=$($markers['rt_ibl_consume_frame']).")
+    }
+
+    # --- the live dispatch -------------------------------------------------
+    # WATCHED FAILING, each broken -> watched failing -> restored -> green:
+    #   (a) make the stable preview stop sampling the environment (force the
+    #       `if (g_IblParams.z != 0)` branch off) -> rt_ibl_consume_consumption
+    #       AND rt_ibl_consume_identity both fail, spec/diffuse/in-final
+    #       0.322357/0.287125/0.322540 -> 0. Every startup marker and the whole
+    #       RASTER consumption block stay green, which is the gap measured
+    #       rather than argued
+    #   (b) bind the wrong descriptor as the DXR environment cube (point the
+    #       env-cube SRV at the RT display texture) -> rt_ibl_consume_identity
+    #       fails, sky_rel_err 0.001007 -> 1.000000. Consumption stays ok,
+    #       because a wrong cube still produces a nonzero specular term
+    #   (c) neuter RTEnvironmentInputs::disabled -> the CONTROL fails and the
+    #       live verdict stays green, which is the pair doing its job
+    Assert-Marker "rt_ibl_consume" "ok"
+    Assert-Marker "rt_ibl_consume_reached" "ok"
+    Assert-Marker "rt_ibl_consume_consumption" "ok"
+    Assert-Marker "rt_ibl_consume_identity" "ok"
+
+    if ([uint64]$markers["rt_ibl_consume_shaded_pixels"] -eq 0) {
+        throw ("rt_ibl_consume_shaded_pixels=0: the probed dispatch shaded nothing, so " +
+               "every DXR IBL claim on it is vacuous.")
+    }
+    # Same equality as the raster side and it holds for the same reason: the IBL
+    # branch is predicated on a frame constant, and the probe writes only at
+    # bounce 0, so every path vertex that reached the combine also fetched.
+    if ($markers["rt_ibl_consume_cube_samples"] -ne $markers["rt_ibl_consume_shaded_pixels"]) {
+        throw ("rt_ibl_consume_cube_samples=$($markers['rt_ibl_consume_cube_samples']) against " +
+               "rt_ibl_consume_shaded_pixels=$($markers['rt_ibl_consume_shaded_pixels']). Every " +
+               "primary path vertex the stable preview shades must have fetched the " +
+               "environment cube.")
+    }
+    Write-Host ("DXR IBL consumption: spec=$($markers['rt_ibl_consume_spec_max']) " +
+                "diffuse=$($markers['rt_ibl_consume_diffuse_max']) " +
+                "in-final=$($markers['rt_ibl_consume_in_final_max']) " +
+                "sky-rel-err=$($markers['rt_ibl_consume_sky_rel_err'])")
+
+    # THE CONVERGENCE ASSERTION, and it is the one that is actually about Stage 4
+    # rather than about the probe. The DIFFUSE term rides the constant buffer and
+    # touches no descriptor: both paths evaluate DawningIrradianceSH against the
+    # same nine coefficients from the same EnvironmentIBL, so the maxima must
+    # agree to the fixed-point resolution. MEASURED: both read exactly 0.287125.
+    #
+    # This is what would catch the two paths being handed DIFFERENT SH - a second
+    # projection, a stale upload, or the 12-byte HLSL row-rounding shear that
+    # RTPerFrameConstants' pad0[3] exists to prevent. That shear would produce a
+    # smooth, plausible, wrong ambient with no compile error on either side, and
+    # nothing else in this harness would notice.
+    #
+    # This whole block is already stable-mode-only, so there is no second gate.
+    #
+    # NOT WRAPPED IN BRACES. A bare `{ ... }` in PowerShell is a script-block
+    # LITERAL, not a scope: it is constructed, discarded, and never executed. It
+    # was written that way here first and the assertion below silently did not run
+    # - the same never-reached-assertion failure this file documents at length for
+    # the shadow and draw probes, reproduced in the harness itself.
+    $rasterDiffuse = [double]$markers["ibl_consume_diffuse_max"]
+    $rtDiffuse     = [double]$markers["rt_ibl_consume_diffuse_max"]
+    $diffuseDelta  = [math]::Abs($rasterDiffuse - $rtDiffuse)
+    Write-Host ("IBL raster/DXR SH diffuse agreement: raster=$rasterDiffuse " +
+                "dxr=$rtDiffuse delta=$([math]::Round($diffuseDelta,6))")
+    # 1/65536 is the probe's quantisation step. Two paths evaluating the same
+    # nine coefficients through the same header cannot differ by more than one.
+    if ($diffuseDelta -gt 0.0001) {
+        throw ("The raster and DXR paths disagree about SH diffuse irradiance: " +
+               "raster=$rasterDiffuse dxr=$rtDiffuse. They evaluate the same " +
+               "DawningIrradianceSH against coefficients from the same EnvironmentIBL, " +
+               "so any difference means one of them is reading a different constant " +
+               "buffer than it thinks - the RTPerFrameConstants row-rounding shear is " +
+               "the first thing to check.")
+    }
+
+    # --- the negative control ----------------------------------------------
+    Assert-Marker "rt_ibl_consume_control" "ok"
+    Assert-Marker "rt_ibl_consume_control_reached" "ok"
+    Assert-Marker "rt_ibl_consume_control_consumption" "ok"
+    Assert-Marker "rt_ibl_consume_control_identity" "ok"
+    Assert-Marker "rt_ibl_consume_control_cube_samples" "0"
+    if ([uint64]$markers["rt_ibl_consume_control_shaded_pixels"] -eq 0) {
+        throw ("rt_ibl_consume_control_shaded_pixels=0: the control dispatch traced " +
+               "nothing, so 'every word reads zero' is satisfied by an empty frame " +
+               "rather than by the environment being switched off.")
+    }
+}
 # BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
 # skipped in path-tracing runs, which do not use the shadow map at all" - an
 # accurate description of a hole, not a reason for one. The shadow probe rode the
