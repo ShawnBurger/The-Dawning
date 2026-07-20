@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>   // snprintf, for the MAX_RASTER_TEXTURES shader define
+#include <cassert>
 
 namespace render
 {
@@ -1241,6 +1242,9 @@ DescriptorHandle Renderer::RegisterTexture(ID3D12Device* device, const Texture& 
 // =============================================================================
 D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize)
 {
+    assert(m_frameResourcesBegun &&
+           "UploadCB before BeginFrameResources - the frame slot is stale");
+
     uint32_t alignedSize = AlignCBSize(dataSize);
 
     // Check for overflow
@@ -1267,12 +1271,25 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
 }
 
 // =============================================================================
+// BeginFrameResources — advance the frame slot, above every pass
+// =============================================================================
+void Renderer::BeginFrameResources(D3D12Device& device)
+{
+    m_currentFrame = device.FrameIndex();
+    m_cbOffset     = 0;   // rewind THIS frame's ring, not some other frame's
+    m_frameResourcesBegun = true;
+}
+
+// =============================================================================
 // BeginFrame — set up pipeline state and per-frame constants
 // =============================================================================
 void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
 {
-    m_currentFrame = device.FrameIndex();
-    m_cbOffset = 0; // Reset ring for this frame
+    // The frame slot and the ring cursor are advanced by BeginFrameResources,
+    // which runs above the shadow pass. Do not reinstate them here: the shadow
+    // pass has already appended into this frame's ring by the time we arrive.
+    assert(m_frameResourcesBegun &&
+           "BeginFrameResources must run before BeginFrame");
 
     auto* cmd = device.CmdList();
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
@@ -1362,6 +1379,8 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
                         float emissiveStrength)
 {
     if (!mesh.IsValid()) return;
+    assert(m_frameResourcesBegun &&
+           "DrawMesh before BeginFrameResources - the frame slot is stale");
 
     auto* cmd = device.CmdList();
     bool useAlbedoTexture = albedoTexture &&
@@ -1792,6 +1811,8 @@ void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
                               const core::Mat4x4& worldMatrix)
 {
     if (!mesh.IsValid() || !m_shadowMap) return;
+    assert(m_frameResourcesBegun &&
+           "DrawMeshShadow before BeginFrameResources - the frame slot is stale");
 
     auto* cmd = device.CmdList();
 

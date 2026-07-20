@@ -104,6 +104,27 @@ public:
     bool Init(D3D12Device& device);
     void Shutdown();
 
+    // Call once per frame BEFORE any pass records anything - above the shadow
+    // pass, and above the raster/path-tracing branch so an F1 toggle also lands
+    // on a clean slot.
+    //
+    // This exists because BeginFrame is NOT first in a frame. App::RenderFrame
+    // runs the entire shadow pass before it, so while BeginFrame was the only
+    // place m_currentFrame and m_cbOffset were assigned, every DrawMeshShadow
+    // in frame N uploaded into the buffer belonging to frame N-1's slot, at
+    // offsets continuing past that frame's high-water mark, with root CBVs
+    // pointing into it - and BeginFrame then rewound a DIFFERENT buffer to zero.
+    // On frame 0 both indices are zero before and after, so the main pass
+    // overwrote the shadow constants at the same addresses before the GPU
+    // executed anything. In steady state frame N+3 rewinds a slot that frames
+    // N+1 and N+2 may still be reading, since WaitForCurrentFrame only
+    // guarantees frame N has retired. It survived only because a constant
+    // entity count made the two watermarks abut.
+    void BeginFrameResources(D3D12Device& device);
+
+    // Clears the stale-state guard. Called at the end of App::RenderFrame.
+    void EndFrameResources() { m_frameResourcesBegun = false; }
+
     // Call once per frame before any draw calls
     void BeginFrame(D3D12Device& device, const Camera& camera);
 
@@ -336,6 +357,11 @@ private:
     // samples it once at shutdown, and a per-frame value would report whatever
     // the last frame happened to cost rather than the worst case.
     uint32_t m_cbPeak = 0;
+    // Guards against a future pass being added ABOVE BeginFrameResources in
+    // App::RenderFrame, which would silently reintroduce exactly the frame-slot
+    // bug that function exists to fix. Without it the reintroduction has no
+    // symptom until entity counts grow.
+    bool m_frameResourcesBegun = false;
 
     // Cached view-projection matrix for the current frame
     core::Mat4x4 m_viewProj;

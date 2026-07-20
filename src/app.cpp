@@ -1116,6 +1116,16 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     auto* commandList = m_device.CmdList();
     m_renderer.ReclaimTextureDescriptors(m_device);
+
+    // Advance the renderer's per-frame slot BEFORE any pass records anything,
+    // and unconditionally - above the raster/path-tracing branch. The shadow
+    // pass below runs before BeginFrame, so leaving the advance to BeginFrame
+    // meant the shadow pass wrote into the previous frame's buffer. The
+    // path-tracing branch never calls BeginFrame at all, so the slot also went
+    // stale across RT frames and the first shadow pass after an F1 toggle back
+    // to raster wrote at whatever offset the last raster frame left behind.
+    m_renderer.BeginFrameResources(m_device);
+
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
 
     if (renderedPathTracing)
@@ -1213,6 +1223,12 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                              m_renderer.ShadowsAvailable();
     if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
         m_verifyShadowThisFrame = false;
+
+    // Everything that records into this frame's arena has now done so. Clearing
+    // the guard here is what makes it able to catch a pass added above
+    // BeginFrameResources on a LATER frame; a flag set once and never cleared
+    // would be true forever after frame 0 and would catch nothing.
+    m_renderer.EndFrameResources();
 
     const bool vsync = !(m_options.smoke && m_options.smokeUnlocked);
     if (!m_device.ExecuteAndPresent(vsync))
