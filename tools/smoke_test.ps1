@@ -141,19 +141,71 @@ Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 # wrong" - so assert the slot, not just that shadows exist.
 Assert-Marker "shadow_map" "ok"
 Assert-Marker "shadow_map_slot" "1"
+# Four cascades on ONE Texture2DArray. The slice count is asserted separately
+# from the slot because they fail independently: the array can lose a slice
+# without the descriptor moving, and vice versa. %u on the C++ side, never
+# %.1f - this is a string compare, so "4.0" would not match "4".
+Assert-Marker "shadow_cascades" "4"
 # Raster only - the probe is skipped in path-tracing runs, which do not use the
 # shadow map at all. This is the assertion with teeth: shadow_map=ok only proves
 # the resource was created, and deleting the shadow pass entirely leaves the map
 # at its cleared value with every pixel reading fully lit, which nothing else
 # here would notice. Verified by deleting the caster draw and watching this flip
 # to "no".
-if ($RasterOnly) { Assert-Marker "shadow_map_written" "yes" }
+if ($RasterOnly) {
+    Assert-Marker "shadow_map_written" "yes"
+
+    # The pass began every cascade. This is asserted SEPARATELY from the
+    # per-slice coverage below because coverage cannot see a skipped cascade:
+    # measured, not assumed - changing the app's loop bound to c < N-1 leaves
+    # shadow_cascade_written_3 reading "yes", since an uncleared, never-rendered
+    # depth slice holds arbitrary values under the 1.0 clear and is
+    # indistinguishable from real depth. This counter is the only check here that
+    # flips when a cascade is skipped.
+    Assert-Marker "shadow_cascades_rendered" "4"
+
+    # EVERY cascade holds depth, not just cascade 0. The index is in the KEY on
+    # purpose: markers are stored in a hashtable, so a shared "cascade_written"
+    # key would be overwritten by each loop iteration and collapse to the last
+    # cascade - passing while cascades 0..2 were empty.
+    foreach ($c in 0..3) { Assert-Marker "shadow_cascade_written_$c" "yes" }
+
+    # Each cascade stored a DIFFERENT depth for the scene. Cascade c's slab is
+    # 120/325/875/2350 units deep, so the same geometry must normalise to a
+    # different NDC depth in every slice - four equal values mean the slices did
+    # not each get their own matrix. Structural, not a tuned threshold.
+    #
+    # Verified by pinning DrawMeshShadow to m_lightViewProj[0]: this flips to
+    # "no" while every shadow_cascade_written_* marker stays "yes".
+    #
+    # It does NOT catch a permutation of matrices across slices - all four stay
+    # distinct. Nothing here does; the CPU cases in tests/test_shadow_cascades.cpp
+    # are what constrain the matrices themselves.
+    #
+    # Deliberately NOT asserted: the coverage-fraction ordering. The probe window
+    # is 1/8 of each footprint, so even cascade 3's is 117 world units across and
+    # sits entirely on the 200x200 ground plane - all four fractions are 1.0. An
+    # assertion on them would pass unconditionally, which is worse than none.
+    Assert-Marker "shadow_cascade_depths_distinct" "yes"
+
+    # The live cascade fit, not a mirror of the constant table: strictly
+    # increasing texel size with consecutive ratios in (1, 8]. Catches the whole
+    # family of "all cascades ended up the same size" and "the table got
+    # reversed". Verified by setting the extents to {24,24,24,24} and watching
+    # this flip to "no".
+    Assert-Marker "shadow_cascade_texel_monotonic" "yes"
+}
 
 # Constant-ring headroom. The ring is fixed at kCBRingSize and every shadowed
-# entity costs 768 bytes per frame, so it caps the scene at a few hundred draws.
-# Overflow is already an error, but by then draws are reading address zero. This
-# fails while there is still room to do something about it. The threshold is
-# deliberately loose - it is a scaling alarm, not an appearance check.
+# entity now costs 1536 bytes per frame: 256 per-object + 256 material + 256 for
+# each of the 4 cascades, because the casters are walked once per cascade.
+# Cascades roughly halved the entity ceiling - measured, this run peaks at 57% of
+# capacity with 97 entities, against 29% before, so the gate trips somewhere near
+# 127 entities. Overflow is already an error, but by then draws are reading
+# address zero. This fails while there is still room to do something about it.
+# The threshold is deliberately loose - it is a scaling alarm, not an appearance
+# check. The real fix is per-object data in a structured buffer indexed by draw;
+# per-cascade caster culling would also help, but Mesh carries no bounds yet.
 if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capacity")) {
     $peak = [double]$markers["cb_ring_peak"]
     $cap  = [double]$markers["cb_ring_capacity"]

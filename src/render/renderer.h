@@ -20,6 +20,8 @@
 #include "camera.h"
 #include "texture.h"
 #include "../core/types.h"
+#include "../core/shadow_cascades.h"
+#include <cstddef>
 #include <cstdint>
 
 namespace render
@@ -57,16 +59,48 @@ struct CBPerFrame
     float aspect;
     float camForward[3];
     float pad4;
+    // ---- FROZEN PREFIX ENDS HERE, at byte 112 ------------------------------
+    // sky_ps.hlsl declares EXACTLY bytes 0..111 of this struct and reads them by
+    // offset. Nothing may be inserted above this line: doing so shifts every
+    // offset sky_ps.hlsl reads, silently, with no compile error on either side.
+    // Fields may only ever be APPENDED below.
 
-    // Camera-relative light view-projection, so the pixel shader can project a
-    // world position into shadow-map space. Camera-relative because every world
-    // matrix the raster path sees already is - see RULES #1 in CLAUDE.md. A
-    // light matrix built in absolute world space would be correct only while the
-    // camera sat at the origin.
-    float lightViewProj[16];
+    // 112..367 - one camera-relative light view-projection per cascade.
+    //
+    // Camera-relative because every world matrix the raster path sees already is
+    // (RULE 1 in CLAUDE.md); a light matrix in absolute world space would be
+    // correct only while the camera sat at the origin.
+    //
+    // Cascade 0 occupies exactly the bytes the old single lightViewProj did,
+    // which is precisely the property that lets sky_ps.hlsl stay untouched.
+    float lightViewProj[core::kShadowCascadeCount][16];
+    // 368..383 - outer radius of each cascade, camera-relative world units.
+    float cascadeSplitRadius[core::kShadowCascadeCount];
+    // 384..399 - world units per shadow texel, per cascade. Replaces a hardcoded
+    // 24.0f/2048.0f pair that used to live in basic_ps.hlsl with nothing
+    // enforcing that it matched the C++ side.
+    float cascadeTexelWorld[core::kShadowCascadeCount];
+    // 400..415 - inner edge of each cascade's outer blend band. RESERVED: it is
+    // uploaded every frame but nothing consumes it yet. It exists from the start
+    // so enabling the optional cross-cascade blend later cannot churn the byte
+    // layout, which is the one thing sky_ps.hlsl cannot tolerate.
+    float cascadeFadeLo[core::kShadowCascadeCount];
 };
-static_assert(sizeof(CBPerFrame) == 176,
+// These five pin the C++ half of the layout. The HLSL half is pinned
+// independently by packoffset on every member of cbuffer CBPerFrame in
+// basic_ps.hlsl - see the comment there for why that matters more than it looks.
+static_assert(sizeof(CBPerFrame) == 416,
               "CBPerFrame must match cbuffer CBPerFrame (b1) in the raster shaders");
+static_assert(offsetof(CBPerFrame, lightViewProj) == 112,
+              "sky_ps.hlsl declares bytes 0..111 as a frozen prefix; "
+              "lightViewProj must stay at offset 112");
+static_assert(offsetof(CBPerFrame, cascadeSplitRadius) == 368, "");
+static_assert(offsetof(CBPerFrame, cascadeTexelWorld) == 384, "");
+static_assert(offsetof(CBPerFrame, cascadeFadeLo) == 400, "");
+static_assert(core::kShadowCascadeCount == 4,
+              "the split/texel/fade tables are declared float4 in basic_ps.hlsl; "
+              "changing the count means repacking them as float4[(N+3)/4] and "
+              "indexing [i/4][i%4]");
 
 struct CBMaterial
 {
@@ -182,12 +216,35 @@ public:
     // Runs BEFORE BeginScenePass. Renders scene depth from the light's point of
     // view into a dedicated depth target, which the main pass then samples.
     //
-    // The light matrix is rebuilt every frame around the camera-relative origin
-    // (i.e. the camera), so the map follows the viewer. That is a single
-    // cascade covering kShadowExtent units - fine for the demo scene, and the
-    // obvious place to add cascades later.
-    void BeginShadowPass(D3D12Device& device);
+    // FOUR cascades, all centred on the camera-relative origin (i.e. the
+    // camera), reaching from 24 to ~448 world units. Rebuilt every frame: the
+    // light can move, and the frustums are anchored to the camera, which
+    // certainly does.
+    //
+    // Call order per frame is ONE BeginShadowPass, then one
+    // BeginShadowCascade + RenderShadowCasters per cascade, then ONE
+    // EndShadowPass. The two whole-resource barriers live in Begin/End, so the
+    // m_shadowIsDepthTarget bool describes the whole resource and stays
+    // coherent; per-slice barriers or an early-out mid-loop would desync it and
+    // produce a validation error a long way from its cause.
+    //
+    // cameraPosition is the absolute Vec3d and is the SANCTIONED RULE 1
+    // exception - see core::BuildShadowCascadeMatrix for exactly what it is used
+    // for (quantising the texel lattice, in double, never narrowed).
+    void BeginShadowPass(D3D12Device& device, const core::Vec3d& cameraPosition);
+    // Bind slice `cascade` and clear it. The clear is UNCONDITIONAL and lives
+    // here on purpose: D3D12 does not zero-initialise a committed
+    // ALLOW_DEPTH_STENCIL resource, so a slice whose clear was skipped can hold
+    // arbitrary values below 1.0 and read as "written" without ever having been
+    // rendered into - which the coverage probe cannot distinguish. The only way
+    // to skip the clear is to skip the whole cascade, and that the smoke markers
+    // do catch.
+    void BeginShadowCascade(D3D12Device& device, uint32_t cascade);
     void EndShadowPass(D3D12Device& device);
+
+    // Recompute all cascade matrices. Called by BeginShadowPass; exposed so
+    // CreateShadowResources can seed valid matrices before the first frame.
+    void UpdateShadowCascades(const core::Vec3d& cameraPosition);
 
     // Depth-only draw. Deliberately a separate entry point rather than a flag on
     // DrawMesh: the shadow pass binds no material, no textures and no per-frame
@@ -205,11 +262,38 @@ public:
     //
     // Two phases, matching the back-buffer capture: record the copy into the
     // frame's command list, then read it after the GPU has caught up.
+    // Copies the centred probe window of EVERY cascade slice, not just slice 0.
+    // Probing only slice 0 would leave cascades 1..3 with no evidence at all
+    // that they were ever rasterised.
     bool RecordShadowMapReadback(D3D12Device& device);
     // Fraction of sampled texels holding anything other than the cleared 1.0,
-    // and the smallest depth found. A fraction of zero means the depth pass did
-    // not rasterise a single triangle.
-    bool ReadShadowMapCoverage(float& writtenFraction, float& minDepth) const;
+    // and the smallest depth found, for one cascade. A fraction of zero means
+    // the depth pass did not rasterise a single triangle into that slice.
+    bool ReadShadowMapCoverage(uint32_t cascade,
+                               float& writtenFraction,
+                               float& minDepth) const;
+    // Do the uploaded cascade texel sizes strictly increase with consecutive
+    // ratios in (1, 8]? Computed from the table that is ACTUALLY in flight, so
+    // it is a check of the live fit rather than a mirror of the constants.
+    bool ShadowCascadeTexelSizesAreMonotonic() const;
+
+    // How many cascades BeginShadowCascade was actually called for in the last
+    // shadow pass.
+    //
+    // This exists because the obvious assertion does not work, and that was
+    // established empirically rather than assumed. Changing the app's loop bound
+    // to skip the last cascade leaves EVERY per-slice coverage marker reading
+    // "written=yes": D3D12 does not zero-initialise a committed
+    // ALLOW_DEPTH_STENCIL resource, so a slice that was never cleared and never
+    // rendered holds arbitrary values below the 1.0 clear and is
+    // indistinguishable from a slice full of real depth. The coverage probe
+    // physically cannot tell those apart.
+    //
+    // A CPU-side count of cascades begun is the only cheap thing that can. It
+    // does not prove the GPU rasterised anything - that is what the coverage and
+    // depth-distinctness markers are for - but it is what catches a loop that
+    // stops early.
+    uint32_t ShadowCascadesRendered() const { return m_cascadesBegunThisPass; }
 
     // Advance the per-frame constant ring. MUST run exactly once per frame,
     // BEFORE any pass uploads constants.
@@ -250,7 +334,6 @@ private:
     bool CreateBloomPipeline(ID3D12Device* device);
     bool CreateShadowResources(ID3D12Device* device);
     bool CreateShadowPSO(ID3D12Device* device);
-    void UpdateLightMatrix();
     void RenderBloom(D3D12Device& device);
 
     // Upload a constant buffer and return its GPU virtual address
@@ -314,22 +397,45 @@ private:
     // so anything the material pass samples has to share that heap. The slot is
     // reserved by starting the descriptor allocator past it, so it can never be
     // handed out to a material texture.
-    static constexpr uint32_t kShadowMapSize = 2048;
+    // Resolution and the cascade geometry now live in core/shadow_cascades.h so
+    // the unit tests can reach them without linking any D3D12.
+    static constexpr uint32_t kShadowMapSize = core::kShadowMapSize;
     static constexpr uint32_t kShadowDescriptorIndex = 1;  // 0 is the null SRV
-    // Half-extent of the orthographic light frustum, in world units, centred on
-    // the camera. Sized for the demo scene; a real world needs cascades.
-    static constexpr float    kShadowExtent = 24.0f;
-    static constexpr float    kShadowDepthRange = 120.0f;
+
+    // ONE Texture2DArray with kShadowCascadeCount slices, NOT N separate
+    // textures and NOT an atlas.
+    //
+    // A Texture2DArray SRV is ONE descriptor however many slices it has, so the
+    // root signature, the descriptor heap layout and kShadowDescriptorIndex are
+    // all completely unchanged by adding cascades - which is why this change
+    // does not open CreateRootSignature at all.
+    //
+    // Not an atlas, for a specific reason: the s1 comparison sampler uses
+    // ADDRESS_MODE_BORDER with OPAQUE_WHITE, so a tap outside a cascade's
+    // footprint reads as LIT with no branch in the shader. In an atlas,
+    // "outside the tile" is still inside the texture, so a 3x3 kernel at a tile
+    // edge would silently sample a neighbouring cascade's depth and return a
+    // plausible wrong answer instead.
+    //
+    // 4 * 2048 * 2048 * 4 = 64 MiB, up from 16 MiB.
     ComPtr<ID3D12Resource>       m_shadowMap;
-    ComPtr<ID3D12DescriptorHeap> m_shadowDsvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_shadowDsvHeap;   // kShadowCascadeCount DSVs
+    uint32_t                     m_shadowDsvDescSize = 0;
     ComPtr<ID3D12PipelineState>  m_shadowPSO;
-    core::Mat4x4                 m_lightViewProj;
+    core::Mat4x4                 m_lightViewProj[core::kShadowCascadeCount];
     bool                         m_shadowIsDepthTarget = false;
-    // A centred window rather than the whole 2048x2048 map: 256 KB instead of
-    // 16 MB, and the light frustum is centred on the camera so this is where
-    // the geometry lands.
+    // Which slice DrawMeshShadow is currently recording into. Set by
+    // BeginShadowCascade; the ONLY thing that selects a cascade's matrix.
+    uint32_t                     m_activeCascade = 0;
+    // Reset by BeginShadowPass, incremented by BeginShadowCascade. See
+    // ShadowCascadesRendered for why a CPU counter is load-bearing here.
+    uint32_t                     m_cascadesBegunThisPass = 0;
+    // A centred window rather than the whole 2048x2048 map: 1 MiB across four
+    // slices instead of 64 MiB. Every cascade is centred on the camera-relative
+    // origin, so this is where the geometry lands in all of them.
     static constexpr uint32_t    kShadowProbeSize = 256;
     ComPtr<ID3D12Resource>       m_shadowReadback;
+    UINT64                       m_shadowReadbackBytes = 0;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
     // slot 1 the shadow map.

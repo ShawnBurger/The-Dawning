@@ -24,9 +24,14 @@ cbuffer CBPerFrame : register(b1)
     float  pad4;
 
     // NOTE: this is a deliberate PREFIX of CBPerFrame, not the whole thing. The
-    // C++ struct (renderer.h, static_assert'd at 176 bytes) ends with a
-    // float4x4 lightViewProj that this shader has no use for, and a cbuffer may
-    // declare fewer members than the buffer holds - reads are by offset.
+    // C++ struct (renderer.h, static_assert'd at 416 bytes) continues with four
+    // cascade light view-projections and three cascade tables that this shader
+    // has no use for, and a cbuffer may declare fewer members than the buffer
+    // holds - reads are by offset.
+    //
+    // Adding cascades did not touch this declaration, by construction: every new
+    // field was APPENDED at or after byte 112, and cascade 0's matrix occupies
+    // exactly the bytes the old single lightViewProj did.
     //
     // The consequence: fields may only be APPENDED to CBPerFrame. Inserting one
     // anywhere above this point shifts every offset below it and this shader

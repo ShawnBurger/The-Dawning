@@ -1186,8 +1186,16 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         // would leave the scene pass pointing at a 2048x2048 depth-only target.
         if (m_renderer.ShadowsAvailable())
         {
-            m_renderer.BeginShadowPass(m_device);
-            m_scene.RenderShadowCasters(m_device, m_renderer, m_camera.Position());
+            // One Begin/End pair around the whole set, one BeginShadowCascade per
+            // slice. The casters are walked once per cascade; per-cascade frustum
+            // culling would avoid that, but Mesh carries no bounding volume yet,
+            // so it is pure waste rather than an artifact and is deferred.
+            m_renderer.BeginShadowPass(m_device, m_camera.Position());
+            for (uint32_t cascade = 0; cascade < core::kShadowCascadeCount; ++cascade)
+            {
+                m_renderer.BeginShadowCascade(m_device, cascade);
+                m_scene.RenderShadowCasters(m_device, m_renderer, m_camera.Position());
+            }
             m_renderer.EndShadowPass(m_device);
         }
 
@@ -1266,18 +1274,92 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (probeShadow && m_verifyShadowThisFrame)
     {
         m_verifyShadowThisFrame = false;
-        float writtenFraction = 0.0f;
-        float minDepth        = 1.0f;
-        if (m_renderer.ReadShadowMapCoverage(writtenFraction, minDepth))
+
+        // Per-cascade markers, with the INDEX IN THE KEY. That shape is
+        // mandatory, not stylistic: smoke_test.ps1 stores markers in a hashtable
+        // keyed by name, so a looped "cascade_written=yes" would OVERWRITE and
+        // collapse to whichever cascade ran last - passing while cascades 0..N-2
+        // were empty.
+        bool  allRead     = true;
+        float fraction[core::kShadowCascadeCount] = {};
+        float minDepth[core::kShadowCascadeCount] = {};
+
+        for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
         {
-            // The assertion is "the depth pass rasterised something", not a
+            minDepth[c] = 1.0f;
+            if (!m_renderer.ReadShadowMapCoverage(c, fraction[c], minDepth[c]))
+            {
+                allRead = false;
+                break;
+            }
+            // The assertion is "this cascade rasterised something", not a
             // threshold on how much. Deleting the pass, culling everything, or
-            // an inverted light matrix all land on zero; anything above it means
-            // geometry reached the map.
+            // an inverted light matrix all land on zero.
+            core::Log::Infof("[SMOKE] shadow_cascade_written_%u=%s",
+                             c, fraction[c] > 0.0f ? "yes" : "no");
+            core::Log::Infof("[SMOKE] shadow_cascade_fraction_%u=%.4f shadow_cascade_min_depth_%u=%.4f",
+                             c, fraction[c], c, minDepth[c]);
+        }
+
+        if (allRead)
+        {
+            // Cascade 0's numbers keep the ORIGINAL key names so the existing
+            // assertions stay true and need no edit.
             core::Log::Infof("[SMOKE] shadow_map_written=%s",
-                             writtenFraction > 0.0f ? "yes" : "no");
+                             fraction[0] > 0.0f ? "yes" : "no");
             core::Log::Infof("[SMOKE] shadow_written_fraction=%.3f shadow_min_depth=%.4f",
-                             writtenFraction, minDepth);
+                             fraction[0], minDepth[0]);
+
+            // EACH CASCADE STORED A DIFFERENT DEPTH. This is the GPU-side
+            // assertion with real discriminating power, and it rests on a
+            // structural property rather than on scene layout: cascade c's
+            // orthographic slab is ShadowCascadeDepthRange(c) deep - 120, 325,
+            // 875, 2350 - so the SAME geometry necessarily normalises to a
+            // different NDC depth in every slice. Four equal values mean the
+            // slices did not each get their own matrix.
+            //
+            // What it catches: m_activeCascade never advancing (every slice
+            // rasterised with cascade 0's matrix), the readback reading slice 0
+            // four times, and every slice bound to the same DSV.
+            //
+            // What it does NOT catch, stated plainly: a PERMUTATION of matrices
+            // across slices leaves all four distinct. Nothing on the GPU side
+            // here detects that; the CPU cases in tests/test_shadow_cascades.cpp
+            // are what constrain the matrices themselves.
+            //
+            // The coverage-fraction ordering the design called for is NOT
+            // asserted, because it is vacuous in this scene: the probe window is
+            // 1/8 of each footprint, so even cascade 3's is 117 world units
+            // across and sits entirely on the 200x200 ground plane. All four
+            // fractions are 1.0. That prediction assumed the old 10x10 plane,
+            // which this branch itself replaced. The fractions are still logged
+            // for diagnosis; they are simply not evidence of anything here.
+            float minSeparation = 1.0f;
+            for (uint32_t a = 0; a < core::kShadowCascadeCount; ++a)
+                for (uint32_t b = a + 1; b < core::kShadowCascadeCount; ++b)
+                {
+                    const float d = std::fabs(minDepth[a] - minDepth[b]);
+                    if (d < minSeparation) minSeparation = d;
+                }
+            core::Log::Infof("[SMOKE] shadow_cascade_depths_distinct=%s",
+                             minSeparation > 1e-4f ? "yes" : "no");
+            core::Log::Infof("[SMOKE] shadow_cascade_depth_separation=%.5f",
+                             minSeparation);
+
+            // How many cascades the pass actually began. NOT redundant with the
+            // per-slice written markers, and that is not a guess: skipping the
+            // last cascade was measured to leave shadow_cascade_written_3=yes,
+            // because an uncleared, never-rendered depth slice holds arbitrary
+            // values below 1.0 and reads exactly like a slice full of real
+            // depth. This counter is what catches a loop that stops early.
+            core::Log::Infof("[SMOKE] shadow_cascades_rendered=%u",
+                             m_renderer.ShadowCascadesRendered());
+
+            // Computed from the table actually in flight this frame, so it is a
+            // check of the live fit rather than a mirror of the constants.
+            core::Log::Infof("[SMOKE] shadow_cascade_texel_monotonic=%s",
+                             m_renderer.ShadowCascadeTexelSizesAreMonotonic()
+                                 ? "yes" : "no");
         }
         else
         {
