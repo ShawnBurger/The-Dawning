@@ -115,6 +115,17 @@ Texture CreateTexture2DFromWICFile(
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name = nullptr);
 
+// Decode an image (PNG/JPEG/etc.) that is already in memory rather than on disk.
+// This is the glTF embedded-image case: the bytes come from the GLB's BIN chunk.
+// bytes must remain valid for the duration of the call.
+Texture CreateTexture2DFromWICMemory(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const uint8_t* bytes,
+    size_t byteCount,
+    ComPtr<ID3D12Resource>& outUpload,
+    const wchar_t* name = nullptr);
+
 bool WriteCheckerDDSTextureRGBA8(
     const char* filePath,
     uint32_t width,
