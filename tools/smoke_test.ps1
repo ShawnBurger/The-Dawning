@@ -150,13 +150,20 @@ Assert-Marker "shadow_map_slot" "1"
 Assert-Marker "shadow_cascades" "4"
 
 # =============================================================================
-# Environment IBL - docs/research/IBL_DESIGN.md section 11, Stage 1
+# Environment IBL - docs/research/IBL_DESIGN.md section 11, Stages 1-3
 # =============================================================================
-# The prefiltered environment cubemap. NOTHING SAMPLES IT YET: Stage 1 builds
-# and proves the resource, Stages 2-4 consume it, and the capture statistics are
-# expected to be byte-identical to the pre-IBL run. Do not read "the image did
-# not change" as these assertions being inert - they are about the resource, and
-# every one of them has been watched failing.
+# The prefiltered environment cubemap (Stage 1), the L2 diffuse SH projection
+# (Stage 2), and the split-sum specular path (Stage 3). basic_ps.hlsl now
+# consumes all of it: its hemisphere ambient is DELETED, not scaled down, so
+# the raster capture statistics legitimately differ from the pre-IBL run.
+#
+# There is deliberately NO golden-value gate on those statistics - see the long
+# note by the capture block below for why one was deleted rather than
+# recalibrated. Every assertion here is either CPU-side over GPU-free code or a
+# GPU-side probe reading back what the shipped shaders computed, and none of it
+# depends on which assets happen to sit in build/<Config>.
+#
+# Every one of these has been watched failing.
 #
 # BOTH MODES, unconditionally. The prefilter runs once at startup, before the
 # raster/path-tracing branch exists, so unlike the shadow and draw probes there
@@ -224,6 +231,70 @@ Assert-Marker "ibl_mip_energy" "pass"
 # trivially, so without it this assertion passes on a cube that was never
 # rendered at all.
 Assert-Marker "ibl_mip_variance_decreasing" "yes"
+
+# --- Stage 2 ---------------------------------------------------------------
+# The SH BASIS mirror. core::SHBasisL2 (which produced the coefficients) and
+# DawningSHBasisL2 in shaders/ibl_common.hlsli (which evaluates them) are two
+# hand-written copies of nine expressions in two files and two languages. A sign
+# flip or permutation applied to ONE of them does not cancel and lights every
+# surface in the scene from the wrong direction, smoothly and plausibly.
+#
+# No CPU test can see this - the HLSL is not linked into TheDawningTests. This
+# probe evaluates the SHIPPED HLSL on the GPU against the SHIPPED coefficients
+# and compares to core::EvaluateIrradiance. It is the SH analogue of
+# ibl_sky_agreement, and it exists for the same reason: a mirror nobody watches
+# is a convention, not a guarantee.
+Assert-Marker "ibl_sh_agreement" "pass"
+Assert-Marker "ibl_sh_slots" "64"
+# The kill switch is ON and the coefficients are not degenerate. DELIBERATELY
+# WEAK, and listed as such: it says what BeginFrame will upload, not that
+# basic_ps.hlsl reads it. Nothing in this harness witnesses that call site - see
+# the note at the top of shaders/ibl_eval_probe_ps.hlsl.
+Assert-Marker "ibl_enabled" "yes"
+
+# --- Stage 3 ---------------------------------------------------------------
+# 3.3 - mirror agreement. At roughness 0 with N = V = d the split-sum reduces to
+# a mip-0 fetch times the env-BRDF scalar, and the shader writes that scalar in
+# the alpha channel so the CPU can divide it out and compare the remaining
+# radiance against core::SkyRadiance WITHOUT re-implementing the Lazarov fit.
+# WATCHED: reflect(V, N) in place of reflect(-V, N) takes the worst relative
+# error from 0.0010 to 1.03. WATCHED NOT FAILING, and disclosed rather than
+# quietly dropped: switching the cube sampler to WRAP leaves this green, because
+# cube sampling never consults the 2-D address modes - the design claims this
+# assertion covers that and it does not.
+Assert-Marker "ibl_spec_mirror" "pass"
+Assert-Marker "ibl_spec_mirror_slots" "64"
+
+# 3.1 - the env-BRDF fit's physical bounds. Restated from the design's furnace
+# formulation, which is not satisfiable: at roughness 1 with F0 = 1 the
+# single-scattering split-sum returns 0.45, a 55% energy loss that the design's
+# own section 9.4 names and deliberately leaves uncorrected, so "within 10% of
+# the cube mean" would have failed for an accepted reason.
+#
+# What is asserted instead are properties of the physics the fit approximates:
+# a smooth dielectric reflects F0 at normal incidence and approaches unity at
+# grazing, and a perfect mirror never reflects MORE than it receives at any
+# roughness. The first two are what give an A/B swap teeth - at F0 = 1 the
+# expression F0*A + B is symmetric in A and B and the swap is invisible, which
+# the design's stated negative test does not account for.
+Assert-Marker "ibl_env_brdf" "pass"
+Assert-Marker "ibl_env_brdf_slots" "64"
+# Vacuity guard: the two smooth-surface claims each look at ONE grid point, so a
+# grid that stopped reaching (roughness 0, NdotV 0) and (roughness 0, NdotV 1)
+# would satisfy them by never evaluating them.
+Assert-Marker "ibl_env_brdf_smooth_samples" "2"
+
+# 3.2 - roughness -> mip. The prefiltered fetch along +Y must rise monotonically
+# with roughness. WATCHED: inverting the mapping to (1 - roughness) * (mips - 1)
+# fails this and the mirror assertion together.
+#
+# AN OFF-BY-ONE IS NOT CAUGHT, and the design claims it is. WATCHED NOT FAILING:
+# adding 1.0 to the mip leaves both this and the mirror assertion green. That is
+# a property of this sky rather than of the probe - adjacent mips of a smooth
+# linear gradient differ by about 0.1%, which is at the half-precision noise
+# floor. A high-contrast HDR environment would separate them.
+Assert-Marker "ibl_spec_mip_monotonic" "pass"
+Assert-Marker "ibl_spec_mip_slots" "64"
 # BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
 # skipped in path-tracing runs, which do not use the shadow map at all" - an
 # accurate description of a hole, not a reason for one. The shadow probe rode the

@@ -28,6 +28,7 @@ set(CORE_SOURCES
     src/core/window.cpp
     src/core/shadow_cascades.cpp
     src/core/sky_radiance.cpp
+    src/core/sh_irradiance.cpp
 )
 
 set(CORE_HEADERS
@@ -38,6 +39,7 @@ set(CORE_HEADERS
     src/core/window.h
     src/core/shadow_cascades.h
     src/core/sky_radiance.h
+    src/core/sh_irradiance.h
 )
 
 set(ASSET_SOURCES
@@ -108,6 +110,8 @@ set(SHADER_FILES
     shaders/ibl_environment.hlsli
     shaders/ibl_prefilter_ps.hlsl
     shaders/ibl_probe_ps.hlsl
+    shaders/ibl_common.hlsli
+    shaders/ibl_eval_probe_ps.hlsl
 )
 
 set(ECS_HEADERS
@@ -143,6 +147,7 @@ set(TEST_SOURCES
     tests/test_gpu_draw_records.cpp
     tests/test_rt_texture_lod.cpp
     tests/test_sky_energy.cpp
+    tests/test_sh_irradiance.cpp
 )
 
 set(TEST_HEADERS
@@ -307,6 +312,13 @@ add_executable(TheDawningTests
     # and states precisely what that tripwire does not prove.
     src/core/sky_radiance.h
     src/core/sky_radiance.cpp
+    # L2 spherical-harmonic diffuse irradiance. GPU-free on the same sanctioned
+    # footing as shadow_cascades.cpp: it includes only core/types.h and <cmath>,
+    # so tests/test_sh_irradiance.cpp exercises the SHIPPED projector rather than
+    # a copy of it. Its BASIS has an HLSL twin, which the header names and which
+    # a GPU probe watches - no CPU test here can see that half.
+    src/core/sh_irradiance.h
+    src/core/sh_irradiance.cpp
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h

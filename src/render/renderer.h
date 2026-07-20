@@ -133,12 +133,47 @@ struct CBPerFrame
     // so enabling the optional cross-cascade blend later cannot churn the byte
     // layout, which is the one thing sky_ps.hlsl cannot tolerate.
     float cascadeFadeLo[core::kShadowCascadeCount];
+
+    // 416..559 - L2 spherical-harmonic diffuse irradiance for the environment
+    // (IBL_DESIGN.md section 6.1). Nine RGB coefficients, produced by
+    // core::PackIrradianceCoefficients, consumed by DawningIrradianceSH.
+    // ZERO descriptor slots: this is the whole reason diffuse IBL is SH here
+    // rather than an irradiance cubemap.
+    //
+    // [9][4], NOT [9][3], AND THIS IS THE TRAP WORTH THE MOST HERE. HLSL places
+    // every element of a cbuffer ARRAY on its own 16-byte register, so
+    // `float3 iblSH[9]` is 144 bytes in HLSL and 108 in C++. That mismatch
+    // compiles on BOTH sides, keeps the member names identical, and makes the
+    // shader read coefficient 1 out of the middle of coefficient 0. It is the
+    // identical trap the cascade tables are documented for in basic_ps.hlsl:29-42,
+    // and the fourth component is dead padding ON PURPOSE.
+    float iblSH[9][4];
+
+    // 560..575 - IBL scalar parameters.
+    //   x: specular mip count, as a FLOAT so there is no int/float cbuffer split
+    //   y: environment intensity multiplier, 1.0 today
+    //   z: IBL enable, 0 or 1. A runtime kill switch, NOT a debug leftover: it is
+    //      what makes "is the IBL path actually reached" answerable, and the
+    //      negative tests in IBL_DESIGN.md section 11 toggle it
+    //   w: reserved, must be written zero
+    float iblParams[4];
 };
-// These five pin the C++ half of the layout. The HLSL half is pinned
-// independently by packoffset on every member of cbuffer CBPerFrame in
-// basic_ps.hlsl - see the comment there for why that matters more than it looks.
-static_assert(sizeof(CBPerFrame) == 416,
+// These pin the C++ half of the layout. The HLSL half is pinned independently by
+// packoffset on every member of cbuffer CBPerFrame in basic_ps.hlsl - see the
+// comment there for why that matters more than it looks.
+static_assert(sizeof(CBPerFrame) == 576,
               "CBPerFrame must match cbuffer CBPerFrame (b1) in the raster shaders");
+static_assert(offsetof(CBPerFrame, iblSH) == 416,
+              "iblSH must land on register c26 in basic_ps.hlsl");
+static_assert(offsetof(CBPerFrame, iblParams) == 560,
+              "iblParams must land on register c35 in basic_ps.hlsl");
+// THE ONE THAT CATCHES THE REAL BUG. float[9][3] would be 108 bytes and would
+// still compile, still match member-for-member, and still satisfy the offsetof
+// check above, because iblSH is the last-but-one field - so its own offset does
+// not move and only iblParams' does. This is the assertion that fails.
+static_assert(sizeof(CBPerFrame::iblSH) == 144,
+              "HLSL puts each cbuffer array element on its own 16-byte register; "
+              "iblSH must be float[9][4], never float[9][3]");
 static_assert(offsetof(CBPerFrame, lightViewProj) == 112,
               "sky_ps.hlsl declares bytes 0..111 as a frozen prefix; "
               "lightViewProj must stay at offset 112");
@@ -692,10 +727,18 @@ private:
     // It does not change the ceiling's character or bring the bindless work
     // forward.
     //
-    // NOTHING SAMPLES IT YET. Stage 1 of docs/research/IBL_DESIGN.md builds and
-    // proves the resource; Stages 2-4 consume it. See environment_ibl.h.
+    // CONSUMED SINCE STAGE 3: basic_ps.hlsl samples it through root parameter 8
+    // (t0/space6) for split-sum specular. Diffuse takes no descriptor at all -
+    // it rides CBPerFrame::iblSH. The DXR path is Stage 4 and still traces its
+    // own environment; see environment_ibl.h.
     static constexpr uint32_t kEnvCubeDescriptorIndex = 2;
     EnvironmentIBL m_environmentIBL;
+
+    // Environment intensity multiplier, uploaded as iblParams.y. One, and
+    // deliberately so: this stage replaces the hemisphere ambient with a
+    // physically-derived term, and a tuning knob set to anything but 1 would
+    // make the before/after comparison a statement about the knob.
+    float m_iblIntensity = 1.0f;
 
     // Bumped whenever the sky changes; EnsureEnvironmentIBL rebakes when the
     // cube's baked revision no longer matches. A COUNTER, not a bool, so a

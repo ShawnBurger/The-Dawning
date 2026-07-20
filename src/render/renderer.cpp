@@ -5,6 +5,7 @@
 #include "renderer.h"
 #include "shader_utils.h"
 #include "../core/log.h"
+#include "../core/sky_radiance.h"   // core::Luminance, for the IBL smoke marker
 #include <cstring>
 #include <cmath>
 #include <cstdint>
@@ -106,6 +107,18 @@ bool Renderer::EnsureEnvironmentIBL(D3D12Device& device)
     // could not record or a readback that could not map - DO abort, above.
     (void)m_environmentIBL.LogMarkers(kEnvCubeDescriptorIndex,
                                       m_textureAllocator.FirstIndex());
+
+    // What BeginFrame will actually upload. This is the CPU half of the call-site
+    // evidence, and it is DELIBERATELY WEAKER than the GPU probes beside it: the
+    // probes witness what ibl_common.hlsli computes, and this witnesses that the
+    // kill switch is on and the coefficients are not degenerate. Neither of them
+    // witnesses basic_ps.hlsl actually calling the header. Say so rather than let
+    // the marker count imply coverage it does not have.
+    const core::Vec3f dc = m_environmentIBL.IrradianceCoefficients().c[0];
+    core::Log::Infof("[SMOKE] ibl_enabled=%s ibl_intensity=%.3f ibl_sh_dc_luminance=%.6f",
+                     m_environmentIBL.IsBuilt() ? "yes" : "no",
+                     m_iblIntensity,
+                     core::Luminance(dc));
     return true;
 }
 
@@ -811,8 +824,22 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 //   Slot 5: 32-bit constants b3 — { objectIndex, materialIndex, probeEnabled } — 3 DWORDs, ALL
 //   Slot 6: Root CBV  b4        — CBPerPass (viewProj)           — 2 DWORDs, VERTEX
 //   Slot 7: Root UAV  u0/space4 — smoke draw-record probe        — 2 DWORDs, VERTEX
-//   Static samplers at s0 (material) and s1 (shadow comparison) — free
-// Total: 15 DWORDs of 64. 49 free.
+//   Slot 8: Table     t0/space6      — prefiltered env cube      — 1 DWORD,  PIXEL
+//   Static samplers at s0 (material), s1 (shadow comparison), s2 (env cube) — free
+// Total: 16 DWORDs of 64. 48 free.
+//
+// SLOT 8 IS THE +1 DWORD IBL_DESIGN.md SECTION 7.2 BUDGETS. It arrives with
+// Stage 3, not with Stage 1: the design attributed it to the stage that creates
+// the cube, but a descriptor costs a root DWORD only when something BINDS it,
+// and nothing did until basic_ps started sampling it. Counted from the tree
+// rather than taken from the document - the same correction Stage 1 already had
+// to make once. The log line at the bottom of this function says 16 for the same
+// reason; that literal has been wrong here before.
+//
+// A separate one-descriptor table rather than a slot inside the material range,
+// following the shadow map's precedent exactly: a fixed reserved slot below the
+// allocator's firstIndex, valid before any material exists and impossible to
+// recycle.
 //
 // Slots 0 and 2 changed TYPE in place (CBV->SRV) rather than being appended
 // alongside dead parameters: slot 0 was "per-object data, VERTEX-visible" and
@@ -904,7 +931,31 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     staticSampler.RegisterSpace    = 0;
     staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
+    // s2: the prefiltered environment cube. TRILINEAR and CLAMP, not the
+    // material sampler's ANISOTROPIC/WRAP - WRAP is not the cube addressing mode
+    // and anisotropy across cube faces is meaningless here. Trilinear rather than
+    // point-mip because DawningSpecularIBL picks the mip as a CONTINUOUS function
+    // of roughness, and point selection bands visibly across a roughness
+    // gradient. Static samplers cost no root DWORDs.
+    //
+    // Every field assigned BEFORE this goes into the array below. The dead-store
+    // bug documented just above shipped once in this exact function.
+    D3D12_STATIC_SAMPLER_DESC envSampler = {};
+    envSampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    envSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.MipLODBias       = 0.0f;
+    envSampler.MaxAnisotropy    = 1;
+    envSampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+    envSampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    envSampler.MinLOD           = 0.0f;
+    envSampler.MaxLOD           = D3D12_FLOAT32_MAX;
+    envSampler.ShaderRegister   = 2;
+    envSampler.RegisterSpace    = 0;
+    envSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler, envSampler };
 
     D3D12_ROOT_SIGNATURE_FLAGS flags =
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
@@ -935,7 +986,15 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         shadowRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[8] = {};
+        D3D12_DESCRIPTOR_RANGE1 envRange = {};
+        envRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        envRange.NumDescriptors                    = 1;
+        envRange.BaseShaderRegister                = 0;
+        envRange.RegisterSpace                     = 6;
+        envRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+        envRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER1 rootParams[9] = {};
 
         // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1043,6 +1102,14 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[7].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
+        // Slot 8: prefiltered environment cube (t0, space6). PIXEL-only - the
+        // shadow pass is depth-only and runs no material shader, so it never
+        // binds this and nothing about that pass changes.
+        rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[8].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[8].DescriptorTable.pDescriptorRanges   = &envRange;
+        rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
@@ -1070,6 +1137,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         shadowRange.RegisterSpace                     = 1;
         shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+        D3D12_DESCRIPTOR_RANGE envRange = {};
+        envRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        envRange.NumDescriptors                    = 1;
+        envRange.BaseShaderRegister                = 0;
+        envRange.RegisterSpace                     = 6;
+        envRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
         // MUST STAY IN LOCKSTEP WITH THE v1.1 BRANCH ABOVE. These are two
         // independent copies of the same layout and this one only runs when
         // CheckFeatureSupport reports no 1.1 support, so a divergence produces
@@ -1077,7 +1151,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // including both smoke modes - would ever catch. v1.0 has no
         // per-descriptor Flags member; volatile is the implicit default there,
         // which is what the v1.1 branch asks for explicitly.
-        D3D12_ROOT_PARAMETER rootParams[8] = {};
+        D3D12_ROOT_PARAMETER rootParams[9] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -1125,6 +1199,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[7].Descriptor.RegisterSpace  = 4;
         rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
+        // PIXEL for the same reason as the v1.1 branch above: only basic_ps
+        // declares t0/space6. The two branches must stay identical.
+        rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[8].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[8].DescriptorTable.pDescriptorRanges   = &envRange;
+        rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
         rsDesc.pParameters       = rootParams;
@@ -1152,7 +1233,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + probe UAV + texture table + shadow table, 2 static samplers, 15 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + probe UAV + texture table + shadow table + env cube table, 3 static samplers, 16 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1970,6 +2051,28 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
         perFrame.cascadeFadeLo[c]      = core::ShadowCascadeFadeLo(c);
     }
 
+    // Image-based lighting. The coefficients come from EnvironmentIBL, which is
+    // the one thing that knows the environment, so the SH the shader evaluates
+    // and the SH the startup probe compares against are the SAME array - there
+    // is no second projection to drift.
+    //
+    // iblParams.z is the kill switch, and it is FALSE until the cube is baked.
+    // On the frames before EnsureEnvironmentIBL has run - and in any future
+    // configuration where it fails - the shader must take the zero branch rather
+    // than sample an unwritten cube.
+    const core::SHColor9& sh = m_environmentIBL.IrradianceCoefficients();
+    for (uint32_t k = 0; k < core::kSHCoefficientCount; ++k)
+    {
+        perFrame.iblSH[k][0] = sh.c[k].x;
+        perFrame.iblSH[k][1] = sh.c[k].y;
+        perFrame.iblSH[k][2] = sh.c[k].z;
+        perFrame.iblSH[k][3] = 0.0f;    // dead padding, on purpose - see renderer.h
+    }
+    perFrame.iblParams[0] = static_cast<float>(kEnvCubeMips);
+    perFrame.iblParams[1] = m_iblIntensity;
+    perFrame.iblParams[2] = m_environmentIBL.IsBuilt() ? 1.0f : 0.0f;
+    perFrame.iblParams[3] = 0.0f;
+
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
 
@@ -2000,6 +2103,14 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     D3D12_GPU_DESCRIPTOR_HANDLE shadowGpu = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
     shadowGpu.ptr += static_cast<UINT64>(kShadowDescriptorIndex) * m_textureDescSize;
     cmd->SetGraphicsRootDescriptorTable(4, shadowGpu);
+
+    // Prefiltered environment cube, same shape and for the same reason: a fixed
+    // reserved slot below the material allocator's firstIndex. Bound once per
+    // frame here, beside the shadow table. The shadow pass needs it for nothing
+    // and does not bind it.
+    D3D12_GPU_DESCRIPTOR_HANDLE envGpu = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
+    envGpu.ptr += static_cast<UINT64>(kEnvCubeDescriptorIndex) * m_textureDescSize;
+    cmd->SetGraphicsRootDescriptorTable(8, envGpu);
 }
 
 void Renderer::DrawSky(D3D12Device& device)
