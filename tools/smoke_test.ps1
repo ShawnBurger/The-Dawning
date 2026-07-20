@@ -404,6 +404,31 @@ Assert-Marker "ibl_consume" "ok"
 Assert-Marker "ibl_consume_reached" "ok"
 Assert-Marker "ibl_consume_consumption" "ok"
 Assert-Marker "ibl_consume_identity" "ok"
+# The two specular-fidelity fixes added in this stage (IBL_DESIGN 9.3, 10).
+# WATCHED FAILING, each broken -> failing -> restored -> green:
+#   (f) neuter specularOcclusion back to `envSpecular *= ambientOcclusion` in
+#       basic_ps.hlsl -> spec_occ_above_ao 0.192459 -> 0, ibl_consume_occlusion
+#       fails, while consumption/identity STAY ok (the applied specular occlusion
+#       equals AO, so the shipped image reverts and the witness collapses)
+#   (g) delete the DawningToksvigRoughness fold in basic_ps.hlsl -> toksvig_rough
+#       _inc 0.791718 -> 0, ibl_consume_occlusion fails, others stay ok
+Assert-Marker "ibl_consume_occlusion" "ok"
+# Not redundant with the verdict: these are the numbers it was computed FROM, so a
+# reduction that lost a clause reads absurd beside a verdict that reads ok. Both
+# are MAX over the live frame of a quantity that is exactly 0 when its fix is
+# absent, so a small positive value is the fix being present on some pixel.
+if ([double]$markers["ibl_consume_spec_occ_above_ao"] -le 0.0) {
+    throw ("ibl_consume_spec_occ_above_ao=$($markers['ibl_consume_spec_occ_above_ao']): the " +
+           "specular-occlusion remap never departed upward from the diffuse AO on any pixel, " +
+           "so envSpecular is still being multiplied by raw AO. The fix is absent.")
+}
+if ([double]$markers["ibl_consume_toksvig_rough_inc"] -le 0.0) {
+    throw ("ibl_consume_toksvig_rough_inc=$($markers['ibl_consume_toksvig_rough_inc']): the " +
+           "shading roughness never rose above its pre-Toksvig value on any pixel, so the " +
+           "normal-map variance is still being discarded. The fix is absent.")
+}
+Write-Host ("IBL specular fidelity: spec-occ-above-ao=$($markers['ibl_consume_spec_occ_above_ao']) " +
+            "toksvig-rough-inc=$($markers['ibl_consume_toksvig_rough_inc'])")
 
 # Not redundant with the verdict above: the verdict is computed in C++ and these
 # are the numbers it was computed FROM, so a reduction that lost a clause is
@@ -432,6 +457,12 @@ Assert-Marker "ibl_consume_control" "ok"
 Assert-Marker "ibl_consume_control_reached" "ok"
 Assert-Marker "ibl_consume_control_consumption" "ok"
 Assert-Marker "ibl_consume_control_identity" "ok"
+# The specular-fidelity words are written only inside the cube-sampled branch,
+# which the control frame does not take, so they must read exactly zero here. That
+# is what proves the live values above are the fixes running and not a constant.
+Assert-Marker "ibl_consume_control_occlusion" "ok"
+Assert-Marker "ibl_consume_control_spec_occ_above_ao" "0.000000"
+Assert-Marker "ibl_consume_control_toksvig_rough_inc" "0.000000"
 Assert-Marker "ibl_consume_control_cube_samples" "0"
 if ([uint64]$markers["ibl_consume_control_shaded_pixels"] -eq 0) {
     throw ("ibl_consume_control_shaded_pixels=0: the control frame rendered nothing, so " +
@@ -520,6 +551,26 @@ if ($RasterOnly -or $FullQuality) {
     Assert-Marker "rt_ibl_consume_reached" "ok"
     Assert-Marker "rt_ibl_consume_consumption" "ok"
     Assert-Marker "rt_ibl_consume_identity" "ok"
+    # The same two specular-fidelity fixes, witnessed in the DXR stable preview
+    # from the exact scalars path_trace.hlsl applied. WATCHED FAILING, each broken
+    # -> failing -> restored -> green:
+    #   (h) neuter specularOcclusion back to `envSpecular *= ambientOcclusion` in
+    #       the stable-preview block -> rt spec_occ_above_ao -> 0, occlusion fails
+    #   (i) delete the DawningToksvigRoughness fold in path_trace's material setup
+    #       -> rt toksvig_rough_inc -> 0, occlusion fails
+    Assert-Marker "rt_ibl_consume_occlusion" "ok"
+    if ([double]$markers["rt_ibl_consume_spec_occ_above_ao"] -le 0.0) {
+        throw ("rt_ibl_consume_spec_occ_above_ao=$($markers['rt_ibl_consume_spec_occ_above_ao']): " +
+               "the DXR stable preview never lifted specular occlusion above raw AO, so it is " +
+               "still multiplying envSpecular by the diffuse AO. The fix is absent in DXR.")
+    }
+    if ([double]$markers["rt_ibl_consume_toksvig_rough_inc"] -le 0.0) {
+        throw ("rt_ibl_consume_toksvig_rough_inc=$($markers['rt_ibl_consume_toksvig_rough_inc']): " +
+               "the DXR shading roughness never rose above its pre-Toksvig value, so the normal " +
+               "-map variance is still discarded. The fix is absent in DXR.")
+    }
+    Write-Host ("DXR IBL specular fidelity: spec-occ-above-ao=$($markers['rt_ibl_consume_spec_occ_above_ao']) " +
+                "toksvig-rough-inc=$($markers['rt_ibl_consume_toksvig_rough_inc'])")
 
     if ([uint64]$markers["rt_ibl_consume_shaded_pixels"] -eq 0) {
         throw ("rt_ibl_consume_shaded_pixels=0: the probed dispatch shaded nothing, so " +
@@ -579,6 +630,9 @@ if ($RasterOnly -or $FullQuality) {
     Assert-Marker "rt_ibl_consume_control_reached" "ok"
     Assert-Marker "rt_ibl_consume_control_consumption" "ok"
     Assert-Marker "rt_ibl_consume_control_identity" "ok"
+    Assert-Marker "rt_ibl_consume_control_occlusion" "ok"
+    Assert-Marker "rt_ibl_consume_control_spec_occ_above_ao" "0.000000"
+    Assert-Marker "rt_ibl_consume_control_toksvig_rough_inc" "0.000000"
     Assert-Marker "rt_ibl_consume_control_cube_samples" "0"
     if ([uint64]$markers["rt_ibl_consume_control_shaded_pixels"] -eq 0) {
         throw ("rt_ibl_consume_control_shaded_pixels=0: the control dispatch traced " +

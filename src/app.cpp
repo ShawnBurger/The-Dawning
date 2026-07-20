@@ -1694,10 +1694,15 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             prefix, ibl.mirrorLuminanceMax,
             prefix, ibl.skyRelError);
         core::Log::Infof(
-            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s",
+            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s %s_occlusion=%s",
             prefix, ibl.reachedOk ? "ok" : "failed",
             prefix, ibl.consumptionOk ? "ok" : "failed",
-            prefix, ibl.identityOk ? "ok" : "failed");
+            prefix, ibl.identityOk ? "ok" : "failed",
+            prefix, ibl.occlusionOk ? "ok" : "failed");
+        core::Log::Infof(
+            "[SMOKE] %s_spec_occ_above_ao=%.6f %s_toksvig_rough_inc=%.6f",
+            prefix, ibl.specOccAboveAo,
+            prefix, ibl.toksvigRoughInc);
 
         if (!ibl.ok)
         {
@@ -1705,8 +1710,9 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                 core::Log::Error(
                     "path_trace.hlsl's stable preview did not consume the environment "
                     "cube as shipped: the DXR path either skipped the IBL terms, "
-                    "dropped them out of the radiance sum, or sampled a resource that "
-                    "is not the prefiltered sky at t0/space8");
+                    "dropped them out of the radiance sum, sampled a resource that "
+                    "is not the prefiltered sky at t0/space8, or dropped the specular "
+                    "occlusion / Toksvig roughness fixes");
             else
                 core::Log::Error(
                     "The DXR IBL probe's NEGATIVE CONTROL failed: with iblParams.z "
@@ -1757,10 +1763,15 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             prefix, ibl.mirrorLuminanceMax,
             prefix, ibl.skyRelError);
         core::Log::Infof(
-            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s",
+            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s %s_occlusion=%s",
             prefix, ibl.reachedOk ? "ok" : "failed",
             prefix, ibl.consumptionOk ? "ok" : "failed",
-            prefix, ibl.identityOk ? "ok" : "failed");
+            prefix, ibl.identityOk ? "ok" : "failed",
+            prefix, ibl.occlusionOk ? "ok" : "failed");
+        core::Log::Infof(
+            "[SMOKE] %s_spec_occ_above_ao=%.6f %s_toksvig_rough_inc=%.6f",
+            prefix, ibl.specOccAboveAo,
+            prefix, ibl.toksvigRoughInc);
 
         if (!ibl.ok)
         {
@@ -1768,8 +1779,9 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                 core::Log::Error(
                     "basic_ps.hlsl did not consume the environment cube as shipped: "
                     "the raster path either skipped the IBL terms, dropped them out "
-                    "of finalColor, or sampled a resource that is not the "
-                    "prefiltered sky at t0/space6");
+                    "of finalColor, sampled a resource that is not the "
+                    "prefiltered sky at t0/space6, or dropped the specular occlusion "
+                    "/ Toksvig roughness fixes");
             else
                 core::Log::Error(
                     "The IBL consumption probe's NEGATIVE CONTROL failed: with "

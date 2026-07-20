@@ -224,4 +224,150 @@ float3 DawningSpecularIBL(TextureCube<float4> envCube, SamplerState envSampler,
                                        mipCount, unusedRadiance, unusedR);
 }
 
+// =============================================================================
+// Specular occlusion - IBL_DESIGN.md 9.3's deferred item
+// =============================================================================
+// WHAT WAS WRONG. The split-sum has no visibility term, so `envSpecular` was the
+// environment a surface would see if nothing blocked it. The only thing standing
+// in for visibility was `envSpecular *= ambientOcclusion` - the DIFFUSE AO map
+// applied unchanged to a specular lobe. That is wrong in a specific, directional
+// way, and it is wrong in BOTH directions:
+//
+//   too dark   a smooth surface's specular lobe is narrow. It samples a tiny
+//              solid angle around R, and a hemispherical average of blockers has
+//              almost no claim on whether THAT cone is blocked. Multiplying by a
+//              hemispherical AO of 0.5 halves a reflection that is very likely
+//              unoccluded.
+//   too bright at roughness 1 the specular lobe IS hemispherical, so diffuse AO
+//              is very nearly the right answer there - and the old code was as
+//              wrong at roughness 0 as it was right at roughness 1, with no
+//              dependence on either roughness or view direction to tell them
+//              apart.
+//
+// THE REMAP (Lagarde & de Rousiers, "Moving Frostbite to PBR", listing 26). It
+// is a function of the SAME AO value plus the two quantities that decide how much
+// of the hemisphere the lobe actually covers:
+//
+//     specOcc = saturate(pow(NdotV + AO, exp2(-16*roughness - 1)) - 1 + AO)
+//
+// Every corner of it is checkable by hand, which is why this form was chosen over
+// a tuned curve:
+//
+//   AO = 1            -> pow(NdotV + 1, e) with e in (0, 0.5] and base >= 1, so
+//                        the result is >= 1 and saturate pins it to EXACTLY 1.
+//                        A surface with no occlusion data is untouched. THIS IS
+//                        THE MOST IMPORTANT CORNER IN THIS FILE - see below.
+//   AO = 0            -> pow(NdotV, e) - 1, which is <= 0 for NdotV <= 1, so
+//                        saturate pins it to 0. Fully occluded stays fully
+//                        occluded.
+//   roughness -> 1    -> e = exp2(-17) ~ 7.6e-6, pow(.,e) -> 1, so specOcc -> AO.
+//                        It DEGENERATES to the old behaviour exactly where the old
+//                        behaviour was right.
+//   roughness -> 0    -> e = 0.5, so at AO 0.5 and NdotV 1 specOcc = 0.7247
+//                        against a raw AO of 0.5. The narrow lobe keeps its
+//                        reflection.
+//
+// So this is NOT "AO applied to specular"; it reduces to that only at roughness 1
+// and departs from it monotonically as the lobe narrows. The probe asserts the
+// departure directly (DAWNING_IBL_PROBE_SPEC_OCC_ABOVE_AO) rather than trusting
+// this comment - a later "simplification" back to `* ambientOcclusion` sends that
+// word to zero.
+//
+// *** WHAT THIS DOES FOR AN ASSET THAT SHIPS NO OCCLUSION MAP: NOTHING. ***
+//
+// Stated here rather than in a report, because it is the case that motivated the
+// work. The Meshy corridor ships base_color / metallic / roughness / normal and
+// no AO, so ambientOcclusion is 1.0 on every one of its texels, so specOcc is
+// EXACTLY 1.0 by the first corner above and this function is an identity there.
+// The corridor's overshoot against the DXR-full reference is MACRO-scale
+// geometric visibility - a concave tube whose own walls block most of the sky -
+// and no remap of an absent AO map can supply that. Closing it needs actual
+// visibility: a traced ray, a screen-space trace, or a baked AO map for the
+// asset. This function is the correct fix for the term it replaces; it is not,
+// and cannot be, a fix for missing occlusion data.
+//
+// NEVER APPLY THIS TO DIRECT LIGHT. Occlusion multiplies environment terms only.
+// Direct light is already gated by the shadow map in raster and by the NEE shadow
+// ray in DXR; multiplying it here would double-count that visibility. That rule
+// predates IBL (IBL_DESIGN.md 9.3) and this change does not touch it.
+//
+// Single expression, no branches, so FXC's X4000 analysis has nothing to say. The
+// max() on the base is not slack: pow(0, x) is exp2(x * log2(0)) and evaluating
+// log2(0) is a way to get a NaN into the frame buffer on some drivers, and
+// NdotV + AO is genuinely 0 at a grazing pixel of a fully occluded texel.
+float DawningSpecularOcclusion(float NdotV, float roughness, float ao)
+{
+    float e = exp2(-16.0f * saturate(roughness) - 1.0f);
+    return saturate(pow(max(saturate(NdotV) + saturate(ao), 1e-4f), e) - 1.0f + saturate(ao));
+}
+
+// =============================================================================
+// Toksvig normal-variance -> roughness (IBL_DESIGN.md section 10)
+// =============================================================================
+// WHAT WAS WRONG. Filtering a normal map averages tangent-space normals toward
+// flat and DISCARDS the sub-pixel normal variance that was acting as roughness.
+// The shading normal comes out more coherent than the surface warrants and the
+// roughness comes out unchanged and therefore too low. Both errors point the same
+// way: too sharp a reflection of too coherent a direction. MEASURED when ray-cone
+// texture LOD landed: the capture's distant band brightened 130.8 -> 143.0 out of
+// 255 and DXR's mean luminance moved AWAY from raster. The raster path has the
+// identical defect and takes a smaller hit only because anisotropic filtering
+// flattens less than an isotropic cone does.
+//
+// IT MATTERS MORE UNDER IBL THAN IT DID BEFORE. Roughness used to reach the
+// environment through a bounded `lerp(0.2, 0.8, 1 - roughness)` gloss ramp; it now
+// selects a MIP of the prefiltered cube, which is a strong, high-dynamic-range
+// lookup. A surface whose roughness is understated samples too sharp a mip.
+//
+// THE SIGNAL IS ALREADY IN THE FETCH AND COSTS NOTHING TO READ. A filtered normal
+// map returns an average of unit vectors, and the average of unit vectors that
+// disagree is SHORTER than unit. |n| < 1 is exactly the variance that was
+// discarded, and it arrives in the same fetch the shading normal comes from - no
+// extra tap, no extra channel, no cooked variance map.
+//
+// TOKSVIG (2005), via the standard Blinn-power <-> GGX-alpha bridge
+// (Karis, "Real Shading in UE4": alpha = sqrt(2 / (power + 2))):
+//
+//     power  = 2 / alpha^2 - 2          with GGX alpha = roughness^2
+//     ft     = |n| / (|n| + power * (1 - |n|))
+//     power' = ft * power
+//     alpha' = sqrt(2 / (power' + 2))
+//     rough' = sqrt(alpha')
+//
+// At |n| = 1 this is the EXACT identity rough' == rough, algebraically and not
+// merely to a tolerance, which is the property that makes it safe to run on every
+// surface unconditionally. It is monotonic and can only increase roughness.
+//
+// THE UNORM8 FLOOR IS DERIVED, NOT TUNED. Every normal map in this engine is
+// RGBA8, so a stored unit normal decodes with a per-component error of at most
+// half a step: 1/255 in [-1, 1] units. The length error is therefore bounded by
+// sqrt(3)/255 = 0.0068, and a |n| within that of 1.0 carries NO information - it
+// is indistinguishable from encoding noise on a perfectly flat texel. Feeding it
+// to the formula above would be catastrophic rather than merely inaccurate,
+// because at low roughness `power` is enormous (781246 at roughness 0.04) and ft
+// is correspondingly tiny: a length of 0.9932 that is pure quantisation would
+// widen roughness 0.1 to 0.42 across every flat surface in the scene. So the
+// deficit is relieved by exactly that bound and no more. This is the one constant
+// here, and it comes from the texture format rather than from an eyeball.
+#define DAWNING_UNORM8_NORMAL_LENGTH_EPSILON 0.0068f
+
+float DawningToksvigRoughness(float roughness, float normalLength)
+{
+    // Relieve the quantisation floor, then clamp. The lower bound keeps ft
+    // finite; a normal map texel whose decoded length is under 1/1000 is not a
+    // normal, it is a hole, and widening to roughness 1 is the right answer there.
+    float len = clamp(normalLength + DAWNING_UNORM8_NORMAL_LENGTH_EPSILON, 1e-3f, 1.0f);
+
+    float alpha  = max(roughness * roughness, 1e-4f);
+    float power  = max(2.0f / (alpha * alpha) - 2.0f, 0.0f);
+    float ft     = len / max(len + power * (1.0f - len), 1e-8f);
+    float power2 = ft * power;
+    float alpha2 = sqrt(2.0f / (power2 + 2.0f));
+
+    // max() rather than assignment: the algebra already guarantees alpha2 >= alpha
+    // at len <= 1, and this makes a future edit that breaks that property fail
+    // safe rather than SHARPEN a surface. Toksvig may only ever add roughness.
+    return saturate(max(sqrt(alpha2), roughness));
+}
+
 #endif // THE_DAWNING_IBL_COMMON_HLSLI
