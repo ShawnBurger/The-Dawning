@@ -871,6 +871,54 @@ int App::RunMainLoop()
                                  static_cast<unsigned long long>(m_frameCount));
             }
 
+            // THE DXR IBL PROBE PAIR, on PATH-TRACED frames.
+            //
+            // Scheduled two and three frames after path tracing takes over rather
+            // than at the end of the run, for one reason: the control frame
+            // renders with the environment switched off, and putting it adjacent
+            // to the CAPTURE frame would mean the captured image sat one frame
+            // after a deliberately wrong one. It does not actually matter here -
+            // the demo spins continuously, so the scene signature changes every
+            // frame and rt_accumulation_frame is 0 at the end of every run, which
+            // the harness already asserts - but relying on that would make this
+            // schedule depend on a property of the demo scene rather than on the
+            // probe's own requirements.
+            //
+            // smokeRTStartFrame + 1 is the first frame on which path tracing is
+            // certainly running: the switch happens at smokeRTStartFrame, and
+            // EnsurePathTracing can fail there and fall back.
+            //
+            // Armed only when --smoke-rt is on. Under -RasterOnly there is no
+            // dispatch, so the flags stay false and the markers are ABSENT rather
+            // than green - which is what the harness checks.
+            // STABLE PREVIEW ONLY, and that is a real restriction rather than a
+            // convenience. This probe observes the stable preview's environment
+            // block; under --rt-quality=full that branch does not execute at all,
+            // so arming it there would produce a dispatch that wrote nothing and
+            // a verdict of "failed" for a feature that is correctly absent.
+            // The harness asserts these markers are ABSENT in the full mode, so
+            // the restriction is visible rather than silent.
+            const bool rtStablePreview =
+                m_rtQualityMode == render::RTQualityMode::StablePreview;
+
+            if (m_options.smokeRT && rtStablePreview && !m_smokeRTIBLControlRequested &&
+                m_smokeRTStarted && m_frameCount >= smokeRTStartFrame + 1)
+            {
+                m_smokeRTIBLControlRequested = true;
+                m_verifyRTIBLControlThisFrame = true;
+                core::Log::Infof("[SMOKE] rt_ibl_consume_control_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+            }
+            else if (m_options.smokeRT && rtStablePreview && !m_smokeRTIBLConsumeRequested &&
+                     m_smokeRTIBLControlRequested && m_smokeRTStarted &&
+                     m_frameCount >= smokeRTStartFrame + 2)
+            {
+                m_smokeRTIBLConsumeRequested = true;
+                m_verifyRTIBLConsumeThisFrame = true;
+                core::Log::Infof("[SMOKE] rt_ibl_consume_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+            }
+
             if (m_frameCount >= smokeEndFrame)
             {
                 // CAPTURE ONLY. m_verifyShadowThisFrame used to be raised here
@@ -1381,6 +1429,15 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     const bool probeIBLControl = m_verifyIBLControlThisFrame && !renderedPathTracing;
     const bool probeIBLConsume = m_verifyIBLConsumeThisFrame && !renderedPathTracing;
 
+    // The DXR twins, and the SAME pair structure for the same reason. Gated on
+    // `renderedPathTracing` - the very predicate that selects the render branch
+    // below - rather than on m_usePathTracing, so they run exactly when there is
+    // a dispatch to observe. That is the lesson the shadow probe was rebuilt to
+    // learn: a probe armed on a frame its shader does not run on is an assertion
+    // that exists and is never reached.
+    const bool probeRTIBLControl = m_verifyRTIBLControlThisFrame && renderedPathTracing;
+    const bool probeRTIBLConsume = m_verifyRTIBLConsumeThisFrame && renderedPathTracing;
+
     // ONE flag arms the pixel-stage probe permutation, because basic_ps writes
     // BOTH probes from the same PSO behind the same root-constant gate. Keeping
     // the ARMING unified is deliberate: two schedules that must stay in step is
@@ -1422,8 +1479,37 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         const core::Vec3f lightDirection = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
         const core::Vec3f lightColor = { 1.0f, 0.97f, 0.92f };
         const core::Vec3f ambientColor = { 0.12f, 0.14f, 0.22f };
+
+        // The environment the DXR stable preview shades with. It is the
+        // RENDERER'S EnvironmentIBL - the same cube and the same nine SH
+        // coefficients basic_ps.hlsl uses - not a second bake. That is what makes
+        // the raster/DXR agreement structural rather than something a test has to
+        // police.
+        render::RTEnvironmentInputs rtEnvironment = {};
+        rtEnvironment.ibl        = &m_renderer.Environment();
+        rtEnvironment.intensity  = m_renderer.IBLIntensity();
+        rtEnvironment.disabled   = probeRTIBLControl;
+        rtEnvironment.probeWrite = probeRTIBLControl || probeRTIBLConsume;
+
+        // Zeroing the probe block has to happen BEFORE the dispatch that writes
+        // it, on the same command list. See PathTracer::PrepareIBLProbe for why
+        // an uncleared block would make the control frame report the live
+        // frame's answer.
+        if (rtEnvironment.probeWrite &&
+            !m_scene.GetPathTracer()->PrepareIBLProbe(m_device))
+            return false;
+
         m_scene.PathTraceEntities(
-            m_device, m_camera, lightDirection, lightColor, ambientColor, m_rtQualityMode);
+            m_device, m_camera, lightDirection, lightColor, ambientColor,
+            m_rtQualityMode, rtEnvironment);
+
+        if (rtEnvironment.probeWrite &&
+            !m_scene.GetPathTracer()->RecordIBLProbeReadback(m_device))
+        {
+            core::Log::Error("DXR IBL probe readback could not be recorded");
+            return false;
+        }
+
         m_scene.CopyPathTraceToBackBuffer(m_device);
 
         if (m_debugOverlayReady && m_showDebugOverlay)
@@ -1559,12 +1645,75 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         gpuRetiredForReadback = true;
     }
 
-    if ((probeShadow || probeDrawRecords || probeIBLControl || probeIBLConsume) &&
+    if ((probeShadow || probeDrawRecords || probeIBLControl || probeIBLConsume ||
+         probeRTIBLControl || probeRTIBLConsume) &&
         !gpuRetiredForReadback)
     {
         if (!m_device.WaitForGpu())
             return false;
         gpuRetiredForReadback = true;
+    }
+
+    // The DXR IBL consumption probe, both frames. Reduced by the SAME SHIPPED
+    // ReduceIBLConsumeProbe the raster probe uses, so the two paths' markers are
+    // the same quantities computed the same way and can be read side by side.
+    //
+    // The marker keys are DISTINCT from the raster ones and from each other, and
+    // that shape is mandatory rather than tidy: smoke_test.ps1 stores markers in
+    // a hashtable, so a shared key would collapse a pair to whichever logged last
+    // and the harness would assert one frame twice while believing it had checked
+    // both.
+    if (probeRTIBLControl || probeRTIBLConsume)
+    {
+        const bool live = probeRTIBLConsume;
+        m_verifyRTIBLControlThisFrame = false;
+        m_verifyRTIBLConsumeThisFrame = false;
+
+        render::IBLConsumeValidation ibl = {};
+        if (!m_scene.GetPathTracer()->ReadIBLProbe(ibl, live))
+        {
+            core::Log::Error("DXR IBL consumption probe readback failed");
+            return false;
+        }
+
+        const char* prefix = live ? "rt_ibl_consume" : "rt_ibl_consume_control";
+        core::Log::Infof(
+            "[SMOKE] %s=%s %s_shaded_pixels=%u %s_cube_samples=%u "
+            "%s_env_zero_pixels=%u",
+            prefix, ibl.ok ? "ok" : "failed",
+            prefix, ibl.shadedPixels,
+            prefix, ibl.cubeSamples,
+            prefix, ibl.envZeroPixels);
+        core::Log::Infof(
+            "[SMOKE] %s_spec_max=%.6f %s_diffuse_max=%.6f %s_in_final_max=%.6f "
+            "%s_radiance_max=%.6f %s_mirror_max=%.6f %s_sky_rel_err=%.6f",
+            prefix, ibl.envSpecularMax,
+            prefix, ibl.envDiffuseMax,
+            prefix, ibl.envInFinalMax,
+            prefix, ibl.radianceMax,
+            prefix, ibl.mirrorLuminanceMax,
+            prefix, ibl.skyRelError);
+        core::Log::Infof(
+            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s",
+            prefix, ibl.reachedOk ? "ok" : "failed",
+            prefix, ibl.consumptionOk ? "ok" : "failed",
+            prefix, ibl.identityOk ? "ok" : "failed");
+
+        if (!ibl.ok)
+        {
+            if (live)
+                core::Log::Error(
+                    "path_trace.hlsl's stable preview did not consume the environment "
+                    "cube as shipped: the DXR path either skipped the IBL terms, "
+                    "dropped them out of the radiance sum, or sampled a resource that "
+                    "is not the prefiltered sky at t0/space8");
+            else
+                core::Log::Error(
+                    "The DXR IBL probe's NEGATIVE CONTROL failed: with iblParams.z "
+                    "forced to 0 the environment terms did not vanish from the stable "
+                    "preview. That means the live assertion beside it proves nothing - "
+                    "it would pass with the feature absent");
+        }
     }
 
     // The IBL consumption probe, both frames. Reduced by the SHIPPED

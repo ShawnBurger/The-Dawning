@@ -681,7 +681,22 @@ static constexpr uint32_t kRTEnvCubeDescriptorBase = kRTEmissiveDescriptorBase +
 
 **Cost: +1 descriptor per frame slot, +3 total. Zero root DWORDs** — it is a new
 range appended to the existing root parameter 8 table (`rt_pipeline.cpp:116-149`),
-at `t0, space8`, `OffsetInDescriptorsFromTableStart = 258`.
+at `t0, space8`.
+
+> **CORRECTED AS BUILT.** This paragraph said
+> `OffsetInDescriptorsFromTableStart = 258`. **That is wrong**, and wrong in the
+> direction that indexes one descriptor past the end of a 259-entry heap.
+> `PathTracer::Dispatch` binds root parameter 8 at the **albedo base**
+> (`kRTAlbedoDescriptorBase = 2`), not at the heap start — which is why the four
+> existing ranges carry 0 / 64 / 128 / 192 rather than 2 / 66 / 130 / 194. The
+> offset is **table-relative**, so the cube's is `258 - 2 = 256`. Shipped as
+> `kMaxRTAlbedoTextures + kMaxRTNormalTextures + kMaxRTOrmTextures +
+> kMaxRTEmissiveTextures`, with a `static_assert` in `path_tracer.cpp` pinning
+> that expression to `kRTEnvCubeDescriptorBase - kRTAlbedoDescriptorBase` so the
+> two arithmetics cannot drift apart silently.
+>
+> The heap numbers in the block above (258 → 259) were verified correct against
+> the tree.
 
 **Root signature (`rt_pipeline.cpp:58`, `172-177`):** the global RT root signature
 currently costs 16 DWORDs (1 root SRV ×1 = 2, UAV table = 1, CBV = 2, root SRVs
@@ -690,6 +705,23 @@ divergence probe (§11 Stage 5) adds one **root UAV** at `u0, space9` for +2, so
 **DXR total 16 → 18 of 64.** Following the raster draw probe's precedent
 (`renderer.cpp:980-998`), a root UAV rather than a table keeps it out of the heap
 entirely.
+
+> **VERIFIED AND AMENDED AS BUILT.** The 16-DWORD baseline was **counted from
+> `RTPipeline::CreateGlobalRootSignature` and is correct**, as is "adding the
+> range costs nothing" — the cube is genuinely free.
+>
+> The +2 arrived at Stage 4 rather than Stage 5, and for a different probe. What
+> Stage 4 needed was not a raster/DXR *numeric agreement* probe but a DXR
+> **consumption** probe, for the same reason the raster path needed one: every
+> startup assertion and the entire raster consumption block stay green with the
+> DXR stable preview sampling no environment at all, and stay green with the
+> wrong descriptor bound at `t0/space8`. Both were measured, not argued.
+>
+> Shipped at `u0, space4` (not `space9` — `space4` matches the raster probe's
+> convention and nothing else in this shader claims it). **DXR total 16 → 18 of
+> 64**, exactly as predicted; only the attribution moved. The same lesson Stage 3
+> recorded applies again: *a descriptor costs a root DWORD only when something
+> binds it, and evidence costs DWORDs of its own.*
 
 The cube resource is **shared** — one resource, one SRV descriptor written into
 each of the three RT heaps and one into the raster heap. It is immutable after

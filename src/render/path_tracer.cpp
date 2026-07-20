@@ -20,6 +20,24 @@ static constexpr uint32_t kRTAlbedoDescriptorBase = kRTUavDescriptorCount;
 static constexpr uint32_t kRTNormalDescriptorBase = kRTAlbedoDescriptorBase + kMaxRTAlbedoTextures;
 static constexpr uint32_t kRTOrmDescriptorBase    = kRTNormalDescriptorBase + kMaxRTNormalTextures;
 static constexpr uint32_t kRTEmissiveDescriptorBase = kRTOrmDescriptorBase + kMaxRTOrmTextures;
+// The prefiltered environment cubemap's SRV. ONE descriptor, after the four
+// 64-entry material tables, so the heap goes 258 -> 259 per frame slot.
+//
+// The root signature's fifth range carries the TABLE-RELATIVE offset, which is
+// this minus kRTAlbedoDescriptorBase (the index the table is actually bound at),
+// not this value itself. The assertion below is what keeps the two arithmetics
+// from drifting apart silently.
+static constexpr uint32_t kRTEnvCubeDescriptorBase = kRTEmissiveDescriptorBase + kMaxRTEmissiveTextures;
+static constexpr uint32_t kRTDescriptorsPerFrame   = kRTEnvCubeDescriptorBase + 1;
+static_assert(kRTEnvCubeDescriptorBase == 258,
+              "The env cube SRV must follow the four material tables at heap index 258");
+static_assert(kRTDescriptorsPerFrame == 259,
+              "RT descriptor heap is 259 per frame slot as of IBL Stage 4");
+static_assert(kRTEnvCubeDescriptorBase - kRTAlbedoDescriptorBase ==
+                  kMaxRTAlbedoTextures + kMaxRTNormalTextures + kMaxRTOrmTextures +
+                  kMaxRTEmissiveTextures,
+              "The env cube's table-relative offset in RTPipeline::CreateGlobalRootSignature "
+              "must equal its heap index minus the index the table is bound at");
 
 static bool CreateMappedUploadBuffer(
     ID3D12Device5* device,
@@ -101,6 +119,7 @@ bool PathTracer::Init(D3D12Device& device)
     if (!CreateDescriptorHeap(dev5)) return false;
     if (!CreateOutputTexture(dev5, device.Width(), device.Height())) return false;
     if (!CreateConstantBuffer(dev5)) return false;
+    if (!CreateIBLProbeResources(dev5)) return false;
 
     m_initialized = true;
     core::Log::Info("PathTracer initialized");
@@ -133,6 +152,12 @@ void PathTracer::Shutdown()
     m_trianglePositionBuffers.Reset();
     for (auto& cb : m_constantBuffer) cb.Reset();
 
+    for (auto& probe : m_iblProbeBuffer) probe.Reset();
+    m_iblProbeZeroUpload.Reset();
+    m_iblProbeReadback.Reset();
+    m_iblProbeReadbackPending = false;
+    for (auto& cube : m_boundEnvCube) cube = nullptr;
+
     m_srvUavDescSize = 0;
     for (uint32_t i = 0; i < kFrameCount; ++i)
     {
@@ -159,7 +184,7 @@ void PathTracer::Shutdown()
 bool PathTracer::CreateDescriptorHeap(ID3D12Device5* device)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = kRTEmissiveDescriptorBase + kMaxRTEmissiveTextures;
+    heapDesc.NumDescriptors = kRTDescriptorsPerFrame;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -212,6 +237,26 @@ void PathTracer::ClearMaterialTextureDescriptors(ID3D12Device5* device)
         clearRange(m_srvUavHeap[i].Get(), kRTNormalDescriptorBase, kMaxRTNormalTextures);
         clearRange(m_srvUavHeap[i].Get(), kRTOrmDescriptorBase, kMaxRTOrmTextures);
         clearRange(m_srvUavHeap[i].Get(), kRTEmissiveDescriptorBase, kMaxRTEmissiveTextures);
+
+        // The env cube's slot needs a CUBE null SRV, not the TEXTURE2D one
+        // above: a descriptor whose ViewDimension disagrees with the shader's
+        // TextureCube declaration is not merely wrong, it is a debug-layer error.
+        // The slot must hold something valid on every frame because the table is
+        // bound unconditionally, and until EnvironmentIBL has baked, this is what
+        // it holds. The shader never reads it - iblParams.z is 0 in exactly that
+        // case - but "never read" is a property of the shader's control flow, and
+        // leaving an invalid descriptor behind it would be relying on that.
+        D3D12_SHADER_RESOURCE_VIEW_DESC nullCube = {};
+        nullCube.Format                  = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        nullCube.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        nullCube.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        nullCube.TextureCube.MipLevels   = 1;
+        D3D12_CPU_DESCRIPTOR_HANDLE envHandle =
+            m_srvUavHeap[i]->GetCPUDescriptorHandleForHeapStart();
+        envHandle.ptr += static_cast<SIZE_T>(kRTEnvCubeDescriptorBase) * m_srvUavDescSize;
+        device->CreateShaderResourceView(nullptr, &nullCube, envHandle);
+        m_boundEnvCube[i] = nullptr;
+
         m_boundAlbedoTextureCount[i] = 0;
         m_boundAlbedoTextureResources[i].fill(nullptr);
         m_boundNormalTextureCount[i] = 0;
@@ -448,6 +493,199 @@ bool PathTracer::CreateConstantBuffer(ID3D12Device5* device)
     return true;
 }
 
+// =============================================================================
+// The DXR IBL consumption probe's resources
+// =============================================================================
+// Deliberately the same shape as Renderer::EnsureIBLConsumeProbeResources: a
+// DEFAULT-heap block per frame in flight, one zero-filled UPLOAD buffer to clear
+// it from, and one READBACK buffer. Same 64-byte layout, same reduction. Where
+// the raster version differs is that this one is created in Init rather than
+// lazily, because the path tracer has a single construction point.
+bool PathTracer::CreateIBLProbeResources(ID3D12Device5* device)
+{
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = sizeof(IBLConsumeProbeBlock);
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        const HRESULT hr = device->CreateCommittedResource(
+            &defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+            IID_PPV_ARGS(&m_iblProbeBuffer[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("DXR IBL probe UAV allocation failed for slot %u: 0x%08X", i, hr);
+            return false;
+        }
+        wchar_t name[64];
+        swprintf_s(name, L"RT_IBLConsumeProbe[%u]", i);
+        m_iblProbeBuffer[i]->SetName(name);
+    }
+
+    desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    HRESULT hr = device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&m_iblProbeZeroUpload));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("DXR IBL probe clear upload allocation failed: 0x%08X", hr);
+        return false;
+    }
+    m_iblProbeZeroUpload->SetName(L"RT_IBLConsumeProbeZeroUpload");
+
+    void* mapped = nullptr;
+    const D3D12_RANGE noRead = { 0, 0 };
+    hr = m_iblProbeZeroUpload->Map(0, &noRead, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("DXR IBL probe clear upload map failed: 0x%08X", hr);
+        return false;
+    }
+    std::memset(mapped, 0, sizeof(IBLConsumeProbeBlock));
+    m_iblProbeZeroUpload->Unmap(0, nullptr);
+
+    D3D12_HEAP_PROPERTIES readbackHeap = {};
+    readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    hr = device->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&m_iblProbeReadback));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("DXR IBL probe readback allocation failed: 0x%08X", hr);
+        return false;
+    }
+    m_iblProbeReadback->SetName(L"RT_IBLConsumeProbeReadback");
+    return true;
+}
+
+// ZEROING IS THE WHOLE CONTRACT, exactly as on the raster side. Every word is an
+// InterlockedMax or an InterlockedAdd from a zero start, so a block that was not
+// cleared carries the previously probed dispatch's answer - and on the control
+// frame the previously probed dispatch is the LIVE one, which would make the
+// control pass while reporting the opposite of the truth.
+bool PathTracer::PrepareIBLProbe(D3D12Device& device)
+{
+    const uint32_t slot = device.FrameIndex();
+    if (!m_iblProbeBuffer[slot] || !m_iblProbeZeroUpload)
+    {
+        core::Log::Error("DXR IBL probe resources are unavailable");
+        return false;
+    }
+
+    auto* cmd = device.CmdList();
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource   = m_iblProbeBuffer[slot].Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
+    cmd->ResourceBarrier(1, &barrier);
+    cmd->CopyBufferRegion(m_iblProbeBuffer[slot].Get(), 0,
+                          m_iblProbeZeroUpload.Get(), 0, sizeof(IBLConsumeProbeBlock));
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &barrier);
+    return true;
+}
+
+bool PathTracer::RecordIBLProbeReadback(D3D12Device& device)
+{
+    const uint32_t slot = device.FrameIndex();
+    if (!m_iblProbeBuffer[slot] || !m_iblProbeReadback)
+        return false;
+
+    auto* cmd = device.CmdList();
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = m_iblProbeBuffer[slot].Get();
+    cmd->ResourceBarrier(1, &uavBarrier);
+
+    D3D12_RESOURCE_BARRIER transition = {};
+    transition.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    transition.Transition.pResource   = m_iblProbeBuffer[slot].Get();
+    transition.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    transition.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    transition.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd->ResourceBarrier(1, &transition);
+    cmd->CopyBufferRegion(m_iblProbeReadback.Get(), 0,
+                          m_iblProbeBuffer[slot].Get(), 0,
+                          sizeof(IBLConsumeProbeBlock));
+    std::swap(transition.Transition.StateBefore, transition.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &transition);
+    m_iblProbeReadbackPending = true;
+    return true;
+}
+
+bool PathTracer::ReadIBLProbe(IBLConsumeValidation& validation, bool iblExpectedActive)
+{
+    validation = {};
+    if (!m_iblProbeReadbackPending || !m_iblProbeReadback) return false;
+    m_iblProbeReadbackPending = false;
+
+    const D3D12_RANGE readRange = { 0, sizeof(IBLConsumeProbeBlock) };
+    void* mapped = nullptr;
+    const HRESULT hr = m_iblProbeReadback->Map(0, &readRange, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("DXR IBL probe readback map failed: 0x%08X", hr);
+        return false;
+    }
+
+    IBLConsumeProbeBlock block = {};
+    std::memcpy(&block, mapped, sizeof(block));
+
+    const D3D12_RANGE noWrite = { 0, 0 };
+    m_iblProbeReadback->Unmap(0, &noWrite);
+
+    // THE SAME SHIPPED REDUCTION the raster probe uses. Not a copy of it - the
+    // verdict logic has one definition, covered by the CPU cases in
+    // tests/test_ibl_consume_probe.cpp, and both paths' markers are therefore
+    // the same numbers computed the same way.
+    validation = ReduceIBLConsumeProbe(block, iblExpectedActive);
+    return true;
+}
+
+// Writes the cube's SRV into this frame slot's reserved descriptor. Returns
+// whether a real cube landed there - the single input to iblParams.z, so a cube
+// that failed to bake switches the environment off rather than leaving the
+// shader to sample a null descriptor and shade from black.
+bool PathTracer::UpdateEnvironmentDescriptor(ID3D12Device5* device, const EnvironmentIBL* ibl)
+{
+    if (!device || m_srvUavDescSize == 0 || !m_srvUavHeap[m_frameIndex])
+        return false;
+    if (!ibl || !ibl->IsBuilt() || !ibl->Cube())
+        return false;
+
+    // Rewritten only when the resource changes. EnvironmentIBL rebakes behind a
+    // REVISION COUNTER and can in principle hand back a different resource, so
+    // this compares the pointer rather than assuming a one-time write.
+    if (m_boundEnvCube[m_frameIndex] == ibl->Cube())
+        return true;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE handle =
+        m_srvUavHeap[m_frameIndex]->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(kRTEnvCubeDescriptorBase) * m_srvUavDescSize;
+
+    // EnvironmentIBL owns the view description - format, mip count, cube
+    // dimension - so the raster and DXR descriptors are written by ONE function
+    // and cannot drift into describing the same resource two ways.
+    ibl->WriteCubeSRV(device, handle);
+    m_boundEnvCube[m_frameIndex] = ibl->Cube();
+    return true;
+}
 
 // =============================================================================
 // Dispatch — execute the path tracer for one frame
@@ -526,7 +764,8 @@ void PathTracer::Dispatch(
     uint32_t emissiveTextureCount,
     uint32_t instanceCount,
     uint64_t sceneSignature,
-    RTQualityMode qualityMode)
+    RTQualityMode qualityMode,
+    const RTEnvironmentInputs& environment)
 {
     if (!m_initialized) return;
 
@@ -658,6 +897,36 @@ void PathTracer::Dispatch(
     // from, so the cone can never describe a different frustum than the rays.
     cb.primaryConeSpread = PrimaryRayConeSpreadAngle(cb.tanHalfFovY, m_outputHeight);
 
+    // -------------------------------------------------------------------------
+    // Image-based lighting, for the STABLE PREVIEW.
+    // -------------------------------------------------------------------------
+    // The descriptor is written first, because iblParams.z is a claim about what
+    // is actually bound at t0/space8 on THIS frame slot, not about what the
+    // Renderer believes it baked.
+    const bool envBound = UpdateEnvironmentDescriptor(device.Device5(), environment.ibl);
+
+    if (envBound)
+    {
+        const core::SHColor9& sh = environment.ibl->IrradianceCoefficients();
+        for (uint32_t i = 0; i < 9; ++i)
+        {
+            cb.iblSH[i][0] = sh.c[i].x;
+            cb.iblSH[i][1] = sh.c[i].y;
+            cb.iblSH[i][2] = sh.c[i].z;
+            cb.iblSH[i][3] = 0.0f;
+        }
+    }
+
+    cb.iblParams[0] = static_cast<float>(kEnvCubeMips);
+    cb.iblParams[1] = environment.intensity;
+    // TWO inputs, matching Renderer::BeginFrame's iblParams.z exactly: the cube
+    // must really be bound, AND the negative control must not have switched it
+    // off for this dispatch. A kill switch no code path can enter is not a
+    // reachable state, and an unreachable state cannot be the control frame.
+    cb.iblParams[2] = (envBound && !environment.disabled) ? 1.0f : 0.0f;
+    // The probe write gate. Raised on the two probe dispatches only.
+    cb.iblParams[3] = environment.probeWrite ? 1.0f : 0.0f;
+
     // Fires on the first dispatch and on any resize or FOV change, not per frame.
     // A spread of exactly 0 means every hit would clamp to mip 0 - the defect
     // ray cones replaced - so it is worth being able to see the number.
@@ -753,6 +1022,12 @@ void PathTracer::Dispatch(
         m_srvUavHeap[m_frameIndex]->GetGPUDescriptorHandleForHeapStart();
     textureTable.ptr += static_cast<UINT64>(kRTAlbedoDescriptorBase) * m_srvUavDescSize;
     cmd->SetComputeRootDescriptorTable(8, textureTable);
+    // [9] The IBL consumption probe's raw buffer. Bound on EVERY dispatch: a
+    // root descriptor cannot be left unset once the shader declares the
+    // resource, so the gate is iblParams.w inside the shader, not this bind.
+    if (m_iblProbeBuffer[m_frameIndex])
+        cmd->SetComputeRootUnorderedAccessView(
+            9, m_iblProbeBuffer[m_frameIndex]->GetGPUVirtualAddress());
 
     // --- DispatchRays ---
     D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};

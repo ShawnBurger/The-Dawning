@@ -51,11 +51,29 @@ void RTPipeline::Shutdown()
 //   [5] SRV - instance metadata StructuredBuffer (t3, space0)
 //   [6] SRV - triangle UV StructuredBuffer (t4, space0)
 //   [7] SRV - triangle positions (t5)
-//   [8] SRV descriptor table - albedo (t0 space4), normal (t0 space5), ORM (t0 space6)
+//   [8] SRV descriptor table - albedo (t0 space4), normal (t0 space5), ORM (t0
+//       space6), emissive (t0 space7), environment cube (t0 space8)
+//   [9] UAV - the IBL consumption probe's raw buffer (u0 space4)
+//
+// ROOT DWORD COST, counted from this function rather than taken from the design:
+//   [0] root SRV                2      [5] root SRV                2
+//   [1] descriptor table        1      [6] root SRV                2
+//   [2] root CBV                2      [7] root SRV                2
+//   [3] root SRV                2      [8] descriptor table        1
+//   [4] root SRV                2      [9] root UAV                2
+// Total 16 -> 18 of the 64 available.
+//
+// THE ENVIRONMENT CUBE ITSELF COSTS ZERO DWORDs: it is a fifth range inside the
+// table [8] already binds, and extra ranges in an existing table are free. The
+// two DWORDs above are spent entirely on the EVIDENCE that the cube is consumed
+// - the same trade the raster path made when its root signature went 16 -> 18
+// for the same probe, and the same justification: without it every IBL assertion
+// in this tree passes with the cube unsampled and with the wrong descriptor
+// bound at t0/space8.
 // =============================================================================
 bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
 {
-    D3D12_ROOT_PARAMETER rootParams[9] = {};
+    D3D12_ROOT_PARAMETER rootParams[10] = {};
 
     // Slot 0: TLAS SRV (t0)
     rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -112,8 +130,9 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     rootParams[7].Descriptor.RegisterSpace  = 0;
     rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Slot 8: Material texture descriptor table (albedo space4, normal space5, ORM space6)
-    D3D12_DESCRIPTOR_RANGE textureRanges[4] = {};
+    // Slot 8: Material texture descriptor table (albedo space4, normal space5,
+    // ORM space6, emissive space7, environment cube space8)
+    D3D12_DESCRIPTOR_RANGE textureRanges[5] = {};
     textureRanges[0].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     textureRanges[0].NumDescriptors     = kMaxRTAlbedoTextures;
     textureRanges[0].BaseShaderRegister = 0;
@@ -143,10 +162,39 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     textureRanges[3].OffsetInDescriptorsFromTableStart =
         kMaxRTAlbedoTextures + kMaxRTNormalTextures + kMaxRTOrmTextures;
 
+    // The prefiltered environment cubemap, at t0/space8. ONE descriptor.
+    //
+    // THE OFFSET IS TABLE-RELATIVE, NOT HEAP-RELATIVE, and that distinction is
+    // the whole bug waiting here. PathTracer binds this table at the ALBEDO base
+    // (heap index kRTAlbedoDescriptorBase = 2), not at the heap start, which is
+    // why the four ranges above read 0 / 64 / 128 / 192 rather than 2 / 66 / 130
+    // / 194. The cube lives at heap index 258, so its table-relative offset is
+    // 258 - 2 = 256. IBL_DESIGN.md 6.x says 258; that is wrong, and it is wrong
+    // in the direction that reads past the end of a 259-descriptor heap.
+    textureRanges[4].RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRanges[4].NumDescriptors     = 1;
+    textureRanges[4].BaseShaderRegister = 0;
+    textureRanges[4].RegisterSpace      = 8;
+    textureRanges[4].OffsetInDescriptorsFromTableStart =
+        kMaxRTAlbedoTextures + kMaxRTNormalTextures + kMaxRTOrmTextures +
+        kMaxRTEmissiveTextures;
+
     rootParams[8].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParams[8].DescriptorTable.NumDescriptorRanges = _countof(textureRanges);
     rootParams[8].DescriptorTable.pDescriptorRanges   = textureRanges;
     rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Slot 9: the IBL consumption probe's raw buffer UAV (u0, space4).
+    //
+    // A ROOT UAV rather than a table entry: it costs 2 DWORDs and no heap slot,
+    // and a root descriptor is exactly what a RWByteAddressBuffer supports. It
+    // must be bound on EVERY dispatch - a root descriptor cannot be left unset
+    // once the shader declares it - so the WRITES are gated inside the shader on
+    // RTPerFrameConstants::iblParams.w instead.
+    rootParams[9].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    rootParams[9].Descriptor.ShaderRegister = 0;
+    rootParams[9].Descriptor.RegisterSpace  = 4;
+    rootParams[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     // Deliberately NOT anisotropic, unlike the raster sampler. path_trace.hlsl
@@ -168,12 +216,33 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     sampler.RegisterSpace    = 0;
     sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    // s1: the environment cube's sampler. Trilinear and CLAMP, matching the
+    // raster path's s2 exactly.
+    //
+    // TRILINEAR IS LOAD-BEARING HERE in a way it is not for s0 above.
+    // DawningPrefilteredRadiance selects the mip ANALYTICALLY from roughness and
+    // calls SampleLevel with a fractional level, so MIP_LINEAR is what makes
+    // roughness a continuous parameter rather than eight visible bands. The
+    // address modes are inert - cube lookups never consult the 2-D modes, which
+    // CLAUDE.md already records as the reason assertion 3.3 cannot catch a WRAP
+    // sampler - and are set to CLAMP anyway so the two paths do not differ on a
+    // line a reader would otherwise have to go and check.
+    D3D12_STATIC_SAMPLER_DESC envSampler = sampler;
+    envSampler.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    envSampler.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    envSampler.ShaderRegister = 1;
+    envSampler.RegisterSpace  = 0;
+
+    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { sampler, envSampler };
+
     // Root signature description
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
     rsDesc.NumParameters     = _countof(rootParams);
     rsDesc.pParameters       = rootParams;
-    rsDesc.NumStaticSamplers = 1;
-    rsDesc.pStaticSamplers   = &sampler;
+    rsDesc.NumStaticSamplers = _countof(staticSamplers);
+    rsDesc.pStaticSamplers   = staticSamplers;
     rsDesc.Flags             = D3D12_ROOT_SIGNATURE_FLAG_NONE; // No IA for RT
 
     ComPtr<ID3DBlob> sigBlob, errorBlob;
@@ -197,7 +266,7 @@ bool RTPipeline::CreateGlobalRootSignature(ID3D12Device5* device)
     }
 
     m_globalRootSig->SetName(L"RT_GlobalRootSig");
-    core::Log::Info("RT global root signature created (9 params: TLAS, UAVs, CB, materials, normals, instances, UVs, positions, material textures)");
+    core::Log::Info("RT global root signature created (10 params: TLAS, UAVs, CB, materials, normals, instances, UVs, positions, material textures + env cube, IBL probe UAV)");
     return true;
 }
 
