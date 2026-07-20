@@ -5,6 +5,7 @@
 #include "path_tracer.h"
 
 #include <cmath>   // std::tan for the camera FOV term
+#include "rt_texture_lod.h"   // PrimaryRayConeSpreadAngle for the ray-cone LOD
 #include "../core/log.h"
 #include <algorithm>
 #include <cstring>
@@ -652,6 +653,21 @@ void PathTracer::Dispatch(
     cb.stablePreview = quality.stablePreview;
     // Sourced from the camera so the DXR frustum cannot drift from the raster one.
     cb.tanHalfFovY   = std::tan(camera.GetFOV() * (3.14159265358979323846f / 180.0f) * 0.5f);
+    // Ray-cone texture LOD: one pixel of output height of angular spread per unit
+    // distance. Derived from the SAME tanHalfFovY the ray directions are built
+    // from, so the cone can never describe a different frustum than the rays.
+    cb.primaryConeSpread = PrimaryRayConeSpreadAngle(cb.tanHalfFovY, m_outputHeight);
+
+    // Fires on the first dispatch and on any resize or FOV change, not per frame.
+    // A spread of exactly 0 means every hit would clamp to mip 0 - the defect
+    // ray cones replaced - so it is worth being able to see the number.
+    if (cb.primaryConeSpread != m_loggedConeSpread)
+    {
+        m_loggedConeSpread = cb.primaryConeSpread;
+        core::Log::Infof(
+            "[SMOKE] rt_texture_lod=ray_cone primary_cone_spread=%.8f render_height=%u",
+            static_cast<double>(cb.primaryConeSpread), m_outputHeight);
+    }
 
     memcpy(m_cbMapped[m_frameIndex], &cb, sizeof(cb));
 

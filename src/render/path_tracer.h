@@ -196,6 +196,10 @@ private:
     uint32_t m_accumFrameIndex = 0;   // Resets when the rendered view changes; drives accumulation
     uint32_t m_seedFrameCounter = 0;  // Never resets — drives RNG decorrelation
     uint32_t m_frameIndex = 0;        // Frame-in-flight slot (0..kFrameCount-1)
+    // Last ray-cone spread angle reported through the [SMOKE] log. Purely
+    // diagnostic: it exists so the marker fires once per distinct value rather
+    // than once per frame, which would drown the log.
+    float    m_loggedConeSpread = -1.0f;
     bool     m_hasPrevCamera = false;
     bool     m_hasPrevQuality = false;
     bool     m_hasPrevScene = false;

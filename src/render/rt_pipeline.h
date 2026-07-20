@@ -56,11 +56,20 @@ struct RTPerFrameConstants
     // about which pixels see what. Occupies the former alignment pad, so the
     // layout is unchanged.
     float tanHalfFovY;
+    // Primary ray-cone spread angle, radians per unit distance, from
+    // render::PrimaryRayConeSpreadAngle(tanHalfFovY, renderHeight). The shader
+    // could derive this from the two fields above in one line; it is passed
+    // instead so the formula lives in a GPU-free translation unit that
+    // tests/test_rt_texture_lod.cpp can actually compile and pin. See
+    // rt_texture_lod.h for exactly how much of the LOD path that does and does
+    // not cover. Sits at offset 208, the start of a fresh 16-byte cbuffer row,
+    // so no earlier field moves and HLSL packing needs no explicit padding.
+    float primaryConeSpread;
 };
 
 // Must stay byte-identical to cbuffer PerFrameConstants in shaders/path_trace.hlsl.
 // A silent mismatch here misaligns every field after the divergence point.
-static_assert(sizeof(RTPerFrameConstants) == 208,
+static_assert(sizeof(RTPerFrameConstants) == 212,
               "RTPerFrameConstants layout changed — update path_trace.hlsl to match");
 
 // =============================================================================
