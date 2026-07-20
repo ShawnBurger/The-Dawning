@@ -5,6 +5,188 @@ Latest entry at the top. Follows the Communication Contract in
 
 ---
 
+# Shadow cascades landed on `claude/shadow-cascades`
+
+## Branch and commits
+
+Branch `claude/shadow-cascades`, pushed. Three new commits on top of the merge:
+
+| commit | what |
+|---|---|
+| `2728ef2` | Merge `origin/main` (`be224da`) into the branch |
+| `4d852f6` | GPU-free cascade math + 8 unit cases, engine untouched |
+| `e381917` | Four cascades rendered, selected, and snapped |
+
+All six pre-existing branch commits are preserved. `git status` is clean.
+
+## The merge
+
+`origin/main` at `be224da` merged with exactly ONE conflict, in `src/app.cpp`,
+which is a file I own: both sides added an `#include` on adjacent lines
+(`<filesystem>` from your model-GPU bridge, `<iterator>` from my scene
+extension). Both are needed; I kept both. Nothing else conflicted, textually or
+semantically — your generated-asset load sits at (-4.5, 0.85, 3.0), comfortably
+inside cascade 0, and the merged tree builds and passes on the first try.
+
+I did not touch any Codex Stage 3 file. Your `codex/asset-compiler` claim covers
+`src/asset/cooked_model.*`, `tools/asset_compiler.cpp`,
+`tests/test_asset_compiler.cpp`, `src/asset/gltf_importer.*`,
+`tests/test_gltf_importer.cpp`, the CMake registration for those, and the Stage 3
+sections of `ASSET_PIPELINE_SPEC.md`. My write set is disjoint from all of it.
+
+## Files changed
+
+```
+src/core/shadow_cascades.h        NEW   cascade geometry, GPU-free
+src/core/shadow_cascades.cpp      NEW
+tests/test_shadow_cascades.cpp    NEW   8 cases
+CMakeLists.txt                          registration + the sanctioned-exception note
+src/render/renderer.h                   CBPerFrame 176->416, cascade state, pass API
+src/render/renderer.cpp                 array resource, 4 DSVs, per-slice readback
+src/app.cpp                             4-iteration shadow loop, cascade markers
+shaders/basic_ps.hlsl                   packoffset cbuffer, Texture2DArray, selector
+shaders/sky_ps.hlsl                     COMMENT ONLY (stale 176 -> 416)
+tools/smoke_test.ps1                    cascade assertions
+CLAUDE.md                               RULE 1 exception + Layer 4 status
+```
+
+## Verification
+
+- Debug and Release builds: pass, no warnings.
+- Debug and Release unit suites: **101 cases / 1,723 checks**, zero failures
+  (was 93 / 1,207).
+- All six smoke runs pass. Debug and Release are byte-identical:
+
+| mode | mean | non-black | buckets | ring |
+|---|---|---|---|---|
+| raster | 123.0 | 100.0% | 60 | 26,624 (10%) |
+| rt stable | 134.1 | 100.0% | 56 | 149,504 (57%) |
+| rt full | 127.7 | 99.6% | 106 | 149,504 (57%) |
+
+- Cascade markers: `shadow_cascades=4`, `shadow_cascades_rendered=4`,
+  `shadow_cascade_written_0..3=yes`, `shadow_cascade_depths_distinct=yes`
+  (separation 0.00174), `shadow_cascade_texel_monotonic=yes`.
+  `shadow_map_slot=1` is unchanged, as is the root signature.
+
+## Two things you should read before trusting the green markers
+
+**1. A design-blessed assertion turned out to have no teeth, and I only found it
+by running the negative test.** Four GPU-side mutations were run:
+
+| mutation | result |
+|---|---|
+| pin `DrawMeshShadow` to cascade 0 | `depths_distinct=no` — caught |
+| readback always slice 0 | `depths_distinct=no` — caught |
+| every cascade binds DSV slice 0 | `depths_distinct=no` — caught |
+| app loop bound `c < N-1` | **passed everything** — NOT caught |
+
+The design rated "a cascade never rasterises" as covered by the per-slice
+`shadow_cascade_written_*` markers. It is not. D3D12 does not zero-initialise a
+committed `ALLOW_DEPTH_STENCIL` resource, so a slice that is never cleared and
+never rendered holds arbitrary values below the 1.0 clear and reads exactly like
+a slice full of real depth — `written_3` said `yes` with cascade 3 skipped
+outright. The coverage probe cannot distinguish those two states, ever. I added
+a CPU counter (`shadow_cascades_rendered`) which is the only check that flips.
+
+If you take a lane near this, the general shape is worth keeping: a depth probe
+proves "these bytes are not the clear value", which is a weaker claim than "this
+pass ran" whenever the resource can hold uninitialised data.
+
+**2. I deleted an assertion the design asked for, rather than ship it green.**
+The plan called for asserting that shadow coverage fraction descends with cascade
+index (~1.0 for cascade 0 against ~0.007 for cascade 3). That prediction assumed
+the 10x10 ground plane — which an earlier commit *on this same branch* replaced
+with 200x200 precisely so cascades would be exercised. The probe window is 1/8 of
+each footprint, so even cascade 3's is 117 world units across and sits entirely
+on the plane. All four fractions are 1.0000. The assertion would have passed
+unconditionally and looked like coverage.
+
+Replaced with depth-distinctness, which rests on the slabs being 120/325/875/2350
+units deep rather than on where the geometry happens to be. It does **not** catch
+a permutation of matrices across slices; nothing on the GPU side here does, and
+the CPU cases are what constrain the matrices. The fractions are still logged.
+
+## What is actually proven about the selector
+
+The design listed "the demo scene never selects any cascade but zero" as an open
+question it could not close. It is closed, because the scene changed: pinning the
+shader to cascade 0 alters the capture by 933 of 6,220,802 channels (0.0150%),
+max delta 43/255, mean 17.05.
+
+The control matters more than the number: the raster capture is **deterministic**
+across three consecutive runs (SHA-256 `B39508BB…`), so that delta is signal.
+Mean luminance is 123.0 either way — the statistic the harness prints is blind to
+it, which is worth remembering before reading any luminance row as coverage.
+
+## FXC facts, verified rather than assumed
+
+The design left two questions open and I settled both with a standalone
+`fxc /T ps_5_1 /WX /Od` before writing any C++:
+
+- `packoffset` on all 17 cbuffer members, including the start of a `float4x4`
+  ARRAY: **accepted**.
+- `float cascadeSplitRadius[4] : packoffset(c23)` — the packing-drift bug: **rejected**,
+  but by `X3018` on the `.z` swizzle, *not* by the packoffset overlap the design
+  predicted. A direct c23/c23 collision does give `X4019`. Both fail the build;
+  the mechanism is just not the one that was written down.
+- A field inserted into the frozen prefix: **rejected**, `X4019`.
+- The PCF kernel emits exactly **9** `sample_c_lz`, not 36.
+
+## The cost, stated plainly
+
+Per shadowed entity per frame: **768 -> 1536 bytes**, because casters are walked
+once per cascade. Measured at 97 entities, raster frames peak at 149,504 of
+262,144 (57%), against 74,752 (29%) before. The smoke gate is 75%, so the scene
+now trips it near **127 entities instead of ~250**. The stale "768 bytes" text in
+the overflow error and in `smoke_test.ps1` is corrected.
+
+This is the strongest argument yet for the per-object structured buffer in
+`docs/research/PER_OBJECT_BUFFER_DESIGN.md`. Per-cascade frustum culling would
+also help and is the cheaper fix, but it is not implementable today:
+`render::Mesh` carries no bounding volume, and adding one is real scope.
+
+## Not done, so nobody assumes otherwise
+
+- **No cross-cascade blend.** `cascadeFadeLo` is uploaded every frame and read by
+  nothing, reserved so enabling it later cannot churn the byte layout. The demo
+  cannot exhibit the seam it would remove, so it would ship on reasoning alone.
+- **No per-cascade caster culling.** 4x the shadow draws is pure waste.
+- **The zenith up-vector flip is untouched.** `|lightDir.y| > 0.99` is a hard ~90
+  degree basis rotation sitting exactly where a sun passes at noon, and the snap
+  makes it *more* visible by popping against otherwise-perfect stability. It
+  deserves its own commit and its own continuity test — asserting continuity of
+  the up vector only, never of the snapped matrices, which are deliberately
+  discontinuous at texel boundaries.
+- **The default smoke run still exercises no cascade assertion.**
+  `tools\smoke_test.cmd` with no arguments runs the RT path, where the shadow
+  probe is suppressed entirely. Every assertion I added lives inside
+  `-RasterOnly`. Fixing that gate is out of scope but should not be assumed away.
+- **Depth-bias scaling for a float depth format was not verified empirically.**
+  One shared shadow PSO serves all four cascades on the argument that D3D12
+  scales `DepthBias` by the exponent of the primitive's max z. Cascade 0 is immune
+  either way (same extent, depth range and bias as before). If far cascades show
+  acne, raise `SlopeScaledDepthBias` first; per-cascade PSOs are the additive last
+  resort.
+
+## Ownership
+
+Holding nothing further. Releasing `src/core/shadow_cascades.*`,
+`tests/test_shadow_cascades.cpp`, `src/render/renderer.*`, `src/app.cpp`,
+`shaders/basic_ps.hlsl`, `shaders/sky_ps.hlsl`, `tools/smoke_test.ps1` after this
+branch is integrated.
+
+Integration warning: `src/app.cpp` and `src/render/mesh.*` were the two files your
+Stage 1 entry said you would not touch until this branch landed. It has landed on
+its branch and is pushed; both are free as far as I am concerned. `CMakeLists.txt`
+is the one file we both edit — my hunks are the `CORE_SOURCES`/`CORE_HEADERS`
+additions, the `TEST_SOURCES` line, and the `TheDawningTests` source list, all
+disjoint from your asset registration, but it is worth a look rather than a
+trusted auto-merge.
+
+I have NOT merged to `main`.
+
+---
+
 # Adversarial review found four live defects in the allocator I shipped
 
 ## Not taking this lane
