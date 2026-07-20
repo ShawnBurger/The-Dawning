@@ -5,8 +5,11 @@
 #include "../asset/model_data.h"
 #include "../core/log.h"
 #include "../render/mesh.h"
+#include "../render/renderer.h"
+#include "../render/texture.h"
 
 #include <cstdint>
+#include <string>
 
 namespace scene
 {
@@ -29,11 +32,30 @@ render::Vertex ToEngineVertex(const asset::ImportedVertex& in)
     return out;
 }
 
-// Scalar factors only in this slice - no texture handles are set, so the
-// material renders with its baseColor/roughness/metallic/emissive constants and
-// UINT32_MAX (no map) everywhere else. The importer already converted colours and
-// factors into the engine's conventions, so this is a straight copy.
-ecs::Material ToEngineMaterial(const asset::ImportedMaterial& in)
+// Resolve a glTF texture binding to the engine texture handle for the image it
+// ultimately references. The chain is: material binding -> textures[] entry ->
+// imageIndex -> the decoded engine texture. Returns UINT32_MAX (no map) if the
+// binding is unset or its image failed to decode.
+uint32_t ResolveBinding(const asset::ImportedModel& model,
+                        const asset::TextureBinding& binding,
+                        const std::vector<uint32_t>& imageHandles)
+{
+    if (binding.textureIndex == asset::kInvalidAssetIndex ||
+        binding.textureIndex >= model.textures.size())
+        return UINT32_MAX;
+    const uint32_t imageIndex = model.textures[binding.textureIndex].imageIndex;
+    if (imageIndex == asset::kInvalidAssetIndex || imageIndex >= imageHandles.size())
+        return UINT32_MAX;
+    return imageHandles[imageIndex];
+}
+
+// Map material factors and resolve its texture bindings to engine handles.
+// imageHandles is indexed by glTF image index; entries are UINT32_MAX where an
+// image was absent or failed to decode, which the shaders already treat as "no
+// map" via the useXxxTexture gates.
+ecs::Material ToEngineMaterial(const asset::ImportedModel& model,
+                               const asset::ImportedMaterial& in,
+                               const std::vector<uint32_t>& imageHandles)
 {
     ecs::Material out;
     out.albedo    = in.baseColor;
@@ -44,6 +66,27 @@ ecs::Material ToEngineMaterial(const asset::ImportedMaterial& in)
     // defaults it to 0.0. Copying the glTF value is correct - black * 1.0 is still
     // black, and a real emitter keeps its intended strength.
     out.emissiveStrength = in.emissiveStrength;
+
+    out.albedoTextureHandle   = ResolveBinding(model, in.baseColorTexture, imageHandles);
+    out.normalTextureHandle   = ResolveBinding(model, in.normalTexture, imageHandles);
+    // glTF's metallicRoughness texture is exactly the engine's ORM packing on the
+    // two channels that matter: roughness in G, metallic in B. The engine also
+    // reads occlusion from R; glTF leaves R to a separate occlusion texture, so
+    // when only metallicRoughness is present R is whatever the exporter wrote.
+    // That at worst perturbs the ambient term slightly - G and B, the channels
+    // that drive the actual BRDF, are correct - which is far better than dropping
+    // per-texel roughness and metallic entirely. Prefer a dedicated occlusion
+    // texture's image when the exporter provided a combined one, else fall back
+    // to metallicRoughness.
+    uint32_t ormHandle = ResolveBinding(model, in.metallicRoughnessTexture, imageHandles);
+    if (in.occlusionTexture.textureIndex != asset::kInvalidAssetIndex)
+    {
+        const uint32_t occ = ResolveBinding(model, in.occlusionTexture, imageHandles);
+        if (occ != UINT32_MAX)
+            ormHandle = occ;  // combined ORM authored in the occlusion slot
+    }
+    out.ormTextureHandle      = ormHandle;
+    out.emissiveTextureHandle = ResolveBinding(model, in.emissiveTexture, imageHandles);
     return out;
 }
 
@@ -51,6 +94,7 @@ ecs::Material ToEngineMaterial(const asset::ImportedMaterial& in)
 
 LoadedModel LoadModelIntoScene(Scene& scene,
                                render::D3D12Device& device,
+                               render::Renderer& renderer,
                                const std::filesystem::path& path,
                                const ecs::Transform& baseTransform)
 {
@@ -73,6 +117,53 @@ LoadedModel LoadModelIntoScene(Scene& scene,
 
     ID3D12Device* d3dDevice = device.Device();
     ID3D12GraphicsCommandList* cmd = device.CmdList();
+
+    // Decode each embedded image ONCE, up front, and register it with both the
+    // raster descriptor heap (RegisterTexture, which stamps texture.descriptor)
+    // and the ResourceManager (which both render paths look meshes' materials up
+    // through). imageHandles is parallel to model.images; a failed or external
+    // image stays UINT32_MAX so the material treats it as "no map".
+    //
+    // A model with M images and one material consumes M raster descriptor slots.
+    // The raster table is kMaxRasterTextures wide and the DXR side 64 per channel,
+    // so a kit of many textured assets will exhaust these - see the texture-table
+    // ceiling in ASSET_PIPELINE_SPEC.md. For a single asset it is fine.
+    std::vector<uint32_t> imageHandles(model.images.size(), UINT32_MAX);
+    uint32_t decodedImages = 0;
+    for (size_t i = 0; i < model.images.size(); ++i)
+    {
+        const asset::ImageSource& img = model.images[i];
+        if (img.embeddedBytes.empty())
+        {
+            // External-URI images are not fetched in this slice; the importer
+            // already confined any URI to the controlled asset directory, but
+            // decoding one would mean a filesystem read this path does not do.
+            core::Log::Infof("Model load: image %zu has no embedded bytes; skipped", i);
+            continue;
+        }
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> texUpload;
+        render::Texture tex = render::CreateTexture2DFromWICMemory(
+            d3dDevice, cmd,
+            img.embeddedBytes.data(), img.embeddedBytes.size(),
+            texUpload, L"ImportedImage");
+        if (!tex.IsValid())
+        {
+            core::Log::Warnf("Model load: image %zu failed to decode; material will "
+                             "fall back to its scalar factor", i);
+            continue;
+        }
+
+        tex.descriptor = renderer.RegisterTexture(d3dDevice, tex);
+        loaded.uploadBuffers.push_back(std::move(texUpload));
+
+        const std::string texName =
+            img.name.empty() ? (model.name + "_img" + std::to_string(i)) : img.name;
+        const TextureHandle handle =
+            resources.AddTexture(std::move(tex), texName.c_str());
+        imageHandles[i] = handle.value;
+        ++decodedImages;
+    }
 
     uint64_t totalVertices = 0;
     uint64_t totalIndices  = 0;
@@ -120,7 +211,8 @@ LoadedModel LoadModelIntoScene(Scene& scene,
         if (prim.materialIndex != asset::kInvalidAssetIndex &&
             prim.materialIndex < model.materials.size())
         {
-            material = ToEngineMaterial(model.materials[prim.materialIndex]);
+            material = ToEngineMaterial(model, model.materials[prim.materialIndex],
+                                        imageHandles);
         }
 
         const ecs::Entity entity =
@@ -141,10 +233,11 @@ LoadedModel LoadModelIntoScene(Scene& scene,
     loaded.ok = true;
     // Structured marker so the smoke harness can assert a generated asset actually
     // reached the GPU, not merely that the importer parsed it. Counts, not prose.
-    core::Log::Infof("[SMOKE] model_loaded=ok primitives=%zu vertices=%llu indices=%llu",
+    core::Log::Infof("[SMOKE] model_loaded=ok primitives=%zu vertices=%llu indices=%llu images=%u",
                      loaded.entities.size(),
                      static_cast<unsigned long long>(totalVertices),
-                     static_cast<unsigned long long>(totalIndices));
+                     static_cast<unsigned long long>(totalIndices),
+                     decodedImages);
     return loaded;
 }
 

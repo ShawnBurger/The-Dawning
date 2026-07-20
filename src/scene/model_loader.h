@@ -19,6 +19,8 @@
 #include "../ecs/components.h"
 #include "../render/d3d12_device.h"
 
+namespace render { class Renderer; }
+
 #include <cstdint>
 #include <filesystem>
 #include <vector>
@@ -53,6 +55,7 @@ struct LoadedModel
 // frame loop, well after that flush, so spawning the entities here is safe.
 LoadedModel LoadModelIntoScene(Scene& scene,
                                render::D3D12Device& device,
+                               render::Renderer& renderer,
                                const std::filesystem::path& path,
                                const ecs::Transform& baseTransform = {});
 

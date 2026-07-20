@@ -447,7 +447,7 @@ bool App::InitializeScene()
         if (std::filesystem::exists(modelPath))
         {
             loadedModel = scene::LoadModelIntoScene(
-                m_scene, m_device, modelPath,
+                m_scene, m_device, m_renderer, modelPath,
                 ecs::Transform{ { -4.5, 0.85, 3.0 }, core::Quatf::Identity(), { 1, 1, 1 } });
             if (!loadedModel.ok)
                 core::Log::Errorf("Generated asset present but failed to load: %s",
