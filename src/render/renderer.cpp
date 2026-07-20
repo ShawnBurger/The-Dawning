@@ -1252,6 +1252,7 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
         m_cbUploadBuffers[m_currentFrame]->GetGPUVirtualAddress() + m_cbOffset;
 
     m_cbOffset += alignedSize;
+    if (m_cbOffset > m_cbPeak) m_cbPeak = m_cbOffset;
     return gpuAddr;
 }
 

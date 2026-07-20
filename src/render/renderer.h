@@ -134,6 +134,14 @@ public:
     void ReleaseTextureDescriptor(D3D12Device& device, DescriptorHandle descriptor);
     void ReclaimTextureDescriptors(D3D12Device& device);
 
+    // Constant-ring pressure, for the smoke harness. The only ring
+    // instrumentation before this was the overflow error in UploadCB, which
+    // fires at 100% - after the offending draws have already bound GPU address
+    // zero. A high-water mark gives the harness something to gate on while
+    // there is still headroom.
+    uint32_t ConstantRingPeakBytes() const { return m_cbPeak; }
+    uint32_t ConstantRingCapacity() const { return kCBRingSize; }
+
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
     uint32_t TextureDescriptorHighWater() const { return m_textureAllocator.HighWater(); }
@@ -324,6 +332,10 @@ private:
     uint8_t* m_cbMappedPtrs[kFrameCount] = {};
     uint32_t m_cbOffset = 0;       // Current write offset in ring
     uint32_t m_currentFrame = 0;
+    // High-water mark across the process lifetime, NOT per frame: the harness
+    // samples it once at shutdown, and a per-frame value would report whatever
+    // the last frame happened to cost rather than the worst case.
+    uint32_t m_cbPeak = 0;
 
     // Cached view-projection matrix for the current frame
     core::Mat4x4 m_viewProj;

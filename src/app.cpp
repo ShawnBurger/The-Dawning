@@ -772,6 +772,24 @@ int App::RunMainLoop()
                 core::Log::Infof("[SMOKE] elapsed_ms=%.3f throughput_fps=%.3f",
                                  elapsedSeconds * 1000.0, throughput);
                 core::Log::Infof("[SMOKE] resize_requests=%u", m_smokeResizeRequests);
+
+                // Constant-ring pressure. This is the metric the per-object
+                // structured-buffer work exists to move: before it, every
+                // shadowed entity cost 768 bytes of this ring per frame and the
+                // scene ceiling was a division. The harness gates on the
+                // percentage rather than the byte count so the assertion stays
+                // valid if kCBRingSize is ever retuned.
+                {
+                    const uint32_t ringPeak = m_renderer.ConstantRingPeakBytes();
+                    const uint32_t ringCap  = m_renderer.ConstantRingCapacity();
+                    const uint32_t ringPct  =
+                        ringCap > 0 ? static_cast<uint32_t>(
+                                          (static_cast<uint64_t>(ringPeak) * 100ull) / ringCap)
+                                    : 0u;
+                    core::Log::Infof(
+                        "[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u cb_ring_pct=%u",
+                        ringPeak, ringCap, ringPct);
+                }
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }

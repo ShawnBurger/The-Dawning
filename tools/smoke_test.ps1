@@ -150,6 +150,20 @@ Assert-Marker "shadow_map_slot" "1"
 if ($RasterOnly) { Assert-Marker "shadow_map_written" "yes" }
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 
+# Constant-ring pressure. An early-warning gate, deliberately well below the
+# 100% point where UploadCB starts handing out GPU address zero to draws that
+# get recorded anyway. Per-object and per-material data live in structured
+# buffers, so this ring now carries only the 176-byte CBPerFrame and should read
+# ~0 regardless of entity count; anything approaching the gate means per-draw
+# traffic has leaked back into the ring.
+if (-not $markers.ContainsKey("cb_ring_pct")) {
+    throw "Smoke test did not emit the 'cb_ring_pct' marker."
+}
+if ([uint32]$markers["cb_ring_pct"] -ge 75) {
+    throw ("Constant ring peaked at {0}% ({1} of {2} bytes), at or past the 75% gate." -f `
+           $markers["cb_ring_pct"], $markers["cb_ring_peak"], $markers["cb_ring_capacity"])
+}
+
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
     throw "Scene shutdown did not retire any raster texture descriptors."
 }
