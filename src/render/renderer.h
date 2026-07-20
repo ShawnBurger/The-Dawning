@@ -12,7 +12,9 @@
 //   t0/space2: StructuredBuffer<ObjectData>   — per-draw transforms  (root SRV)
 //   t0/space3: StructuredBuffer<MaterialData> — per-draw material    (root SRV)
 //   b1:        CBPerFrame   — light, ambient, camera basis, lightViewProj
-//   b3:        CBDrawIndex  — { objectIndex, materialIndex }, root 32-bit constants
+//   b3:        CBDrawIndex  — { objectIndex, materialIndex, drawProbeEnabled },
+//                             root 32-bit constants
+//   u0/space4: RWByteAddressBuffer — merged draw-record probe    (root UAV)
 //   b4:        CBPerPass    — viewProj; light matrix in the shadow pass, camera
 //                             matrix in the main pass. Once per pass, not per draw.
 //   b0 and b2 are permanently free: they were CBPerObject and CBMaterial, and
@@ -258,7 +260,9 @@ public:
     //     genuinely outstanding. The +80 entities App::ApplySmokeGrowthStress
     //     adds at frame 8 do the same in BOTH smoke modes.
     //
-    // -ForceGrow survives as a heavier case rather than as the only case.
+    // The -ForceGrow switch that used to be the ONLY way to reach this branch
+    // is gone - its ramp did not survive the merge that rewrote the sizing-hint
+    // logic, and the default path is now far heavier than it ever was.
     uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
     // The subset of the above that ran with at least one frame already recorded
     // and never waited upon - the genuinely hazardous case, and the only one a

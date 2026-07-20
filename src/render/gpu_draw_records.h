@@ -32,9 +32,10 @@ namespace render
 {
 
 // =============================================================================
-// ObjectData — per-draw transform record, 96 bytes
+// ObjectData — per-draw transform record, 112 bytes
 // =============================================================================
-// Matches `struct ObjectData` in shaders/basic_vs.hlsl and shaders/shadow_vs.hlsl.
+// Matches `struct ObjectData` in shaders/gpu_draw_records.hlsli, which both
+// vertex shaders include.
 //
 // EXPLICIT float4 ROWS, NOT float4x4, and that is load bearing rather than
 // stylistic. render/mesh.h records that StructuredBuffer elements do NOT get
@@ -103,7 +104,7 @@ static_assert(offsetof(ObjectData, recordPad) == 100,
 // =============================================================================
 // MaterialData — per-draw material record, 80 bytes
 // =============================================================================
-// Matches `struct MaterialData` in shaders/basic_ps.hlsl. Field for field the
+// Matches `struct MaterialData` in shaders/gpu_draw_records.hlsli. Field for field the
 // old CBMaterial: every 16-byte block is exactly filled and no member straddles
 // a boundary, so cbuffer packing and StructuredBuffer tight packing produce
 // identical offsets. The bytes do not move; only the register does. The two pad
@@ -287,8 +288,9 @@ void WriteObjectRecord(ObjectData& out,
 // subsequent frame of every run, and its reallocate-and-DeferredRelease branch -
 // which is the ONLY place three frames in flight can use-after-free, because CPU
 // writes to persistently mapped UPLOAD memory are not synchronised by resource
-// barriers - executed only behind the opt-in -ForceGrow smoke switch. An untaken
-// branch behind an unrun flag is not coverage.
+// barriers - executed only behind an opt-in -ForceGrow smoke switch. An untaken
+// branch behind an unrun flag is not coverage. That switch has since been
+// removed outright; the default path covers strictly more than it did.
 //
 // The floors are now small enough that GROWTH IS STRUCTURAL, not incidental:
 //

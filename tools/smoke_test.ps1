@@ -259,7 +259,8 @@ if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 # It used to NEVER EXECUTE in an ordinary run. The demo scene's draw count sat
 # under a 256-element kMinObjectCapacity, so after the first allocation the
 # function early-outed on every frame and the whole branch was reachable only
-# behind -ForceGrow. This block printed "Structured-buffer reallocations: 0" and
+# behind a -ForceGrow switch. This block printed "Structured-buffer
+# reallocations: 0" and
 # moved on - it stated the gap out loud and asserted nothing. An untaken branch
 # behind an unrun flag is not coverage, so the DEFAULT run now takes the branch
 # by construction and these are HARD assertions:
@@ -300,8 +301,8 @@ if ($reallocs -lt 1) {
            "means those floors were raised back above the scene's draw count, or " +
            "the Init allocation was removed, or GrownCapacity started padding the " +
            "first allocation with kCapacityHeadroom again. Do not 'fix' this by " +
-           "deleting the assertion - it exists because this path was previously " +
-           "reachable only under -ForceGrow, which nobody ran.")
+           "deleting the assertion - it exists because this path was once " +
+           "reachable only under a -ForceGrow switch, which nobody ran.")
 }
 
 # THE ASSERTION WITH TEETH, and it applies to EVERY mode including -RasterOnly.
@@ -330,12 +331,16 @@ if ($reallocsInFlight -lt 1) {
            "capacity of 2*MeshInstanceCount + kCapacityHeadroom.")
 }
 
-if ($ForceGrow -and $reallocs -lt 5) {
-    throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
-           "The grow branch is meant to run many times over under this switch; if the " +
-           "sizing hint no longer crosses capacity boundaries then the heavy case " +
-           "is not being exercised. Check the --smoke-force-grow ramp in " +
-           "App::RenderFrame against kCapacityHeadroom.")
+# THE -ForceGrow SWITCH IS GONE, and this is where its assertion used to be.
+#
+# It was never declared in this script's param block after the merge that
+# replaced App::RenderFrame's sizing-hint logic, and the --smoke-force-grow ramp
+# it drove no longer exists in src/. So `$ForceGrow` was always $null, the
+# assertion below it could never run, and passing -ForceGrow on the command line
+# was silently ignored - a switch that looked like extra coverage and delivered
+# none. Removed rather than repaired: the default ramp now performs FIFTEEN
+# replacements, thirteen of them with frames in flight, which is far heavier than
+# -ForceGrow ever was. There is nothing left for it to add.
 
 # KEPT FROM THE OTHER SIDE OF THIS MERGE. The counts say replacement happened
 # with frames outstanding; this says WHEN the first such replacement was, and
@@ -357,7 +362,6 @@ if ($firstInFlight -le 3) {
            "$firstInFlight; it must happen after all three frame slots can be in " +
            "flight, or the deferred-release fence is being exercised only during " +
            "start-up when there is nothing outstanding to protect.")
-}
 }
 
 # Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
