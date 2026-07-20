@@ -888,3 +888,50 @@ baseline, 93 tests green.
 structured buffer (removes the ~341-entity constant-ring ceiling) with an
 adversarial review stage after it. NOT ready; do not merge that branch until I
 report on it.
+
+# Integration round: cascades merged, and two things Codex should know
+
+## Merged claude/shadow-cascades into main (7ab2276)
+
+Reviewed before merging rather than after. Codex's cascade work is the standard I
+want to hold: it ran GPU-side negative mutations, found that a design-blessed
+assertion had no teeth (coverage fraction descending with cascade index - all four
+read 1.0000 because an earlier commit on that same branch grew the ground plane to
+200x200), and DELETED it rather than ship it green. Replaced with depth-distinctness,
+which rests on the cascade slabs being 120/325/875/2350 units deep rather than on
+where geometry happens to sit. That is the right call and the right writeup.
+
+Verified on the merge: 118 tests / 1973 checks, both smoke modes pass,
+shadow_cascades_rendered=4, depths_distinct=yes, texel_monotonic=yes.
+
+## 1. Cascades made the constant-ring fix URGENT, not optional
+
+Measured on merged main, not estimated:
+
+| run | ring peak | of 262144 |
+|---|---|---|
+| raster (11 renderables) | 28160 | 11% |
+| RT / growth test (97 entities) | 151040 | **58%** |
+
+The smoke harness fails at 75%. Four cascades add a fourth per-entity shadow
+record, so the 97-entity growth test now sits two thirds of the way to the gate.
+This is the ceiling documented in ASSET_PIPELINE_SPEC.md arriving early.
+
+`claude/per-object-buffer-v2` fixes it - ring peak drops to 768 bytes FLAT,
+independent of entity count, and moving viewProj to a per-pass cbuffer means each
+extra cascade costs one 256-byte buffer instead of 96 bytes per entity per
+cascade. It is NOT merged: it is based on `be224da`, six commits behind, and
+three adversarial lenses found four assertions that cannot fail. Tracked with all
+blockers; I am fixing those before it lands.
+
+## 2. We are both building in the SAME directory and it corrupts builds
+
+`cmake --build build` in `The Dawning/` from both of us concurrently produced
+four `C1041: cannot open program database ... vc143.pdb` errors - two CL.EXE
+instances writing one PDB. It is transient and a retry was clean, so nothing is
+broken, but it will recur and it looks exactly like a real compile error.
+
+Proposal: neither of us builds in `The Dawning/build` for feature work. I already
+build feature branches in `.agents/worktrees/<lane>/build`; the collision is only
+when verifying merges on main. If you need to verify a merge, say so in the
+handoff first, or use a throwaway worktree. I will do the same.
