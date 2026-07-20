@@ -26,6 +26,7 @@ set(CORE_SOURCES
     src/core/input.cpp
     src/core/timer.cpp
     src/core/window.cpp
+    src/core/shadow_cascades.cpp
 )
 
 set(CORE_HEADERS
@@ -34,6 +35,7 @@ set(CORE_HEADERS
     src/core/input.h
     src/core/timer.h
     src/core/window.h
+    src/core/shadow_cascades.h
 )
 
 set(ASSET_SOURCES
@@ -120,6 +122,7 @@ set(TEST_SOURCES
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
     tests/test_gltf_importer.cpp
+    tests/test_shadow_cascades.cpp
 )
 
 set(TEST_HEADERS
@@ -234,11 +237,19 @@ endif()
 # =============================================================================
 # CPU-only by construction. This target links NO graphics libraries and creates
 # no device, so it runs on any machine (including a GPU-less CI runner). It
-# covers only GPU-independent code: src/core/types.h, src/ecs/*.h, and the
-# CPU-side asset importer.
+# covers only GPU-independent code: src/core/types.h, src/ecs/*.h, the CPU-side
+# asset importer, and src/core/shadow_cascades.cpp.
 #
 # Do NOT add src/render/* or src/scene/* here — scene/ holds a render::PathTracer
 # by value and would drag D3D12 into the test binary.
+#
+# src/core/shadow_cascades.cpp is a SANCTIONED exception to "tests link no engine
+# code": it is deliberately GPU-free (it includes only core/types.h and <cstdint>)
+# precisely so tests/test_shadow_cascades.cpp exercises the SHIPPED cascade math
+# rather than a copy of it. tests/test_math.cpp already shows what the copy
+# approach costs — two cases there read as shadow-matrix tests but rebuild
+# LookAt*OrthoLH inline, so they would keep passing if the light-matrix code were
+# deleted outright. Compile the real thing, or the test proves nothing.
 #
 #   cmake --build build --config Debug
 #   ctest --test-dir build -C Debug --output-on-failure
@@ -249,6 +260,8 @@ add_executable(TheDawningTests
     ${TEST_SOURCES}
     ${TEST_HEADERS}
     src/core/types.h
+    src/core/shadow_cascades.h
+    src/core/shadow_cascades.cpp
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
