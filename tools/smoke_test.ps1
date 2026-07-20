@@ -258,27 +258,86 @@ if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 # synchronised by resource barriers, so nothing but the deferred-release fence
 # stands between it and a live buffer being freed underneath a frame in flight.
 #
-# In an ordinary run it NEVER EXECUTES. The demo scene's draw count sits under
-# kMinObjectCapacity, so after the first allocation the function early-outs on
-# every frame. -ForceGrow ramps the sizing hint so the buffers reallocate
-# repeatedly, mid-run, with frames genuinely in flight.
+# It used to NEVER EXECUTE in an ordinary run. The demo scene's draw count sat
+# under a 256-element kMinObjectCapacity, so after the first allocation the
+# function early-outed on every frame and the whole branch was reachable only
+# behind -ForceGrow. This block printed "Structured-buffer reallocations: 0" and
+# moved on - it stated the gap out loud and asserted nothing. An untaken branch
+# behind an unrun flag is not coverage, so the DEFAULT run now takes the branch
+# by construction and these are HARD assertions:
 #
-# Assert it actually happened rather than assuming the flag worked: a hint ramp
-# that stopped crossing capacity boundaries would leave this whole path
-# uncovered again while the run still passed.
-if ($markers.ContainsKey("structured_buffer_reallocations")) {
-    $reallocs = [int]$markers["structured_buffer_reallocations"]
-    Write-Host "Structured-buffer reallocations: $reallocs"
-    if ($ForceGrow -and $reallocs -lt 5) {
-        throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
-               "The grow branch is meant to run many times under this switch; if the " +
-               "sizing hint no longer crosses capacity boundaries then the one code " +
-               "path here that can use-after-free is going untested. Check the " +
-               "--smoke-force-grow ramp in App::RenderFrame against kCapacityHeadroom.")
-    }
-    if (-not $ForceGrow -and $reallocs -ne 0) {
-        Write-Host "  (note: buffers reallocated without -ForceGrow; the scene outgrew the capacity floor)"
-    }
+#   * The capacity floors (kMinObjectCapacity = 4, kMinMaterialCapacity = 2) sit
+#     below any real scene, and Renderer::Init allocates AT them, so frame one
+#     must grow both buffers.
+#   * The +80 growth entities App::ApplySmokeRTMutationStress adds at frame 8
+#     then push past the frame-one capacity and force a second grow MID-RUN,
+#     while earlier frames are still executing.
+#
+# The two counts are asserted separately because they are not the same claim.
+# structured_buffer_reallocations includes frame zero's grow, which releases a
+# buffer no command list has ever bound: the deferred-release queue has nothing
+# to protect there, and that grow stays green with the fence guard deleted
+# outright - measured, not assumed. Only
+# structured_buffer_reallocations_in_flight - grows that ran with at least one
+# frame already recorded and never waited upon - covers the case that can
+# actually use-after-free.
+foreach ($k in @("structured_buffer_reallocations",
+                 "structured_buffer_reallocations_in_flight")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+$reallocs        = [int]$markers["structured_buffer_reallocations"]
+$reallocsInFlight = [int]$markers["structured_buffer_reallocations_in_flight"]
+Write-Host "Structured-buffer reallocations: $reallocs ($reallocsInFlight with frames in flight)"
+
+# EVERY run, including a plain -RasterOnly one. This is the assertion that keeps
+# the grow path on the default verification loop rather than behind a switch.
+if ($reallocs -lt 1) {
+    throw ("No structured-buffer reallocations occurred. The grow branch in " +
+           "Renderer::EnsureFrameStructuredBuffer - allocate kFrameCount " +
+           "replacements, unmap and DeferredRelease the outgoing ones, swap - is " +
+           "the ONLY code in the per-draw structured-buffer design that can " +
+           "use-after-free, and this run never executed it. Renderer::Init " +
+           "allocates both buffers at kMinObjectCapacity/kMinMaterialCapacity " +
+           "precisely so the first real frame has to grow past them; a zero here " +
+           "means those floors were raised back above the scene's draw count, or " +
+           "the Init allocation was removed, or GrownCapacity started padding the " +
+           "first allocation with kCapacityHeadroom again. Do not 'fix' this by " +
+           "deleting the assertion - it exists because this path was previously " +
+           "reachable only under -ForceGrow, which nobody ran.")
+}
+
+# THE ASSERTION WITH TEETH, and it applies to EVERY mode including -RasterOnly.
+#
+# App::ApplySmokeGrowthStress adds its 80 entities at frame 8 in both smoke
+# modes, deliberately outside the --smoke-rt gate, because this is a raster-path
+# hazard: it is Renderer::BeginFrame's root SRVs that address the buffers being
+# released. In the default run frame 8 is still raster anyway - RT starts at
+# frame 15 with the 0.25 s delay - so the grow lands with the raster path
+# actively binding and reading these buffers.
+#
+# Measured, not assumed: replacing DeferredRelease with an immediate Reset in
+# EnsureFrameStructuredBuffer kills the run at exactly this grow. The same break
+# left a -RasterOnly run completely green while the growth churn was still
+# RT-gated and the only reallocations it performed were frame one's, which is
+# why the churn moved and why this assertion is not conditioned on the mode.
+if ($reallocsInFlight -lt 1) {
+    throw ("This run reallocated $reallocs time(s) but NONE of them ran with " +
+           "frames in flight, so the deferred-release fence guard in " +
+           "EnsureFrameStructuredBuffer went untested: a grow with nothing " +
+           "outstanding would stay green even if the outgoing buffers were " +
+           "freed immediately instead of parked at m_globalFenceValue + 1. " +
+           "The +80 entities App::ApplySmokeGrowthStress adds at frame 8 are what " +
+           "produce this; check that they are still created in BOTH smoke modes " +
+           "and that they still push RequiredObjectCapacity past the frame-one " +
+           "capacity of 2*MeshInstanceCount + kCapacityHeadroom.")
+}
+
+if ($ForceGrow -and $reallocs -lt 5) {
+    throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
+           "The grow branch is meant to run many times over under this switch; if the " +
+           "sizing hint no longer crosses capacity boundaries then the heavy case " +
+           "is not being exercised. Check the --smoke-force-grow ramp in " +
+           "App::RenderFrame against kCapacityHeadroom.")
 }
 
 # Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities

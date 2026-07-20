@@ -74,6 +74,11 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws)
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount)
 {
     if (elementCount <= currentCapacity) return currentCapacity;
+    // First allocation: exact. See the header - headroom amortises REPEATED
+    // growth, and there is nothing to amortise against on the way out of zero.
+    // Sizing this exactly is also what keeps a buffer created at a capacity
+    // floor actually AT that floor, so the first real frame has to grow.
+    if (currentCapacity == 0) return elementCount;
     return elementCount + kCapacityHeadroom;
 }
 

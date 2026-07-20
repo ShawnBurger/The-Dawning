@@ -261,9 +261,10 @@ TEST_CASE(GpuDrawRecords_ObjectCapacityIsTwicePerDraw)
     CHECK_EQ(render::RequiredMaterialCapacity(1000), 1000u);
 }
 
-// The floors keep the buffers non-empty in an empty scene, so their GPU virtual
-// addresses are never null and DrawSky - which runs under the same root
-// signature - never sees an unbound root SRV.
+// The floors keep the buffers non-empty in an empty scene, so Renderer::Init can
+// create them before any frame and Renderer::BeginFrame's root SRV binds are
+// never skipped. They do NOT exist to avoid a null root SRV in DrawSky - the sky
+// shaders read neither structured buffer; see gpu_draw_records.h.
 TEST_CASE(GpuDrawRecords_CapacityFloorsHoldForEmptyScenes)
 {
     CHECK_EQ(render::RequiredObjectCapacity(0), render::kMinObjectCapacity);
@@ -411,14 +412,9 @@ TEST_CASE(GpuDrawRecords_GrowthNeverShrinksAndAmortises)
     CHECK_EQ(render::GrownCapacity(500, 501), 501u + render::kCapacityHeadroom);
     CHECK(render::GrownCapacity(500, 501) > 500u);
 
-    // From nothing.
-    CHECK_EQ(render::GrownCapacity(0, 256), 256u + render::kCapacityHeadroom);
-
     // Grow, then shrink the demand back down. The capacity must HOLD: shrinking
     // would mean destroying a buffer frames in flight may still be reading.
-    // 400 draws is used rather than the smoke scene's 91 for the reason the next
-    // test documents.
-    uint32_t cap = 0;
+    uint32_t cap = render::kMinObjectCapacity;
     cap = render::GrownCapacity(cap, render::RequiredObjectCapacity(11));
     const uint32_t afterSmall = cap;
     cap = render::GrownCapacity(cap, render::RequiredObjectCapacity(400));
@@ -429,25 +425,97 @@ TEST_CASE(GpuDrawRecords_GrowthNeverShrinksAndAmortises)
     CHECK_EQ(cap, afterGrowth);   // did not shrink back
 }
 
-// HONEST NOTE, asserted so it cannot rot into a false assumption: the smoke
-// scene never reaches the growth path. Its peak is 91 renderables, i.e. 182
-// object records, which sits UNDER the 256-element floor - so
-// EnsureFrameStructuredBuffer early-outs on every frame of every smoke run and
-// its D3D12 reallocate-and-DeferredRelease branch is exercised by neither smoke
-// mode. The arithmetic above is covered here; the resource swap is not covered
-// anywhere. Raising the floor or lowering it would change that, so pin the
-// relationship down rather than leaving it to be rediscovered.
-TEST_CASE(GpuDrawRecords_SmokeSceneStaysUnderTheCapacityFloor)
+// The FIRST allocation is exact - no headroom - and that is what makes a buffer
+// created at a capacity floor actually sit at that floor.
+//
+// This is not a stylistic detail. Renderer::Init creates both per-draw buffers
+// at kMinObjectCapacity / kMinMaterialCapacity so that the first real frame has
+// to grow past them, which is what puts the reallocate-and-DeferredRelease swap
+// on the DEFAULT verification path instead of behind -ForceGrow. If the initial
+// allocation silently picked up kCapacityHeadroom, a 4-element floor would
+// become a 68-element buffer, the demo scene's 34 records would fit inside it,
+// and the whole arrangement would quietly revert to "never grows".
+TEST_CASE(GpuDrawRecords_FirstAllocationIsExactSoTheFloorsAreReal)
 {
-    const uint32_t smokePeakRenderables = 91;   // 11 demo + 80 RTGrowth_*
-    CHECK(render::RequiredObjectCapacity(smokePeakRenderables) ==
-          render::kMinObjectCapacity);
-    CHECK(render::RequiredMaterialCapacity(smokePeakRenderables) ==
-          render::kMinMaterialCapacity);
+    CHECK_EQ(render::GrownCapacity(0, render::kMinObjectCapacity),
+             render::kMinObjectCapacity);
+    CHECK_EQ(render::GrownCapacity(0, render::kMinMaterialCapacity),
+             render::kMinMaterialCapacity);
+    CHECK_EQ(render::GrownCapacity(0, 256), 256u);
 
-    // The first renderable count that DOES force a real allocation, so anyone
-    // wanting to exercise the growth path knows what to reach for.
-    const uint32_t firstGrowingCount = render::kMinObjectCapacity / 2 + 1;   // 129
-    CHECK(render::RequiredObjectCapacity(firstGrowingCount) >
-          render::kMinObjectCapacity);
+    // Headroom returns the moment there is an existing allocation to grow FROM,
+    // because from then on it is amortising a real reallocation.
+    CHECK_EQ(render::GrownCapacity(render::kMinObjectCapacity, 256),
+             256u + render::kCapacityHeadroom);
+}
+
+// THE COVERAGE INVARIANT, asserted here so it cannot silently rot: the smoke
+// scene MUST cross the growth path, twice.
+//
+// This test replaces one that asserted the exact opposite. Its predecessor was
+// an "honest note" recording that the smoke scene's peak of 91 renderables sat
+// under a 256-element floor, so EnsureFrameStructuredBuffer early-outed on every
+// frame of every smoke run and its D3D12 reallocate-and-DeferredRelease branch -
+// the only code in this design that can use-after-free with three frames in
+// flight - was exercised by neither smoke mode. Documenting that gap was better
+// than not knowing about it, but the gap was the bug. The floors are now smaller
+// than any real scene and these are the numbers that keep them that way.
+TEST_CASE(GpuDrawRecords_SmokeSceneForcesTwoGrowsByConstruction)
+{
+    // What the running demo scene actually is, and what the growth churn adds.
+    // Cross-checked against the smoke harness: shadow_records / main_records are
+    // 17, and App::ApplySmokeRTMutationStress creates 80 RTGrowth_* entities at
+    // frame 8 and destroys them at frame 16.
+    const uint32_t demoRenderables   = 17;
+    const uint32_t grownRenderables  = demoRenderables + 80;   // 97
+
+    // ---- Renderer::Init: exactly the floors, no headroom -------------------
+    uint32_t objectCap   = render::GrownCapacity(0, render::kMinObjectCapacity);
+    uint32_t materialCap = render::GrownCapacity(0, render::kMinMaterialCapacity);
+    CHECK_EQ(objectCap,   render::kMinObjectCapacity);
+    CHECK_EQ(materialCap, render::kMinMaterialCapacity);
+
+    // ---- Frame one: the demo scene must NOT fit ----------------------------
+    // This is the assertion that keeps the floors honest. If someone raises them
+    // back over the scene size, this is what fails.
+    const uint32_t frameOneObjects   = render::RequiredObjectCapacity(demoRenderables);
+    const uint32_t frameOneMaterials = render::RequiredMaterialCapacity(demoRenderables);
+    CHECK(frameOneObjects   > objectCap);
+    CHECK(frameOneMaterials > materialCap);
+
+    objectCap   = render::GrownCapacity(objectCap,   frameOneObjects);
+    materialCap = render::GrownCapacity(materialCap, frameOneMaterials);
+    CHECK_EQ(objectCap,   frameOneObjects   + render::kCapacityHeadroom);
+    CHECK_EQ(materialCap, frameOneMaterials + render::kCapacityHeadroom);
+
+    // ---- Frame eight: +80 entities must not fit either ----------------------
+    // The SECOND grow, and the one that matters: it happens mid-run with earlier
+    // frames still executing, which is the only condition under which a missing
+    // deferred-release fence can be observed. kCapacityHeadroom is 64 and the
+    // churn adds 80 renderables = 160 object records, so the headroom cannot
+    // absorb it - but that is arithmetic worth pinning rather than assuming,
+    // since a larger headroom or a smaller churn would silently swallow it.
+    const uint32_t grownObjects   = render::RequiredObjectCapacity(grownRenderables);
+    const uint32_t grownMaterials = render::RequiredMaterialCapacity(grownRenderables);
+    CHECK(grownObjects   > objectCap);
+    CHECK(grownMaterials > materialCap);
+
+    // ---- And back down: the capacity holds when the churn is destroyed ------
+    const uint32_t afterGrowthObjects = render::GrownCapacity(objectCap, grownObjects);
+    CHECK_EQ(render::GrownCapacity(afterGrowthObjects, frameOneObjects),
+             afterGrowthObjects);
+}
+
+// A floor of 4 object records is 2 draws, so ANY scene with 3 or more
+// renderables outgrows it on frame one. Stated as a test rather than a comment
+// because "the first frame must grow" is the property the whole default-path
+// coverage rests on, and it is a property of the NUMBER, not of the demo scene.
+TEST_CASE(GpuDrawRecords_FloorsAreBelowAnyRealScene)
+{
+    CHECK(render::kMinObjectCapacity   > 0u);   // the buffer must always exist
+    CHECK(render::kMinMaterialCapacity > 0u);
+
+    // Three renderables is already too many for the floors to hold.
+    CHECK(render::RequiredObjectCapacity(3)   > render::kMinObjectCapacity);
+    CHECK(render::RequiredMaterialCapacity(3) > render::kMinMaterialCapacity);
 }

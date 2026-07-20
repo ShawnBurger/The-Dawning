@@ -35,6 +35,28 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateShadowResources(device.Device())) return false;
     if (!CreateShadowPSO(device.Device())) return false;
 
+    // Per-draw structured buffers, created HERE at exactly the capacity floors
+    // rather than lazily on the first BeginFrameResources. Two reasons, and the
+    // second is the load-bearing one:
+    //
+    //   1. The buffers then always exist, so Renderer::BeginFrame's root SRV
+    //      binds are never skipped and no pass has to reason about an unbound
+    //      root parameter. (This is the only part of the old 256/128 floors'
+    //      justification that was ever real - see gpu_draw_records.h.)
+    //   2. It makes the first frame's allocation a genuine REALLOCATION rather
+    //      than a first allocation. Growing out of capacity 0 is not the
+    //      hazardous operation: there is no outgoing buffer to release, so it
+    //      shares the code path with the dangerous case but not the risk, and
+    //      m_structuredBufferReallocations deliberately does not count it. With
+    //      a floor-sized buffer already in place, frame one exercises the real
+    //      replace-and-DeferredRelease swap in every run of the engine.
+    if (!EnsureFrameStructuredBuffer(device, m_objectBuffer, kMinObjectCapacity,
+                                     sizeof(ObjectData), L"ObjectDataBuffer"))
+        return false;
+    if (!EnsureFrameStructuredBuffer(device, m_materialBuffer, kMinMaterialCapacity,
+                                     sizeof(MaterialData), L"MaterialDataBuffer"))
+        return false;
+
     core::Log::Info("Renderer initialized");
     return true;
 }
@@ -1512,7 +1534,47 @@ bool Renderer::EnsureFrameStructuredBuffer(D3D12Device& device,
     // nothing can still be reading a buffer that did not exist. The realloc is
     // the case that can use-after-free with frames in flight, so it is the case
     // the smoke marker has to be able to prove happened.
-    if (hadPriorAllocation) ++m_structuredBufferReallocations;
+    //
+    // And the two are counted SEPARATELY, because "a reallocation happened" is
+    // a much weaker claim than the one worth making. Renderer::Init creates both
+    // buffers at their capacity floors, so frame one always reallocates - but at
+    // frame one nothing has been submitted yet, the deferred-release queue has
+    // nothing to protect, and deleting the fence guard entirely would not be
+    // detectable from that grow alone. Measured, not argued: with
+    // DeferredRelease replaced by an immediate Reset, a smoke run whose only
+    // reallocations were frame one's passed completely green.
+    //
+    // "IN FLIGHT" HERE MEANS: a frame that may have BOUND these buffers has been
+    // submitted and not waited upon. m_framesBegun is the count of frames that
+    // have already been through BeginFrameResources, and every one of them
+    // recorded a command list that bound the outgoing buffers' GPU virtual
+    // addresses as root SRVs. D3D12Device::WaitForCurrentFrame waits only for
+    // the frame kFrameCount-1 back, so frames N-1 and N-2 are never waited on at
+    // all - which is precisely why the release has to be fence-tagged. Any grow
+    // with m_framesBegun > 0 is therefore hazardous; the grow on frame zero is
+    // not, because the only thing that ever touched the buffer it releases is
+    // Renderer::Init's CreateCommittedResource.
+    //
+    // TWO WRONG VERSIONS OF THIS WERE WRITTEN FIRST, both worth recording:
+    //
+    //   device.OutstandingSubmissionCount() > 0 samples GetCompletedValue(), so
+    //   it reports whatever the GPU has incidentally drained at the instant of
+    //   the call. Under --gpu-validation the validator serialises execution and
+    //   the GPU is always caught up, so every grow read "0 outstanding" and the
+    //   harness assertion failed on a run where nothing was wrong. It would
+    //   flake the same way on a fast GPU with a light scene.
+    //
+    //   device.PendingFenceValue() > 1 is deterministic but measures the wrong
+    //   thing: App::Initialize uploads meshes and textures through WaitForGpu,
+    //   which advances m_globalFenceValue before the first frame is ever
+    //   recorded. The test was true on frame zero as well, so the count stopped
+    //   distinguishing the harmless startup grow from the dangerous mid-run one
+    //   - which is the entire reason this counter exists apart from the total.
+    if (hadPriorAllocation)
+    {
+        ++m_structuredBufferReallocations;
+        if (m_framesBegun > 0) ++m_structuredBufferReallocationsInFlight;
+    }
 
     target.capacity = newCapacity;
 
@@ -1567,6 +1629,11 @@ void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint)
     // the root UAV address must not change under a recorded draw.
     if (EnsureDrawIndexWitness(device, m_objectBuffer.capacity))
         ClearDrawIndexWitness(device);
+
+    // Counted AFTER the growth above, so a grow sees the number of frames that
+    // preceded it rather than including itself. Frame zero's grow must read
+    // zero: it releases a buffer no command list has ever bound.
+    ++m_framesBegun;
 
     m_frameResourcesBegun = true;
     m_frameResourcesViolationLogged = false;

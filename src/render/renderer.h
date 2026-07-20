@@ -194,10 +194,29 @@ public:
     uint32_t MaterialRecordsPeak() const { return m_materialPeak; }
     uint32_t ObjectBufferCapacity() const { return m_objectBuffer.capacity; }
     uint32_t MaterialBufferCapacity() const { return m_materialBuffer.capacity; }
-    // Times a per-draw structured buffer was REPLACED by a larger one while
-    // frames were in flight - the one operation here that can use-after-free.
-    // Zero in an ordinary run, which is exactly why --smoke-force-grow exists.
+    // Times a per-draw structured buffer was REPLACED by a larger one - the one
+    // operation here that can use-after-free, because kFrameCount frames may
+    // still be reading the buffers it releases and CPU writes to persistently
+    // mapped UPLOAD memory are not synchronised by resource barriers.
+    //
+    // This used to read zero in an ordinary run, which is what --smoke-force-grow
+    // existed to work around. It no longer does: the capacity floors are smaller
+    // than any real scene and Init allocates AT them, so frame one reallocates
+    // and the smoke growth test's +80 entities reallocate again mid-run. See
+    // gpu_draw_records.h.
     uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
+    // The subset of the above that ran with at least one frame already recorded
+    // and never waited upon - the genuinely hazardous case, and the only one a
+    // missing deferred-release fence can be caught by. Frame zero's grow is NOT
+    // in this count: no command list has bound the buffer it releases, so it
+    // stays green even with the fence guard deleted outright (measured, not
+    // assumed). Deliberately derived from a frame count rather than from any
+    // fence value - see EnsureFrameStructuredBuffer for the two fence-based
+    // versions that were tried first and why each was wrong.
+    uint32_t StructuredBufferReallocationsInFlight() const
+    {
+        return m_structuredBufferReallocationsInFlight;
+    }
     uint32_t ShadowRecords() const { return m_reportedShadowRecords; }
     uint32_t MainRecords() const { return m_reportedMainRecords; }
 
@@ -468,6 +487,12 @@ private:
     // is too.
     bool     m_drawOverflowLogged = false;
     uint32_t m_structuredBufferReallocations = 0;
+    uint32_t m_structuredBufferReallocationsInFlight = 0;
+    // Frames that have been through BeginFrameResources, i.e. that recorded a
+    // command list binding the per-draw buffers. Used only to classify a grow as
+    // hazardous or not - see EnsureFrameStructuredBuffer for why neither the
+    // completed-fence value nor the global fence value works here.
+    uint32_t m_framesBegun = 0;
 
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;

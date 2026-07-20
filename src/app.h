@@ -51,6 +51,10 @@ private:
     bool ApplySmokeResizeStep();
     bool ApplySmokeDescriptorStress();
     bool ApplySmokeRTMutationStress();
+    // Mid-run entity churn. Runs in BOTH smoke modes, unlike the RT mutation
+    // stress above: it is what forces the per-draw structured buffers to
+    // reallocate with frames in flight, which is a raster-path hazard.
+    void ApplySmokeGrowthStress();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
     void UpdateCamera(const core::TimeStep& timeStep);
     bool RenderFrame(const core::TimeStep& timeStep);
