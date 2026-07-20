@@ -215,10 +215,50 @@ void WriteObjectRecord(ObjectData& out,
 // matter only for SIZING, where being wrong costs an oversized allocation
 // rather than wrong geometry.
 //
-// The floors keep the GPU virtual address non-null in an empty scene, which
-// removes any need to reason about binding a null root SRV during DrawSky.
-constexpr uint32_t kMinObjectCapacity   = 256;
-constexpr uint32_t kMinMaterialCapacity = 128;
+// =============================================================================
+// THE CAPACITY FLOORS, AND WHY THEY ARE THIS SMALL
+// =============================================================================
+// These were 256 and 128, and their stated justification was that the floors
+// "keep the GPU virtual address non-null in an empty scene, which removes any
+// need to reason about binding a null root SRV during DrawSky". THAT CLAIM IS
+// NOT SUPPORTED BY THE CODE and was checked before these numbers were changed:
+// shaders/sky_vs.hlsl declares no ObjectData StructuredBuffer and
+// shaders/sky_ps.hlsl declares nothing but CBPerFrame at b1, so the sky draw
+// reads neither root SRV. Renderer::BeginFrame binds both under
+// `if (buffer.Valid())`, so an absent buffer leaves the root parameter unbound
+// rather than null-bound, and no shader that runs would read it. There was
+// never a null-SRV hazard to remove.
+//
+// What the old floors DID do was disable the only dangerous code in this whole
+// design. RequiredObjectCapacity(maxDraws) = max(floor, 2 * maxDraws), the demo
+// scene is 17 renderables (34 records), and even the smoke growth test's peak of
+// 97 renderables needs only 194 - all under 256. So
+// Renderer::EnsureFrameStructuredBuffer allocated once and early-outed on every
+// subsequent frame of every run, and its reallocate-and-DeferredRelease branch -
+// which is the ONLY place three frames in flight can use-after-free, because CPU
+// writes to persistently mapped UPLOAD memory are not synchronised by resource
+// barriers - executed only behind the opt-in -ForceGrow smoke switch. An untaken
+// branch behind an unrun flag is not coverage.
+//
+// The floors are now small enough that GROWTH IS STRUCTURAL, not incidental:
+//
+//   * The buffers are created at exactly these capacities in Renderer::Init,
+//     before any frame. That is what keeps them non-zero - the buffer always
+//     exists, which is the one property worth preserving from the old comment.
+//   * A floor of 4 object records is 2 draws, so ANY scene with 3 or more
+//     renderables - i.e. every scene this engine has ever drawn - exceeds it on
+//     frame one and takes the grow path immediately. Same for 2 materials.
+//   * The frame-one grow leaves 2*maxDraws + kCapacityHeadroom, which the smoke
+//     growth test's +80 entities then exceeds again MID-RUN, with frames
+//     genuinely in flight. That second grow is the hazardous one; the frame-one
+//     grow has nothing in flight behind it and is the easy case.
+//
+// Both happen on a default smoke run and tools/smoke_test.ps1 asserts on both.
+// DO NOT raise these back to "amortise better": the headroom below is what
+// amortises growth, and raising the floors past the scene size puts the
+// use-after-free branch back behind a flag nobody runs.
+constexpr uint32_t kMinObjectCapacity   = 4;
+constexpr uint32_t kMinMaterialCapacity = 2;
 
 uint32_t RequiredObjectCapacity(uint32_t maxDraws);
 uint32_t RequiredMaterialCapacity(uint32_t maxDraws);
@@ -226,6 +266,15 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws);
 // Capacity a FrameStructuredBuffer grows to when `elementCount` is requested.
 // Never shrinks: shrinking would mean destroying a buffer a recorded command
 // list may still reference. The headroom is what makes growth amortise.
+//
+// Headroom is added only when growing from an EXISTING allocation. The first
+// allocation - currentCapacity 0 - is sized exactly, for two reasons. It is not
+// a reallocation, so there is no old buffer to release and nothing to amortise
+// against. And it is what makes the floors mean what they say: a buffer created
+// at kMinObjectCapacity holds kMinObjectCapacity elements, so the first frame
+// with a real scene must cross it. Folding headroom into the initial allocation
+// would silently hand a 4-element floor a 68-element buffer and put the whole
+// engine back under the floor.
 constexpr uint32_t kCapacityHeadroom = 64;
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount);
 

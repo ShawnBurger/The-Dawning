@@ -752,6 +752,16 @@ int App::RunMainLoop()
             m_running = false;
             break;
         }
+        // Deliberately NOT gated on --smoke-rt, unlike the mutation stress above.
+        // This is what forces the per-draw structured buffers to REALLOCATE
+        // mid-run with frames in flight, and that swap is a raster-path hazard,
+        // not an RT one: it is Renderer::BeginFrame's root SRVs that address the
+        // buffers being released. Leaving it inside the RT-only block meant a
+        // -RasterOnly run performed only the frame-one grow, which has nothing
+        // outstanding behind it and stays green even with the deferred-release
+        // fence deleted outright. Verified: with DeferredRelease replaced by an
+        // immediate Reset, the default run dies here and -RasterOnly passed.
+        ApplySmokeGrowthStress();
 
         if (m_options.smoke)
         {
@@ -836,10 +846,18 @@ int App::RunMainLoop()
                     m_renderer.MaterialBufferCapacity(),
                     m_renderer.ShadowRecords(),
                     m_renderer.MainRecords());
-                // Proof that the reallocation branch actually ran. Zero in an
-                // ordinary run; --smoke-force-grow is what makes it nonzero.
-                core::Log::Infof("[SMOKE] structured_buffer_reallocations=%u",
-                                 m_renderer.StructuredBufferReallocations());
+                // Proof that the reallocation branch actually ran, and - the
+                // part that matters - that it ran with frames in flight. Both
+                // are nonzero on a DEFAULT run now: the capacity floors sit
+                // below any real scene and Renderer::Init allocates at them, so
+                // frame one reallocates, and the +80 growth entities above
+                // reallocate again mid-run while earlier frames are still
+                // executing. --smoke-force-grow is now a heavier case rather
+                // than the only case. See src/render/gpu_draw_records.h.
+                core::Log::Infof("[SMOKE] structured_buffer_reallocations=%u "
+                                 "structured_buffer_reallocations_in_flight=%u",
+                                 m_renderer.StructuredBufferReallocations(),
+                                 m_renderer.StructuredBufferReallocationsInFlight());
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }
@@ -1112,7 +1130,41 @@ bool App::ApplySmokeRTMutationStress()
         material.emissiveTextureHandle = m_smokeSavedEmissiveTexture;
         core::Log::Info("[SMOKE] rt_texture_churn=passed");
     }
-    else if (m_frameCount == 8)
+
+    return true;
+}
+
+// =============================================================================
+// ApplySmokeGrowthStress — the mid-run entity churn, in BOTH smoke modes
+// =============================================================================
+// Adds 80 renderables at frame 8 and destroys them at frame 16. It does two
+// separate jobs, which is why it is no longer inside ApplySmokeRTMutationStress:
+//
+//   * In an RT run it churns TLAS topology, which is what rt_topology_churn
+//     reports. That was its original and only purpose.
+//   * In EVERY run it drives Renderer::EnsureFrameStructuredBuffer's
+//     reallocate-and-DeferredRelease branch, mid-run, with earlier frames still
+//     executing. 17 demo renderables need 34 object records, so frame one grows
+//     the buffer to 34 + kCapacityHeadroom = 98; 97 renderables need 194, which
+//     that cannot absorb. See src/render/gpu_draw_records.h.
+//
+// The second job is a RASTER hazard - Renderer::BeginFrame's root SRVs are what
+// address the released buffers - so gating the whole thing on --smoke-rt left
+// -RasterOnly performing only the frame-one grow. That grow has nothing
+// outstanding behind it, so it cannot observe a missing fence: with
+// DeferredRelease replaced by an immediate Reset, a -RasterOnly run passed
+// completely green while the default run died on this churn.
+//
+// The marker names keep their rt_ prefix because tools/smoke_test.ps1 asserts
+// rt_topology_churn by name in its path-tracing branch. Renaming them would be a
+// silent contract change for a cosmetic gain.
+//
+// Frame 16 is far enough ahead of the capture frame that the churn entities are
+// long destroyed before any pixel or draw-index assertion runs, and they sit at
+// world x/z = 100000 regardless, well outside the view.
+void App::ApplySmokeGrowthStress()
+{
+    if (m_frameCount == 8)
     {
         m_smokeGrowthEntities.reserve(80);
         for (uint32_t i = 0; i < 80; ++i)
@@ -1137,8 +1189,6 @@ bool App::ApplySmokeRTMutationStress()
         m_smokeGrowthEntities.clear();
         core::Log::Info("[SMOKE] rt_topology_churn=passed");
     }
-
-    return true;
 }
 
 render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep) const
