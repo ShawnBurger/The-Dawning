@@ -111,8 +111,20 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            double-precision texel snap so distant edges do not crawl as the
            camera translates. Reach is ~448 world units, up from 24. Cascade 0 is
            bit-identical to the old single cascade, so the near field is
-           unchanged. Costs 256 bytes of constant ring per entity per cascade;
-           see the ring note below
+           unchanged. Cascades cost NOTHING per entity in the constant ring:
+           per-object and per-material data live in structured buffers indexed
+           by a root constant, and the light view-projection is a per-PASS
+           cbuffer, so each cascade costs one flat 256-byte upload and the four
+           cascades share one set of object records. Ring peak is 1792 bytes,
+           flat, in both smoke modes
+           Per-draw record indexing is asserted ON THE GPU by the draw-index
+           witness: ObjectData carries its own index, both vertex shaders write
+           the index they LOADED into a root UAV at u0/space2, and the smoke
+           harness reads it back and requires the identity permutation. This is
+           the only check on the invariant a root SRV leaves unvalidated - no
+           descriptor, no stride, and a scene drawn entirely from record 0 looks
+           plausible. It costs one uint store per vertex in both raster vertex
+           shaders, permanently, in every configuration
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
            and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a

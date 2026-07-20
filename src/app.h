@@ -22,6 +22,10 @@ struct AppOptions
     bool smokeFullQuality = false;
     bool smokeCapture = false;
     bool smokeResize = false;
+    // Forces the per-draw structured buffers to REALLOCATE repeatedly while
+    // frames are in flight. See App::RenderFrame - this is the only way that
+    // branch executes at all.
+    bool smokeForceGrow = false;
     bool smokeUnlocked = false;
     bool gpuValidation = false;
     bool showOverlay = true;

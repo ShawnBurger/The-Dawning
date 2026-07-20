@@ -4,6 +4,7 @@ param(
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
+    [switch]$ForceGrow,
     [switch]$Unlocked,
     [switch]$GPUValidation,
     [int]$TimeoutSeconds = 15,
@@ -64,6 +65,7 @@ if (!$RasterOnly)  {
 }
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
+if ($ForceGrow)    { $arguments += "--smoke-force-grow" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if ($GPUValidation){ $arguments += "--gpu-validation" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
@@ -196,26 +198,222 @@ if ($RasterOnly) {
     Assert-Marker "shadow_cascade_texel_monotonic" "yes"
 }
 
-# Constant-ring headroom. The ring is fixed at kCBRingSize and every shadowed
-# entity now costs 1536 bytes per frame: 256 per-object + 256 material + 256 for
-# each of the 4 cascades, because the casters are walked once per cascade.
-# Cascades roughly halved the entity ceiling - measured, this run peaks at 57% of
-# capacity with 97 entities, against 29% before, so the gate trips somewhere near
-# 127 entities. Overflow is already an error, but by then draws are reading
-# address zero. This fails while there is still room to do something about it.
-# The threshold is deliberately loose - it is a scaling alarm, not an appearance
-# check. The real fix is per-object data in a structured buffer indexed by draw;
-# per-cascade caster culling would also help, but Mesh carries no bounds yet.
+# -----------------------------------------------------------------------------
+# Constant-ring FLATNESS
+# -----------------------------------------------------------------------------
+# This replaces a "fail at 75% of kCBRingSize" gate, which after the per-object
+# structured-buffer change could not fire on the regression it existed to catch.
+# The ring no longer scales with entity count at all: per-object and per-material
+# data live in structured buffers, and the only ring traffic left is CBPerFrame
+# plus one CBPerPass per pass. Measured peak is 1792 bytes in BOTH smoke modes -
+# 1% of the 256 KB ring. Restoring the ENTIRE pre-change per-draw traffic would
+# reach roughly 24% here, so a 75% gate would have sat there passing forever
+# while the very thing it was watching for went unnoticed.
+#
+# So gate on FLATNESS instead of on a fraction of a fixed capacity. The budget
+# below scales with the cascade count - a fifth cascade legitimately costs one
+# more 256-byte cbuffer - but NOT with entity count. Any per-draw ring
+# allocation reintroduced anywhere immediately blows it: one 256-byte upload per
+# caster at this scene's draw count is already an order of magnitude over.
+#
+# This is a gate that can actually trip, which the previous one was not.
 if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capacity")) {
     $peak = [double]$markers["cb_ring_peak"]
     $cap  = [double]$markers["cb_ring_capacity"]
     $pct  = [int](100 * $peak / $cap)
     Write-Host "Constant ring peak: $peak / $cap bytes ($pct%)"
-    if ($pct -ge 75) {
-        throw "Constant ring at $pct% of capacity. Raise kCBRingSize or move per-object data into a structured buffer before adding draws."
+
+    $cascades = if ($markers.ContainsKey("shadow_cascades")) { [int]$markers["shadow_cascades"] } else { 4 }
+    # CBPerFrame rounded up to the 256-byte constant alignment (512 with four
+    # cascade matrices), plus one CBPerPass per shadow cascade and one for the
+    # main pass, plus one spare slot of slack for a future per-pass constant.
+    $flatBudget = 512 + (($cascades + 1) * 256) + 256
+
+    if ($peak -gt $flatBudget) {
+        $perDrawCost = 0
+        if ($markers.ContainsKey("shadow_records")) {
+            $perDrawCost = [int]$markers["shadow_records"] * 256
+        }
+        throw ("Constant ring peak is $peak bytes, above the flat budget of $flatBudget for " +
+               "$cascades cascades. The ring is supposed to hold only CBPerFrame and one " +
+               "CBPerPass per pass, so its peak must not depend on entity count. This says " +
+               "something now allocates from the ring PER DRAW - at this scene's draw count " +
+               "one 256-byte upload per caster would add about $perDrawCost bytes. Find the " +
+               "new UploadCB call on a per-draw path and move that data into the object or " +
+               "material structured buffer instead. Do NOT raise this budget to make the " +
+               "failure go away: the budget scales with cascade count on purpose and with " +
+               "nothing else, and raising it re-creates the entity ceiling this change removed.")
     }
 }
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
+
+# -----------------------------------------------------------------------------
+# Per-draw structured-buffer REALLOCATION
+# -----------------------------------------------------------------------------
+# EnsureFrameStructuredBuffer's grow branch allocates kFrameCount replacement
+# buffers, unmaps and DeferredReleases the outgoing ones, and swaps them in. It
+# is the only code in the per-object structured-buffer design that can
+# use-after-free: kFrameCount frames may still be reading the buffers it
+# releases, and CPU writes to persistently mapped UPLOAD memory are not
+# synchronised by resource barriers, so nothing but the deferred-release fence
+# stands between it and a live buffer being freed underneath a frame in flight.
+#
+# In an ordinary run it NEVER EXECUTES. The demo scene's draw count sits under
+# kMinObjectCapacity, so after the first allocation the function early-outs on
+# every frame. -ForceGrow ramps the sizing hint so the buffers reallocate
+# repeatedly, mid-run, with frames genuinely in flight.
+#
+# Assert it actually happened rather than assuming the flag worked: a hint ramp
+# that stopped crossing capacity boundaries would leave this whole path
+# uncovered again while the run still passed.
+if ($markers.ContainsKey("structured_buffer_reallocations")) {
+    $reallocs = [int]$markers["structured_buffer_reallocations"]
+    Write-Host "Structured-buffer reallocations: $reallocs"
+    if ($ForceGrow -and $reallocs -lt 5) {
+        throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
+               "The grow branch is meant to run many times under this switch; if the " +
+               "sizing hint no longer crosses capacity boundaries then the one code " +
+               "path here that can use-after-free is going untested. Check the " +
+               "--smoke-force-grow ramp in App::RenderFrame against kCapacityHeadroom.")
+    }
+    if (-not $ForceGrow -and $reallocs -ne 0) {
+        Write-Host "  (note: buffers reallocated without -ForceGrow; the scene outgrew the capacity floor)"
+    }
+}
+
+# Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
+# walk the same MeshInstance pool in the same order with identical
+# visible/Transform/Material filters, so they issue the same number of draws.
+# That is what makes 2 x MeshInstanceCount() sufficient capacity for the shared
+# object buffer - and it is enforced nowhere in the code. Asserting the
+# INVARIANT rather than a magic entity count means it survives the demo scene
+# changing, and a future divergence (frustum culling, a castsShadow flag, an LOD
+# cut) surfaces here as a test failure instead of as a wrong-looking frame.
+foreach ($k in @("shadow_records", "main_records", "object_records_peak", "object_capacity")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+$shadowRecords = [uint32]$markers["shadow_records"]
+$mainRecords   = [uint32]$markers["main_records"]
+if ($shadowRecords -ne $mainRecords) {
+    throw (("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+            "The two scene walks no longer issue the same draws.") -f $shadowRecords, $mainRecords)
+}
+if ($shadowRecords -lt 1) {
+    throw "No per-object records were written by either pass; the raster path drew nothing."
+}
+# The object buffer is shared by both passes at disjoint index ranges, so its
+# peak occupancy must be exactly the two counts summed, and must fit.
+if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
+    throw (("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+            "overlapping in the object buffer rather than taking disjoint ranges.") -f `
+            $markers["object_records_peak"], ($shadowRecords + $mainRecords))
+}
+if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
+    throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
+           $markers["object_records_peak"], $markers["object_capacity"])
+}
+
+# -----------------------------------------------------------------------------
+# The draw-index witness: every draw read ITS OWN per-object record
+# -----------------------------------------------------------------------------
+# THE assertion this harness exists to make about the per-object structured
+# buffer, and the one nothing else can make.
+#
+# Per-object and per-material data live in structured buffers indexed by a
+# per-draw root constant at b3. Those are ROOT SRVs: a bare GPU virtual address,
+# no descriptor, no StructureByteStride. Nothing in the runtime, the debug layer
+# or the PIX capture cross-checks that basic_vs.hlsl indexed objectBuffer with
+# the constant it was handed rather than with a literal 0 - and a scene rendered
+# entirely from record 0 draws every entity with the first entity's transform,
+# which still looks like a scene and passes every loose threshold above.
+#
+# The CPU-side counters next door cannot cover it either. shadow_records,
+# main_records and object_records_peak count what was WRITTEN; all three stay
+# perfectly correct while the GPU reads the wrong element.
+#
+# So the shaders write it down. ObjectData carries recordId, set by the CPU to
+# the element's own index; both vertex shaders write the recordId they LOADED
+# into a UAV slot chosen by the root constant they were GIVEN. Correct indexing
+# leaves the identity permutation. See gpu_draw_records.h.
+#
+# Raster only: the probe runs on the capture frame, and a path-traced frame runs
+# neither raster pass.
+if ($RasterOnly) {
+    foreach ($k in @("draw_index_identity", "draw_index_mismatches",
+                     "draw_index_shadow_records", "draw_index_shadow_distinct",
+                     "draw_index_main_records",   "draw_index_main_distinct")) {
+        if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+    }
+
+    $diShadowRecords  = [uint32]$markers["draw_index_shadow_records"]
+    $diShadowDistinct = [uint32]$markers["draw_index_shadow_distinct"]
+    $diMainRecords    = [uint32]$markers["draw_index_main_records"]
+    $diMainDistinct   = [uint32]$markers["draw_index_main_distinct"]
+
+    Write-Host ("Draw-index witness: shadow {0}/{1} distinct, main {2}/{3} distinct, {4} mismatches" -f `
+                $diShadowDistinct, $diShadowRecords, $diMainDistinct, $diMainRecords,
+                $markers["draw_index_mismatches"])
+
+    # Both passes must have drawn something, or the checks below are vacuous:
+    # zero records trivially give zero distinct and zero mismatches.
+    if ($diShadowRecords -lt 2) {
+        throw (("draw_index_shadow_records={0}; fewer than two shadow draws means the " +
+                "distinct-index check cannot distinguish correct indexing from every " +
+                "draw sharing one record.") -f $diShadowRecords)
+    }
+    if ($diMainRecords -lt 2) {
+        throw (("draw_index_main_records={0}; fewer than two main-pass draws means the " +
+                "distinct-index check cannot distinguish correct indexing from every " +
+                "draw sharing one record.") -f $diMainRecords)
+    }
+
+    # DISTINCT INDEX COUNT PER PASS. N draws must have read N different records.
+    # Checked per pass because the two failure modes are one-sided: basic_vs
+    # reading record 0 leaves the shadow pass flawless and vice versa, so a
+    # single combined count would be dragged only halfway by either.
+    #
+    # This is what collapses to 1 when the root constant stops reaching a shader.
+    if ($diShadowDistinct -ne $diShadowRecords) {
+        throw (("Shadow pass read {0} distinct object records across {1} draws. " +
+                "The per-draw root constant at b3 is not reaching shadow_vs.hlsl, or " +
+                "shadow_vs.hlsl is not indexing objectBuffer with it - so multiple " +
+                "shadow draws are rasterising with one entity's transform. A count of " +
+                "1 means every draw read the same record.") -f `
+                $diShadowDistinct, $diShadowRecords)
+    }
+    if ($diMainDistinct -ne $diMainRecords) {
+        throw (("Main pass read {0} distinct object records across {1} draws. " +
+                "The per-draw root constant at b3 is not reaching basic_vs.hlsl, or " +
+                "basic_vs.hlsl is not indexing objectBuffer with it - so multiple " +
+                "draws are shading with one entity's transform. A count of 1 means " +
+                "every draw read the same record.") -f $diMainDistinct, $diMainRecords)
+    }
+
+    # THE STRONG FORM: slot i holds record i, for every allocated slot in both
+    # passes. Asserted as well as the distinct counts because distinctness alone
+    # would accept a PERMUTATION - every draw reading a different record, but not
+    # its own - which renders every object with another object's transform and is
+    # exactly what the disjoint shadow/main ranges in gpu_draw_records.h exist to
+    # prevent. A permutation leaves both distinct counts perfect.
+    Assert-Marker "draw_index_identity" "yes"
+    if ([uint32]$markers["draw_index_mismatches"] -ne 0) {
+        throw (("draw_index_mismatches={0}: that many draws read a record other than " +
+                "the one the cursor allocated for them. Diff shaders/basic_vs.hlsl, " +
+                "shaders/shadow_vs.hlsl and src/render/gpu_draw_records.h - ObjectData " +
+                "must be byte-identical in all three, and a layout disagreement reads " +
+                "shifted garbage that nothing else validates.") -f `
+                $markers["draw_index_mismatches"])
+    }
+
+    # The witness must agree with the counters that are derived independently, or
+    # one of the two is measuring a different frame than it claims.
+    if ($diShadowRecords -ne $shadowRecords -or $diMainRecords -ne $mainRecords) {
+        throw (("Draw-index witness saw shadow={0} main={1} but the record counters " +
+                "reported shadow={2} main={3}. The witness readback and the record " +
+                "counters are describing different frames.") -f `
+                $diShadowRecords, $diMainRecords, $shadowRecords, $mainRecords)
+    }
+}
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
     throw "Scene shutdown did not retire any raster texture descriptors."
@@ -323,6 +521,38 @@ if (!$NoCapture) {
     if ($meanLum -gt 245)     { throw "Capture is blown out (mean luminance $([math]::Round($meanLum,1)))." }
     if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
+
+    # -------------------------------------------------------------------------
+    # There is DELIBERATELY no golden-value gate on these statistics.
+    # -------------------------------------------------------------------------
+    # One used to live here: exact mean luminance and an exact colour-bucket
+    # count, +/-0.5. It was deleted rather than repaired, and the reasoning is
+    # worth keeping so nobody reintroduces it.
+    #
+    # It was guarding a real invariant - that the per-draw root constant at b3
+    # reaches every draw path, so each draw reads its own object record, which a
+    # root SRV leaves completely unvalidated at runtime. But it guarded that
+    # invariant THROUGH THE RENDERED IMAGE, and the rendered image is a function
+    # of which assets happen to sit in build/<Config>. That is build output, not
+    # tracked source, so two checkouts of the same commit legitimately produce
+    # different numbers. The gate was mis-calibrated twice in a single round on
+    # exactly that: 128.3 measured before four-cascade shadows landed, then 122.9
+    # measured on a clean 17-entity clone, while the tree the harness actually
+    # runs in has a gitignored corridor GLB loaded and renders 64 buckets.
+    #
+    # It also could not do the job even when calibrated. Pinning shadow_vs.hlsl
+    # to record 0 was measured at mean 123.6 / 58 buckets against a correct
+    # 122.9 / 59 - one bucket and 0.7 luminance, well inside the cross-checkout
+    # drift that destabilised the gate. A tolerance loose enough to be stable
+    # could not see the failure; one tight enough to see it could not stay green.
+    #
+    # The invariant is now asserted directly and on the GPU side, by the
+    # draw_index_* markers below. Those are exact integers produced by the draw
+    # loop and are independent of the scene, the assets and the lighting.
+    # DO NOT put a golden-value gate back here. If you want appearance
+    # regression testing, the right tool is a reference-image comparison against
+    # a committed image, which is a different mechanism with different
+    # requirements.
 }
 
 if ($RasterOnly) {
