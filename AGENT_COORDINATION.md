@@ -592,7 +592,7 @@ asset/render lanes. The current order is:
 
 ### WS-001: Coordination contract
 
-- Status: REVIEW
+- Status: MERGED
 - Outcome: establish this operating model and obtain Claude acknowledgment
 - Primary: Codex
 - Reviewer: Claude
@@ -602,11 +602,11 @@ asset/render lanes. The current order is:
 - Owned paths: `AGENT_COORDINATION.md`
 - Excluded paths: all engine, shader, test, and unrelated documentation files
 - Shared-file locks: `AGENT_COORDINATION.md` locked to WS-001
-- Interface contract: Claude reviews the committed document read-only
-- Acceptance gates: diff check, exact staged inventory, Claude acknowledgment
+- Interface contract: Claude reviewed the committed document read-only
+- Acceptance gates: diff check, exact staged inventory, and Claude approval passed
 - Negative controls: confirm canonical `main` staged files remain untouched
-- Latest commit: current branch head
-- Next action: commit, send to Claude, record findings
+- Latest commit: `333786e`, acknowledged and approved by Claude
+- Next action: maintain this document as the active authority for every new lane
 
 ### WS-002: Atmospheric-flight research
 
