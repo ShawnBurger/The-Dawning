@@ -62,6 +62,7 @@ set(RENDER_SOURCES
     src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
+    src/render/rt_texture_lod.cpp
     src/render/path_tracer.cpp
 )
 
@@ -78,6 +79,7 @@ set(RENDER_HEADERS
     src/render/debug_overlay.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
+    src/render/rt_texture_lod.h
     src/render/path_tracer.h
 )
 
@@ -131,6 +133,7 @@ set(TEST_SOURCES
     tests/test_gltf_importer.cpp
     tests/test_shadow_cascades.cpp
     tests/test_gpu_draw_records.cpp
+    tests/test_rt_texture_lod.cpp
 )
 
 set(TEST_HEADERS
@@ -296,6 +299,12 @@ add_executable(TheDawningTests
     # with no device. Do NOT add renderer.cpp or anything else from src/render.
     src/render/gpu_draw_records.cpp
     src/render/gpu_draw_records.h
+    # Ray-cone texture LOD arithmetic. Also safe here for the same reason:
+    # rt_texture_lod.h includes only <cstdint>/<cmath> and no D3D12 header, so
+    # the LOD formulae compile on a machine with no device. Do NOT add
+    # path_tracer.cpp or rt_pipeline.cpp - both pull in d3d12.h.
+    src/render/rt_texture_lod.cpp
+    src/render/rt_texture_lod.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

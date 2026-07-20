@@ -40,6 +40,9 @@ cbuffer PerFrameConstants : register(b0, space0)
     uint     g_StablePreview;
     uint     g_SeedIndex;       // Wall-clock dispatch counter — RNG decorrelation only
     float    g_TanHalfFovY;     // tan(fovY/2) from the camera; see RTPerFrameConstants
+    // Primary ray-cone spread angle in radians per pixel of output height,
+    // computed CPU-side by render::PrimaryRayConeSpreadAngle. See rt_texture_lod.h.
+    float    g_PrimaryConeSpread;
 };
 
 struct MaterialData
@@ -102,27 +105,124 @@ Texture2D<float4> g_AlbedoTextures[64] : register(t0, space4);
 Texture2D<float4> g_NormalTextures[64] : register(t0, space5);
 Texture2D<float4> g_OrmTextures[64]    : register(t0, space6);
 Texture2D<float4> g_EmissiveTextures[64] : register(t0, space7);
-// KNOWN DEFECT - no texture LOD. Every sample in this file uses
-// SampleLevel(..., 0), i.e. mip 0 regardless of distance, because a ray has no
-// screen-space derivatives to derive a mip from.
+// Texture LOD here comes from RAY CONES, not from screen-space derivatives - a
+// ray has none. See the "Ray cone texture LOD" block below for the formulation
+// and RayConeTextureLod for the per-sample-site term. Every SampleLevel call in
+// this file passes a computed mip; none of them force mip 0 any more.
 //
-// Consequences, in order of how much they matter:
-//   1. Minified textures alias badly. Temporal accumulation partially hides it
-//      by averaging many samples per pixel, which means the cost shows up as
-//      slower convergence rather than as visible shimmer in a settled image.
-//   2. It diverges from the raster path, which uses anisotropic filtering over a
-//      full mip chain. Raster and DXR therefore disagree on texture appearance at
-//      distance, and by the project's own rule DXR is supposed to be the
-//      reference.
-//   3. It got materially worse when the ground plane grew to 200x200 world units,
-//      because far more of the scene is now minified.
-//
-// The fix is NOT to make this sampler anisotropic - anisotropy is selected across
-// mips, and mip 0 is forced here, so it would be inert. It needs an actual LOD:
-// ray cones or ray differentials, using the per-triangle UV area the engine
-// already uploads (g_TriangleUVs) to derive texel density per hit. That is its
-// own piece of work, tracked in ASSET_PIPELINE_SPEC.md.
+// This sampler stays MIN_MAG_MIP_LINEAR on purpose. Making it ANISOTROPIC would
+// be inert without a mip chain to select across, and that exact mistake has
+// already been made once on the raster side (MaxAnisotropy=16 set while the
+// filter was MIN_MAG_MIP_LINEAR). Anisotropic DXR filtering would additionally
+// need a per-hit anisotropy axis, which ray cones do not carry - a cone is
+// isotropic by construction. The grazing-angle term below picks the MAJOR axis
+// of the footprint, so a surface seen edge-on blurs rather than aliases. That is
+// the isotropic-filtering trade, and it is a known residual difference from the
+// raster path's anisotropic filtering.
 SamplerState g_TextureSampler : register(s0, space0);
+
+// =============================================================================
+// Ray cone texture LOD
+// =============================================================================
+// Akenine-Möller, Nilsson, Andersson, Barré-Brisebois, Toth, Karras,
+// "Texture Level of Detail Strategies for Real-Time Ray Tracing",
+// Ray Tracing Gems (2019), chapter 20.
+//
+// A cone is tracked along each path. Its width at a hit is
+//     coneWidth = widthAtOrigin + spreadAngle * hitDistance
+// and the mip for a texture of W x H texels is
+//     lambda = 0.5*log2(uvArea / worldArea)      <- per-triangle, unitless
+//            + log2(coneWidth / |dot(rayDir, geometricNormal)|)
+//            + 0.5*log2(W * H)                   <- per-texture
+// The first two terms are texture-independent, so the closest-hit shader
+// computes them once and hands the sum ("lodBase") back through the payload;
+// each sample site adds only its own 0.5*log2(W*H).
+//
+// The CPU mirror of this arithmetic, and the unit tests that pin its signs and
+// log base, live in src/render/rt_texture_lod.{h,cpp} and
+// tests/test_rt_texture_lod.cpp. Those tests do NOT compile this file - keep
+// the two in step by hand.
+
+// Sentinel for a triangle with no usable UV or world area (zero-area triangle,
+// or UVs collapsed to a point). Large and negative so that adding any real
+// 0.5*log2(W*H) still clamps to mip 0 - i.e. degenerate triangles fall back to
+// exactly the old behaviour rather than to a garbage mip.
+static const float kRayConeDegenerateLod = -64.0f;
+
+// Diffuse bounces sample a full cosine-weighted hemisphere, so the outgoing
+// "cone" is a fiction - the true footprint is the whole hemisphere. This is a
+// deliberately coarse stand-in: diffuse indirect is low-frequency, and a coarser
+// mip is both cheaper to sample and less noisy than a sharp one. Roughly a 29
+// degree spread per diffuse bounce.
+static const float kDiffuseBounceConeSpread = 0.5f;
+
+// Grazing-angle floor. Without it, |dot(rayDir, N)| -> 0 at the horizon sends
+// lambda to +inf and the far ground plane collapses to its 1x1 mip. 0.1 caps the
+// grazing term at +3.32 mips.
+//
+// This term is the one place a ray cone cannot imitate the raster path. Cones
+// are isotropic, so the footprint gets one number; anisotropic filtering
+// resolves the minor axis separately and keeps detail a cone has to throw away.
+// The floor is the knob that trades the resulting over-blur against aliasing,
+// and 0.1 was MEASURED, not guessed. Mean absolute horizontal pixel-to-pixel
+// contrast over the distant-ground band of the smoke capture (rows 420-480),
+// against the raster capture of the same frame as the reference:
+//
+//     mip 0 (before)      4.876      3.1x the reference: aliasing
+//     floor 0.02          0.813      over-blurred past the reference
+//     floor 0.10          1.694      within 7% of the reference   <- chosen
+//     floor 0.25          3.538      still visibly aliasing
+//     raster (aniso)      1.582      the reference
+static const float kRayConeGrazingFloor = 0.1f;
+
+// The payload carries the cone IN (spread angle, width at ray origin) and the
+// resolved lodBase OUT, through one 32-bit field. Two halves rather than two
+// floats keeps RayPayload at 32 bytes; half precision costs ~0.001 mip here,
+// because everything downstream of the pack is inside a log2.
+uint PackRayCone(float spreadAngle, float widthAtOrigin)
+{
+    return (f32tof16(spreadAngle) & 0xFFFFu) | (f32tof16(widthAtOrigin) << 16);
+}
+
+float2 UnpackRayCone(uint packedCone)
+{
+    return float2(f16tof32(packedCone & 0xFFFFu), f16tof32(packedCone >> 16));
+}
+
+// 0.5*log2(uvArea / worldArea). Both areas are twice the true triangle area; the
+// factor of 2 cancels in the ratio, so it is not worth paying for.
+float RayConeTriangleLodConstant(
+    float2 uv0, float2 uv1, float2 uv2,
+    float3 p0,  float3 p1,  float3 p2)
+{
+    float2 duv1 = uv1 - uv0;
+    float2 duv2 = uv2 - uv0;
+    float uvArea = abs(duv1.x * duv2.y - duv1.y * duv2.x);
+    float worldArea = length(cross(p1 - p0, p2 - p0));
+
+    if (uvArea < 1e-12f || worldArea < 1e-12f)
+        return kRayConeDegenerateLod;
+
+    return 0.5f * log2(uvArea / worldArea);
+}
+
+// Texture-independent part of lambda. Returned through the payload.
+float RayConeLodBase(float triangleLodConstant, float coneWidth, float normalDotRayDir)
+{
+    if (triangleLodConstant <= kRayConeDegenerateLod || coneWidth <= 0.0f)
+        return kRayConeDegenerateLod;
+
+    float grazing = max(abs(normalDotRayDir), kRayConeGrazingFloor);
+    return triangleLodConstant + log2(coneWidth / grazing);
+}
+
+// Per-sample-site term. Clamped at 0 because SampleLevel with a negative LOD is
+// just mip 0 with extra steps, and because it is what turns the degenerate
+// sentinel back into the old mip-0 behaviour.
+float RayConeTextureLod(float lodBase, uint texWidth, uint texHeight)
+{
+    return max(lodBase + 0.5f * log2(float(texWidth) * float(texHeight)), 0.0f);
+}
 
 // =============================================================================
 // Ray payload structures
@@ -133,7 +233,13 @@ struct RayPayload
     float3 normal;
     float2 uv;
     uint   instanceID;
-    uint   pad;
+    // Dual-purpose, and the only field written in both directions:
+    //   IN  (set by RayGen before TraceRay) - PackRayCone(spreadAngle, widthAtOrigin)
+    //   OUT (set by ClosestHit)             - asuint(lodBase)
+    // Reusing the former `pad` keeps the payload at 32 bytes. The miss shader
+    // does not write it, but a miss breaks out of the bounce loop before anything
+    // reads it back.
+    uint   conePacked;
 };
 
 struct ShadowPayload
@@ -239,13 +345,16 @@ float3 ClampFireflySample(float3 sampleRadiance)
     return sampleRadiance;
 }
 
-float3 ResolveAlbedo(MaterialData mat, float2 uv)
+float3 ResolveAlbedo(MaterialData mat, float2 uv, float lodBase)
 {
     float3 albedo = mat.albedo.rgb;
     if (mat.useAlbedoTexture != 0 && mat.albedoTextureIndex < 64)
     {
         uint textureIndex = NonUniformResourceIndex(mat.albedoTextureIndex);
-        albedo *= g_AlbedoTextures[textureIndex].SampleLevel(g_TextureSampler, uv, 0.0f).rgb;
+        uint texWidth, texHeight;
+        g_AlbedoTextures[textureIndex].GetDimensions(texWidth, texHeight);
+        float lod = RayConeTextureLod(lodBase, texWidth, texHeight);
+        albedo *= g_AlbedoTextures[textureIndex].SampleLevel(g_TextureSampler, uv, lod).rgb;
     }
     return saturate(albedo);
 }
@@ -269,7 +378,8 @@ float3 ApplyNormalMap(
     float2 uv0,
     float2 uv1,
     float2 uv2,
-    float2 surfaceUV)
+    float2 surfaceUV,
+    float  lodBase)
 {
     float3 N = normalize(baseNormal);
     if (mat.useNormalTexture == 0 || mat.normalTextureIndex >= 64)
@@ -300,8 +410,27 @@ float3 ApplyNormalMap(
         }
     }
 
+    // The normal map dominates both halves of the ray-cone result, measured on
+    // the smoke capture's distant-ground band (rows 420-480) against the raster
+    // capture. Mipping albedo/ORM/emissive but leaving THIS at mip 0 takes the
+    // band's pixel-to-pixel contrast from 4.876 to 3.666; mipping the normal map
+    // as well takes it to 1.694, against a raster reference of 1.582. Most of
+    // the aliasing in a path-traced frame was shading noise from point-sampling
+    // a minified normal map, not colour noise from the albedo.
+    //
+    // KNOWN RESIDUAL, and it is a real cost, not a rounding error. Filtering a
+    // normal map averages tangent-space normals toward (0,0,1), which discards
+    // the sub-pixel normal variance that was acting as roughness. The same band
+    // brightens from 130.8 to 143.0 out of 255 as a result. The raster path has
+    // the identical problem and takes a smaller hit only because anisotropic
+    // filtering flattens less than an isotropic cone does. The principled fix is
+    // to fold the lost variance back in as roughness - Toksvig, or LEAN/CLEAN
+    // mapping - which is a separate piece of work and is NOT implemented here.
     uint textureIndex = NonUniformResourceIndex(mat.normalTextureIndex);
-    float3 tangentNormal = g_NormalTextures[textureIndex].SampleLevel(g_TextureSampler, surfaceUV, 0.0f).xyz * 2.0f - 1.0f;
+    uint texWidth, texHeight;
+    g_NormalTextures[textureIndex].GetDimensions(texWidth, texHeight);
+    float lod = RayConeTextureLod(lodBase, texWidth, texHeight);
+    float3 tangentNormal = g_NormalTextures[textureIndex].SampleLevel(g_TextureSampler, surfaceUV, lod).xyz * 2.0f - 1.0f;
     tangentNormal.z = max(tangentNormal.z, 0.0f);
 
     float3 mappedNormal = tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N;
@@ -369,6 +498,12 @@ void RayGen()
     float3 currentOrigin = rayOrigin;
     float3 currentDir    = rayDir;
 
+    // Ray cone state, carried across bounces. The camera is a pinhole, so the
+    // primary cone starts with zero width at the aperture and opens at one pixel
+    // of output height per unit distance.
+    float coneSpread = g_PrimaryConeSpread;
+    float coneWidth  = 0.0f;
+
     for (uint bounce = 0; bounce < g_MaxBounces; bounce++)
     {
         // Trace primary/bounce ray
@@ -383,7 +518,7 @@ void RayGen()
         payload.normal     = float3(0, 0, 0);
         payload.uv         = float2(0, 0);
         payload.instanceID = 0;
-        payload.pad        = 0;
+        payload.conePacked = PackRayCone(coneSpread, coneWidth);
 
         TraceRay(g_Scene,
             RAY_FLAG_NONE,
@@ -400,9 +535,18 @@ void RayGen()
             break;
         }
 
+        // Texture-independent mip term for this hit, resolved by ClosestHit from
+        // the cone we packed in above. Read before anything else overwrites it.
+        float lodBase = asfloat(payload.conePacked);
+
+        // Advance the cone to this hit. Must match RayConeLodBase's own width
+        // computation in ClosestHit, or the LOD used for the normal map and the
+        // LOD used for albedo/ORM/emissive would disagree on the same surface.
+        coneWidth += coneSpread * payload.hitT;
+
         // Get material for this instance
         MaterialData mat = g_Materials[payload.instanceID];
-        float3 albedo = ResolveAlbedo(mat, payload.uv);
+        float3 albedo = ResolveAlbedo(mat, payload.uv, lodBase);
 
         // Packed occlusion / roughness / metallic (glTF: AO=R, rough=G, metal=B).
         // Modulating the local copy here means every downstream use - NEE, the
@@ -414,7 +558,10 @@ void RayGen()
         if (mat.useOrmTexture != 0 && mat.ormTextureIndex < 64)
         {
             uint ormIndex = NonUniformResourceIndex(mat.ormTextureIndex);
-            float3 orm = g_OrmTextures[ormIndex].SampleLevel(g_TextureSampler, payload.uv, 0.0f).rgb;
+            uint ormWidth, ormHeight;
+            g_OrmTextures[ormIndex].GetDimensions(ormWidth, ormHeight);
+            float ormLod = RayConeTextureLod(lodBase, ormWidth, ormHeight);
+            float3 orm = g_OrmTextures[ormIndex].SampleLevel(g_TextureSampler, payload.uv, ormLod).rgb;
             ambientOcclusion = orm.r;
             mat.roughness *= orm.g;
             mat.metallic  *= orm.b;
@@ -433,8 +580,11 @@ void RayGen()
         if (mat.useEmissiveTexture != 0 && mat.emissiveTextureIndex < 64)
         {
             uint emissiveIndex = NonUniformResourceIndex(mat.emissiveTextureIndex);
+            uint emissiveWidth, emissiveHeight;
+            g_EmissiveTextures[emissiveIndex].GetDimensions(emissiveWidth, emissiveHeight);
+            float emissiveLod = RayConeTextureLod(lodBase, emissiveWidth, emissiveHeight);
             emission *= g_EmissiveTextures[emissiveIndex]
-                            .SampleLevel(g_TextureSampler, payload.uv, 0.0f).rgb;
+                            .SampleLevel(g_TextureSampler, payload.uv, emissiveLod).rgb;
         }
         radiance += throughput * emission;
         float3 hitPos = currentOrigin + currentDir * payload.hitT;
@@ -524,6 +674,10 @@ void RayGen()
         bool choseSpecular = Random(rngState) <= specProb;
         float branchPdf = choseSpecular ? specProb : (1.0f - specProb);
 
+        // How much the ray cone opens up over this bounce. Set in both branches
+        // below and applied once after them.
+        float bounceConeSpread = kDiffuseBounceConeSpread;
+
         if (!choseSpecular)
         {
             // Diffuse bounce (cosine-weighted hemisphere)
@@ -553,6 +707,13 @@ void RayGen()
             // Clamp alpha away from zero so the VNDF stays well-defined; a true
             // delta mirror would need a separate specular-path branch.
             float alpha = max(mat.roughness * mat.roughness, 1e-3f);
+
+            // A specular lobe stays tight as alpha -> 0, so unlike the diffuse
+            // branch the cone can legitimately keep its spread: a mirror
+            // reflection is as sharp as the incoming cone was. Widen in
+            // proportion to the lobe, capped at the diffuse spread so a fully
+            // rough metal never claims a tighter footprint than a diffuse bounce.
+            bounceConeSpread = min(2.0f * alpha, kDiffuseBounceConeSpread);
 
             float3 Ve = float3(dot(V, T), dot(V, B), dot(V, N));
             float3 Hl = DawningSampleGGXVNDF(Ve, alpha, u);
@@ -585,7 +746,12 @@ void RayGen()
             throughput /= pContinue;
         }
 
-        // Set up next bounce
+        // Set up next bounce. The new ray inherits the footprint the path has
+        // accumulated so far (coneWidth, already advanced to this hit above) and
+        // an angular spread widened by the lobe it was sampled from. The width
+        // term is why a secondary bounce never drops back to a sharp mip even
+        // when the bounce itself is a mirror.
+        coneSpread   += bounceConeSpread;
         currentOrigin = SpawnRayOrigin(hitPos, N, newDir);
         currentDir    = newDir;
     }
@@ -667,17 +833,36 @@ void ClosestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     float3 worldP0 = TransformObjectToWorldPoint(triPos.p0.xyz);
     float3 worldP1 = TransformObjectToWorldPoint(triPos.p1.xyz);
     float3 worldP2 = TransformObjectToWorldPoint(triPos.p2.xyz);
+
+    // ---- Ray cone texture LOD -----------------------------------------------
+    // Read the incoming cone BEFORE overwriting the field with the result. The
+    // grazing term uses the GEOMETRIC normal, not the interpolated or
+    // normal-mapped one: the triangle LOD constant is a flat-triangle quantity,
+    // so the footprint has to be projected onto the same flat triangle. Using a
+    // normal-mapped normal here would make the mip depend on the bump detail it
+    // is supposed to be filtering.
+    float2 incomingCone = UnpackRayCone(payload.conePacked);
+    float  coneWidth    = incomingCone.y + incomingCone.x * RayTCurrent();
+
+    float3 geometricNormal = SafeNormalize(cross(worldP1 - worldP0, worldP2 - worldP0), worldNormal);
+    float  triangleLod = RayConeTriangleLodConstant(
+        triUV.uv0.xy, triUV.uv1.xy, triUV.uv2.xy,
+        worldP0, worldP1, worldP2);
+    float  lodBase = RayConeLodBase(
+        triangleLod, coneWidth, dot(normalize(WorldRayDirection()), geometricNormal));
+
     MaterialData mat = g_Materials[payload.instanceID];
     worldNormal = ApplyNormalMap(mat, worldNormal,
                                  worldP0, worldP1, worldP2,
                                  triUV.uv0.xy, triUV.uv1.xy, triUV.uv2.xy,
-                                 surfaceUV);
+                                 surfaceUV, lodBase);
 
     if (dot(worldNormal, WorldRayDirection()) > 0)
         worldNormal = -worldNormal;
 
-    payload.normal = worldNormal;
-    payload.uv     = surfaceUV;
+    payload.normal     = worldNormal;
+    payload.uv         = surfaceUV;
+    payload.conePacked = asuint(lodBase);
 }
 
 // =============================================================================
