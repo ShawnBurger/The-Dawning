@@ -205,7 +205,11 @@ TEST_CASE(Sh_LinearEnvironmentMatchesAnalyticIrradiance)
         for (uint32_t i = 0; i < 32; ++i)
         {
             const core::Vec3f N = QueryNormal(i, 32);
-            const core::Vec3f E = core::EvaluateIrradiance(packed, N);
+            // RAW, deliberately. This is a closed-form identity about the
+            // reconstruction, and EvaluateIrradiance clamps to match the shader -
+            // a rendering decision that would quietly convert "the maths is
+            // wrong and went negative" into "the maths agrees, at zero".
+            const core::Vec3f E = core::EvaluateIrradianceRaw(packed, N);
 
             const float t = N.Dot(axis);
             const core::Vec3f expected = f.a * kPi + f.b * ((2.0f * kPi / 3.0f) * t);
@@ -265,4 +269,51 @@ TEST_CASE(Sh_ProjectionHasConvergedAtTheShippedSampleCount)
         if (d > worst) worst = d;
     }
     CHECK(worst < 1e-4f);
+}
+
+// =============================================================================
+// The C++ evaluator really is the HLSL evaluator, clamp included
+// =============================================================================
+// These two were NOT the same function. shaders/ibl_common.hlsli ends
+// DawningIrradianceSH with max(e, 0); core::EvaluateIrradiance did not - and the
+// [SMOKE] ibl_sh_agreement probe compared them to 1e-4 anyway. It passed for a
+// reason that was not about either function: THIS sky's reconstruction never
+// goes negative, so the clamp never fired and the difference never showed. A
+// steeper environment would have failed the probe with nothing wrong.
+//
+// So the clamp lives on both sides now, and this case is what stops it being
+// removed from one of them again. Coefficients that reconstruct negative are
+// hand-built rather than projected, because a physically valid environment
+// cannot produce them at L1 - which is precisely why the divergence survived
+// review in the first place.
+//
+// WATCHED FAILING: delete the max() from core::EvaluateIrradiance.
+TEST_CASE(Sh_EvaluatorClampsNegativeIrradianceExactlyAsTheShaderDoes)
+{
+    // DC of zero and a strong band-1 term: E(N) is a signed function of N.y that
+    // must go negative somewhere on the sphere.
+    core::SHColor9 packed;
+    for (uint32_t k = 0; k < core::kSHCoefficientCount; ++k)
+        packed.c[k] = core::Vec3f{ 0.0f, 0.0f, 0.0f };
+    packed.c[1] = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+
+    const core::Vec3f down{ 0.0f, -1.0f, 0.0f };
+
+    // The raw reconstruction goes negative, so the case is not vacuous...
+    const core::Vec3f raw = core::EvaluateIrradianceRaw(packed, down);
+    CHECK(raw.x < 0.0f);
+    CHECK(raw.y < 0.0f);
+    CHECK(raw.z < 0.0f);
+
+    // ...and the shipped evaluator clamps it, which is what the shader does.
+    const core::Vec3f clamped = core::EvaluateIrradiance(packed, down);
+    CHECK(clamped.x == 0.0f);
+    CHECK(clamped.y == 0.0f);
+    CHECK(clamped.z == 0.0f);
+
+    // Where the reconstruction is positive the two must be identical, or the
+    // clamp has become a transform.
+    const core::Vec3f up{ 0.0f, 1.0f, 0.0f };
+    CHECK(MaxComponentDelta(core::EvaluateIrradiance(packed, up),
+                            core::EvaluateIrradianceRaw(packed, up)) == 0.0f);
 }

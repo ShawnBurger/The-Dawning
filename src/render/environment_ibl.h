@@ -76,11 +76,20 @@
 //   3.2 roughness -> mip monotonicity                       (an inverted mapping)
 //   3.3 mirror agreement at roughness 0                     (mip 0; sampler address mode)
 //
-// WHAT NONE OF THEM COVER, said plainly rather than left to be discovered: they
-// witness shaders/ibl_common.hlsli, which is the header basic_ps.hlsl includes,
-// compiled by the same FXC at the same profile. They do NOT witness basic_ps's
-// CALL SITE. Deleting the IBL block from basic_ps leaves every marker below
-// green. See the note at the top of shaders/ibl_eval_probe_ps.hlsl.
+// WHAT NONE OF THEM COVER, said plainly: they witness shaders/ibl_common.hlsli,
+// which is the header basic_ps.hlsl includes, compiled by the same FXC at the
+// same profile. They do NOT witness basic_ps's CALL SITE. Deleting the IBL block
+// from basic_ps leaves every marker in this file green, and so does binding the
+// WRONG DESCRIPTOR at t0/space6 - the probes here get the cube through their own
+// SRV heap and would never notice.
+//
+// THAT GAP IS NOW CLOSED BY A DIFFERENT PROBE, in a different file, because it
+// is a different kind of evidence: render/ibl_consume_probe.h. It rides the
+// draw-record probe's UAV pattern, writes from basic_ps's own consumption site
+// on a raster frame, and runs a NEGATIVE CONTROL frame beside the live one so
+// the assertion is demonstrated to fail with the feature absent rather than
+// merely to pass with it present. Nothing in THIS file gained teeth; the
+// disclosure above is still exactly true of everything below it.
 // =============================================================================
 
 #include <cstdint>
@@ -179,13 +188,22 @@ static constexpr float kEnvSHAgreementTolerance = 1e-4f;
 //     here. CLAMP is kept because it is the honest declaration of intent, but no
 //     assertion in this repo depends on it and none can.
 //   * An OFF-BY-ONE in roughness -> mip. MEASURED: adding 1.0 to the mip moves
-//     the worst relative error from 0.0010 to 0.0018, far inside 2%, and leaves
-//     the monotonicity assertion passing too because the sequence is still
-//     rising. That is a property of THIS sky, not of the probe: adjacent mips of
-//     a smooth linear gradient differ by ~0.1%, which is at the half-precision
-//     noise floor. A high-contrast HDR environment would separate them. Stated
-//     here rather than left to be discovered, because the design claims 3.2
-//     covers "inverted or off by one" and only the first half is true.
+//     the worst relative error from 0.0010 to 0.001768, far inside 2%, so THIS
+//     assertion does not see it. Adjacent mips of a smooth linear gradient
+//     differ by ~0.1%, which is at the half-precision noise floor.
+//
+//     THE MONOTONICITY ASSERTION DOES SEE IT, and an earlier version of this
+//     comment claimed otherwise. RE-MEASURED by performing the mutation: 3.2
+//     fails with worst backward step -0.00098392 against a -1e-5 tolerance,
+//     deterministically, with identical numbers in both smoke modes. The
+//     mechanism is kEnvMipSweepLastSlot: the sweep excludes the 2x2 and 1x1
+//     faces' luminance reversal under the CORRECT mapping, and an off-by-one
+//     shifts that reversal down into the asserted window. The exclusion range
+//     and the detection are the same fact.
+//
+//     So the design's "inverted or off by one" claim for 3.2 holds. What does
+//     not hold is any claim that 3.3 covers the off-by-one; that is what this
+//     paragraph is for.
 static constexpr float kEnvMirrorTolerance = 0.02f;
 
 // Env-BRDF fit bounds.
@@ -214,6 +232,34 @@ static constexpr float kEnvBRDFGrazingFloor             = 0.80f;
 // F0 = 1 is a perfect mirror: single-scattering split-sum may LOSE energy at
 // high roughness (IBL_DESIGN.md 9.4, accepted) but must never create any.
 static constexpr float kEnvBRDFEnergyCeiling            = 1.02f;
+
+// THE SAME CLAIM FOR A DIELECTRIC, and it is a separate constant because the two
+// are separate claims with genuinely different answers.
+//
+// The F0 = 1 ceiling above cannot see the dielectric case at all: it reads
+// A + B, and at F0 = 0.04 the quantity that matters is 0.04*A + B. MEASURED over
+// the 8x8 grid, that reaches 1.042432 at (roughness 0, NdotV 0) - a smooth
+// dielectric at grazing incidence returning 4.2% MORE environment energy than
+// arrives at it. The old guard reported "no energy creation" while that number
+// sat unexamined in the same table.
+//
+// IT IS NOT A BUG AND IT IS NOT BEING HIDDEN. DawningEnvBRDFApprox is Lazarov's
+// analytic fit to the split-sum integral, accurate to a few percent and worst
+// exactly where this is - low roughness, grazing angles - and the reference
+// integral it fits does obey the bound. A 4.2% overshoot at one corner of the
+// domain is the documented cost of spending ~10 ALU instead of a heap slot on a
+// LUT (see the note above DawningEnvBRDFApprox in shaders/ibl_common.hlsli).
+//
+// So the honest guard is a bound on how far the FIT may stray, not a claim that
+// it never strays. 1.06 is the measured 1.0417 with margin, set once from the
+// measurement. WHAT IT STILL CATCHES: an A/B swap sends this to 1.29, and
+// re-expressing the fit with brdf_common.hlsli's direct-lighting Smith k moves
+// it too. What it deliberately does NOT do is fail for the 4.2%, which would be
+// asserting against a trade the design made on purpose.
+//
+// If a LUT ever replaces the fit, tighten this to kEnvBRDFEnergyCeiling and the
+// two claims become one.
+static constexpr float kEnvBRDFDielectricEnergyCeiling  = 1.06f;
 // ...and must not collapse. MEASURED minimum over the 8x8 grid: 0.452, at
 // roughness 1. That number is the single-scatter energy loss the design names,
 // stated here so the next reader can tell it from a regression.
@@ -245,6 +291,13 @@ static constexpr float kEnvBRDFEnergyFloor              = 0.35f;
 // below is half-ulp slack rather than room for a wrong answer, and the rise
 // floor sits at about half the measured 0.0376. An inverted mapping does not
 // merely miss that floor - it produces a rise of about -0.0376.
+//
+// THE EXCLUSION IS ALSO WHAT CATCHES AN OFF-BY-ONE, which is worth stating
+// because it reads like pure accommodation. Under the correct mapping slot 54 is
+// roughness 6/7 and lands on mip 6, just below the reversal. `mip + 1` sends that
+// same slot to mip 7 and drags the reversal INTO the window: MEASURED worst step
+// -0.00098392, a hard fail. Narrowing the range further to "be safe" would give
+// that mutation somewhere to hide.
 static constexpr uint32_t kEnvMipSweepLastSlot      = 54;
 static constexpr float    kEnvMipSweepStepTolerance = 1e-5f;
 static constexpr float    kEnvMipSweepMinRise       = 0.02f;
@@ -350,6 +403,11 @@ struct EnvironmentIBLValidation
     float worstGrazingReflectance   = 1.0f;   // min F0*A+B at NdotV = 0, F0 = 0.04
     float worstEnergyExcess         = 0.0f;   // max (A+B)   over the grid
     float worstEnergyShortfall      = 1.0f;   // min (A+B)   over the grid
+    // max (0.04*A + B) over the grid. A SEPARATE claim from worstEnergyExcess,
+    // not a restatement: F0*A + B is symmetric in A and B at F0 = 1, so the
+    // metal reading is blind to things the dielectric reading is not - which is
+    // the same asymmetry that makes the A/B swap invisible at F0 = 1.
+    float worstDielectricExcess     = 0.0f;
 
     // 3.2 - roughness -> mip.
     uint32_t mipSweepSlots     = 0;

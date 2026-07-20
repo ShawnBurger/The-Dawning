@@ -146,9 +146,35 @@ SHColor9 PackIrradianceCoefficients(const SHColor9& radiance);
 
 // E(N) = integral L(w) max(N.w, 0) dw, from PACKED coefficients.
 //
-// The twin of DawningIrradianceSH in shaders/ibl_common.hlsli. For constant
-// radiance L this returns PI*L exactly - the white furnace identity, which is
-// the unit case in tests/test_sh_irradiance.cpp.
+// THE TWIN OF DawningIrradianceSH in shaders/ibl_common.hlsli, and now actually
+// its twin. These two were NOT the same function: the HLSL ended with
+// `max(e, 0)` and this did not, while the GPU agreement probe compared them
+// against each other to 1e-4. The comparison was sound only because this sky
+// never drives the reconstruction negative - i.e. it was a fact about the
+// environment, not about the code, and a steeper environment would have failed
+// the probe for a reason that was not a defect.
+//
+// So the clamp is here too, and the RAW reconstruction is available separately
+// below for the callers that want the unclamped identity. The two entry points
+// name the difference instead of leaving it for the next reader to find in a
+// diff of two languages.
+//
+// For constant radiance L this returns PI*L exactly - the white furnace
+// identity, which is the unit case in tests/test_sh_irradiance.cpp.
 Vec3f EvaluateIrradiance(const SHColor9& packed, const Vec3f& normal);
+
+// The same dot product WITHOUT the clamp.
+//
+// The L2 projection is exact only for the bands it keeps, so a steep environment
+// can push the reconstruction slightly negative at grazing normals - and a
+// negative irradiance multiplied into albedo is a black rim that reads as a
+// normal-map bug, which is why the shipped path clamps. The closed-form identity
+// cases in tests/test_sh_irradiance.cpp assert against the UNCLAMPED
+// reconstruction, because clamping is a rendering decision and the identity they
+// check is a statement about the maths.
+//
+// Nothing in the engine calls this. If you are reaching for it in render code,
+// you want EvaluateIrradiance.
+Vec3f EvaluateIrradianceRaw(const SHColor9& packed, const Vec3f& normal);
 
 } // namespace core

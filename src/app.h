@@ -94,6 +94,15 @@ private:
     // the draw-record probe and the shadow-map probe: each needs a frame on which
     // the raster pipeline ran, and the final frame is path-traced by default.
     bool m_smokeRasterVerifyRequested = false;
+    // The IBL consumption probe. It runs on a PAIR of frames and the pair is the
+    // assertion: the control frame renders with CBPerFrame::iblParams.z forced to
+    // 0 and asserts the environment vanishes, the live frame - which is the same
+    // frame as the two probes above - asserts it is present and that the cube
+    // really is the prefiltered sky. See src/render/ibl_consume_probe.h for why a
+    // one-sided assertion here would be worth nothing.
+    bool m_verifyIBLControlThisFrame = false;
+    bool m_verifyIBLConsumeThisFrame = false;
+    bool m_smokeIBLControlRequested  = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;

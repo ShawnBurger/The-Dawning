@@ -30,6 +30,7 @@ bool Renderer::Init(D3D12Device& device)
     // frames branch around every write. Keep a one-record UAV bound so the root
     // argument is valid under the debug layer before smoke grows it.
     if (!EnsureDrawProbeResources(device, 1)) return false;
+    if (!EnsureIBLConsumeProbeResources(device.Device())) return false;
     if (!CreateTextureHeap(device.Device())) return false;
     if (!CreateHDRTarget(device.Device(),
                          static_cast<uint32_t>(device.Width()),
@@ -97,16 +98,41 @@ bool Renderer::EnsureEnvironmentIBL(D3D12Device& device)
     // descriptor went somewhere else, nor while the reservation that protects it
     // has quietly been given away.
     //
-    // A FAILED ASSERTION IS NOT FATAL HERE, AND THAT IS DELIBERATE. LogMarkers
-    // logs core::Log::Error and emits a "fail" verdict marker; the smoke harness
-    // turns both into a hard failure, because it throws on any [ERR ] line AND
-    // asserts each verdict by name. But this code runs on every launch in every
-    // mode, including a player's, and refusing to boot the engine because a
-    // prefilter statistic drifted on some driver is the wrong trade for a
-    // resource that nothing samples yet. Infrastructure failures - a bake that
-    // could not record or a readback that could not map - DO abort, above.
-    (void)m_environmentIBL.LogMarkers(kEnvCubeDescriptorIndex,
-                                      m_textureAllocator.FirstIndex());
+    // A FAILED ASSERTION IS FATAL. IT DID NOT USED TO BE, AND THE REASON IT DID
+    // NOT IS NOW FALSE.
+    //
+    // The old justification was "refusing to boot the engine because a prefilter
+    // statistic drifted on some driver is the wrong trade FOR A RESOURCE THAT
+    // NOTHING SAMPLES YET". That clause was true at Stage 1 and Stage 3 deleted
+    // it: basic_ps.hlsl samples this cube for every pixel of every raster frame,
+    // and the hemisphere ambient it replaced is GONE rather than kept as a
+    // fallback. There is no degraded mode to boot into. A failed assertion here
+    // means the engine is about to shade the entire scene from an environment it
+    // has just proved wrong, and it would do so silently, because a wrong
+    // environment reads as "the tone mapping needs tuning" rather than as an
+    // error - which is exactly the failure mode every probe in this file exists
+    // to convert into a loud one.
+    //
+    // It also removes a split that should never have existed: the smoke harness
+    // already treats these verdicts as hard failures (it throws on any [ERR ]
+    // line and asserts each marker by name), so the engine and its harness
+    // disagreed about whether the same evidence mattered. One behaviour now.
+    //
+    // WHAT THIS COSTS, stated rather than waved past: a machine where a tolerance
+    // genuinely drifts will fail to launch instead of rendering something
+    // plausible. Every threshold these verdicts read is calibrated from a
+    // measurement with at least an order of magnitude of margin and recorded
+    // beside its measurement in environment_ibl.h, so a drift large enough to
+    // trip one is a drift large enough to be visible. If that trade ever turns
+    // out to be wrong, the fix is a diagnostic fallback environment, not a
+    // silently-ignored assertion.
+    if (!m_environmentIBL.LogMarkers(kEnvCubeDescriptorIndex,
+                                     m_textureAllocator.FirstIndex()))
+    {
+        core::Log::Error("Environment IBL validation failed; refusing to render "
+                         "with an environment the startup probes rejected");
+        return false;
+    }
 
     // What BeginFrame will actually upload. This is the CPU half of the call-site
     // evidence, and it is DELIBERATELY WEAKER than the GPU probes beside it: the
@@ -142,6 +168,10 @@ void Renderer::Shutdown()
     for (auto& buffer : m_drawProbeBuffer) buffer.Reset();
     m_drawProbeZeroUpload.Reset();
     m_drawProbeReadback.Reset();
+    for (auto& buffer : m_iblProbeBuffer) buffer.Reset();
+    m_iblProbeZeroUpload.Reset();
+    m_iblProbeReadback.Reset();
+    m_iblProbeReadbackPending = false;
     m_drawProbeCapacity = 0;
     m_drawProbeReadbackBytes = 0;
     m_drawProbeReadbackPending = false;
@@ -825,8 +855,17 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 //   Slot 6: Root CBV  b4        — CBPerPass (viewProj)           — 2 DWORDs, VERTEX
 //   Slot 7: Root UAV  u0/space4 — smoke draw-record probe        — 2 DWORDs, VERTEX
 //   Slot 8: Table     t0/space6      — prefiltered env cube      — 1 DWORD,  PIXEL
+//   Slot 9: Root UAV  u1/space4 — IBL consumption probe          — 2 DWORDs, PIXEL
 //   Static samplers at s0 (material), s1 (shadow comparison), s2 (env cube) — free
-// Total: 16 DWORDs of 64. 48 free.
+// Total: 18 DWORDs of 64. 46 free.
+//
+// SLOT 9 IS THE PRICE OF PROVING SLOT 8 IS USED. Two root DWORDs, spent on a
+// buffer that exists only for verification, and it is the correct trade: without
+// it every IBL assertion in this tree passes with basic_ps not sampling the cube
+// at all and with the wrong descriptor bound at slot 8. The evidence for a
+// feature is part of the feature. It is a ROOT UAV rather than a table for the
+// reason spelled out below for slot 7 - the shadow pass binds no descriptor heap -
+// and it is PIXEL-visible rather than ALL because only basic_ps writes it.
 //
 // SLOT 8 IS THE +1 DWORD IBL_DESIGN.md SECTION 7.2 BUDGETS. It arrives with
 // Stage 3, not with Stage 1: the design attributed it to the stage that creates
@@ -994,7 +1033,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         envRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         envRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[9] = {};
+        D3D12_ROOT_PARAMETER1 rootParams[10] = {};
 
         // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1110,6 +1149,18 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[8].DescriptorTable.pDescriptorRanges   = &envRange;
         rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 9: the IBL consumption probe (u1, space4). PIXEL-only: unlike the
+        // draw probe, which three stages write, this one is written from
+        // basic_ps alone - because the pixel stage is where the environment is
+        // consumed, and a witness taken in any other stage would be a witness of
+        // itself. That is the same argument that moved the draw probe's MATERIAL
+        // half into basic_ps, applied to a different resource.
+        rootParams[9].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rootParams[9].Descriptor.ShaderRegister = 1;
+        rootParams[9].Descriptor.RegisterSpace  = 4;
+        rootParams[9].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+        rootParams[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
@@ -1151,7 +1202,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // including both smoke modes - would ever catch. v1.0 has no
         // per-descriptor Flags member; volatile is the implicit default there,
         // which is what the v1.1 branch asks for explicitly.
-        D3D12_ROOT_PARAMETER rootParams[9] = {};
+        D3D12_ROOT_PARAMETER rootParams[10] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -1206,6 +1257,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[8].DescriptorTable.pDescriptorRanges   = &envRange;
         rootParams[8].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // PIXEL for the same reason as the v1.1 branch above: only basic_ps
+        // writes u1/space4. The two branches must stay identical.
+        rootParams[9].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rootParams[9].Descriptor.ShaderRegister = 1;
+        rootParams[9].Descriptor.RegisterSpace  = 4;
+        rootParams[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
         rsDesc.pParameters       = rootParams;
@@ -1233,7 +1291,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + probe UAV + texture table + shadow table + env cube table, 3 static samplers, 16 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + 2 probe UAVs + texture table + shadow table + env cube table, 3 static samplers, 18 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1867,6 +1925,168 @@ bool Renderer::EnsureDrawProbeResources(D3D12Device& device, uint32_t elementCou
     return true;
 }
 
+// =============================================================================
+// The IBL consumption probe's resources
+// =============================================================================
+// Fixed size, allocated once, never grown. The draw probe's capacity tracks the
+// object record count; this block is ONE scene-wide reduction, so there is
+// nothing for it to scale with and no grow path to get wrong.
+bool Renderer::EnsureIBLConsumeProbeResources(ID3D12Device* device)
+{
+    if (m_iblProbeBuffer[0]) return true;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = sizeof(IBLConsumeProbeBlock);
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        const HRESULT hr = device->CreateCommittedResource(
+            &defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+            IID_PPV_ARGS(&m_iblProbeBuffer[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("IBL consumption probe UAV allocation failed for slot %u: 0x%08X",
+                              i, hr);
+            return false;
+        }
+        wchar_t name[64];
+        swprintf_s(name, L"IBLConsumeProbe[%u]", i);
+        m_iblProbeBuffer[i]->SetName(name);
+    }
+
+    desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    HRESULT hr = device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&m_iblProbeZeroUpload));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("IBL consumption probe clear upload allocation failed: 0x%08X", hr);
+        return false;
+    }
+    m_iblProbeZeroUpload->SetName(L"IBLConsumeProbeZeroUpload");
+
+    void* mapped = nullptr;
+    const D3D12_RANGE noRead = { 0, 0 };
+    hr = m_iblProbeZeroUpload->Map(0, &noRead, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("IBL consumption probe clear upload map failed: 0x%08X", hr);
+        return false;
+    }
+    std::memset(mapped, 0, sizeof(IBLConsumeProbeBlock));
+    m_iblProbeZeroUpload->Unmap(0, nullptr);
+
+    D3D12_HEAP_PROPERTIES readbackHeap = {};
+    readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    hr = device->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&m_iblProbeReadback));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("IBL consumption probe readback allocation failed: 0x%08X", hr);
+        return false;
+    }
+    m_iblProbeReadback->SetName(L"IBLConsumeProbeReadback");
+    return true;
+}
+
+// ZEROING IS THE WHOLE CONTRACT. Every word is either an InterlockedMax from a
+// zero start or an InterlockedAdd from a zero start, so a block that was not
+// cleared carries the previous probed frame's answer - and the previous probed
+// frame is the LIVE one when this is the control, which would make the control
+// pass while claiming the opposite of the truth.
+bool Renderer::PrepareIBLConsumeProbe(D3D12Device& device)
+{
+    if (!m_iblProbeBuffer[m_currentFrame] || !m_iblProbeZeroUpload)
+    {
+        core::Log::Error("IBL consumption probe resources are unavailable");
+        return false;
+    }
+
+    auto* cmd = device.CmdList();
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource   = m_iblProbeBuffer[m_currentFrame].Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
+    cmd->ResourceBarrier(1, &barrier);
+    cmd->CopyBufferRegion(m_iblProbeBuffer[m_currentFrame].Get(), 0,
+                          m_iblProbeZeroUpload.Get(), 0, sizeof(IBLConsumeProbeBlock));
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &barrier);
+    return true;
+}
+
+bool Renderer::RecordIBLConsumeProbeReadback(D3D12Device& device)
+{
+    if (!m_drawProbeEnabled || !m_iblProbeBuffer[m_currentFrame] || !m_iblProbeReadback)
+        return false;
+
+    m_iblProbeReadbackFrame = m_currentFrame;
+
+    auto* cmd = device.CmdList();
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = m_iblProbeBuffer[m_currentFrame].Get();
+    cmd->ResourceBarrier(1, &uavBarrier);
+
+    D3D12_RESOURCE_BARRIER transition = {};
+    transition.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    transition.Transition.pResource   = m_iblProbeBuffer[m_currentFrame].Get();
+    transition.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    transition.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    transition.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd->ResourceBarrier(1, &transition);
+    cmd->CopyBufferRegion(m_iblProbeReadback.Get(), 0,
+                          m_iblProbeBuffer[m_currentFrame].Get(), 0,
+                          sizeof(IBLConsumeProbeBlock));
+    std::swap(transition.Transition.StateBefore, transition.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &transition);
+    m_iblProbeReadbackPending = true;
+    return true;
+}
+
+bool Renderer::ReadIBLConsumeProbe(IBLConsumeValidation& validation, bool iblExpectedActive)
+{
+    validation = {};
+    if (!m_iblProbeReadbackPending || !m_iblProbeReadback) return false;
+    m_iblProbeReadbackPending = false;
+
+    const D3D12_RANGE readRange = { 0, sizeof(IBLConsumeProbeBlock) };
+    void* mapped = nullptr;
+    const HRESULT hr = m_iblProbeReadback->Map(0, &readRange, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("IBL consumption probe readback map failed: 0x%08X", hr);
+        return false;
+    }
+
+    IBLConsumeProbeBlock block = {};
+    std::memcpy(&block, mapped, sizeof(block));
+
+    const D3D12_RANGE noWrite = { 0, 0 };
+    m_iblProbeReadback->Unmap(0, &noWrite);
+
+    validation = ReduceIBLConsumeProbe(block, iblExpectedActive);
+    return true;
+}
+
 bool Renderer::PrepareDrawProbe(D3D12Device& device)
 {
     if (!m_drawProbeEnabled) return true;
@@ -1931,10 +2151,20 @@ void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint,
 
     m_drawProbeEnabled = enableDrawProbe;
     m_drawProbeReadbackPending = false;
+    m_iblProbeReadbackPending = false;
     if (m_drawProbeEnabled &&
         (!EnsureDrawProbeResources(device, objectsNeeded) || !PrepareDrawProbe(device)))
     {
         core::Log::Error("Unable to prepare GPU draw-record verification");
+        m_drawProbeEnabled = false;
+    }
+    // Cleared under the SAME flag, because basic_ps writes both probes from the
+    // same permutation behind the same root-constant gate. Splitting the arming
+    // would create a second frame schedule to keep in step with the first, which
+    // is the shape of the bug that put the shadow probe on a path-traced frame.
+    if (m_drawProbeEnabled && !PrepareIBLConsumeProbe(device))
+    {
+        core::Log::Error("Unable to prepare GPU IBL consumption verification");
         m_drawProbeEnabled = false;
     }
 
@@ -2056,10 +2286,20 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     // and the SH the startup probe compares against are the SAME array - there
     // is no second projection to drift.
     //
-    // iblParams.z is the kill switch, and it is FALSE until the cube is baked.
-    // On the frames before EnsureEnvironmentIBL has run - and in any future
-    // configuration where it fails - the shader must take the zero branch rather
-    // than sample an unwritten cube.
+    // iblParams.z is the kill switch, and it has TWO inputs.
+    //
+    // IsBuilt() was the only one, and it was UNREACHABLE as a false: Renderer::Init
+    // calls EnsureEnvironmentIBL and returns false when the bake fails, so no
+    // frame is ever rendered before the bake or after a failed one. Its old
+    // justification - "on the frames before EnsureEnvironmentIBL has run" -
+    // described states that cannot occur. It is kept because it is the correct
+    // precondition to state and costs one branch, not because it fires.
+    //
+    // m_iblDisabledThisFrame is the input with a real caller: App::RenderFrame
+    // raises it on the smoke run's CONTROL frame, where the consumption probe
+    // asserts the environment vanishes from the image. That is what turned this
+    // from a switch with a comment into a switch with a consumer and an
+    // assertion. See Renderer::SetIBLDisabledForFrame.
     const core::SHColor9& sh = m_environmentIBL.IrradianceCoefficients();
     for (uint32_t k = 0; k < core::kSHCoefficientCount; ++k)
     {
@@ -2070,7 +2310,8 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     }
     perFrame.iblParams[0] = static_cast<float>(kEnvCubeMips);
     perFrame.iblParams[1] = m_iblIntensity;
-    perFrame.iblParams[2] = m_environmentIBL.IsBuilt() ? 1.0f : 0.0f;
+    perFrame.iblParams[2] =
+        (m_environmentIBL.IsBuilt() && !m_iblDisabledThisFrame) ? 1.0f : 0.0f;
     perFrame.iblParams[3] = 0.0f;
 
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
@@ -2094,6 +2335,13 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     if (m_drawProbeBuffer[m_currentFrame])
         cmd->SetGraphicsRootUnorderedAccessView(
             7, m_drawProbeBuffer[m_currentFrame]->GetGPUVirtualAddress());
+    // Slot 9, the IBL consumption probe. Bound in the MAIN pass only:
+    // BeginShadowPass binds slot 7 because both vertex shaders write it, but the
+    // shadow pass runs no pixel shader at all, so nothing there could write this
+    // one and binding it would be noise.
+    if (m_iblProbeBuffer[m_currentFrame])
+        cmd->SetGraphicsRootUnorderedAccessView(
+            9, m_iblProbeBuffer[m_currentFrame]->GetGPUVirtualAddress());
 
     cmd->SetGraphicsRootDescriptorTable(3, m_textureHeap->GetGPUDescriptorHandleForHeapStart());
 

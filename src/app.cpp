@@ -837,14 +837,37 @@ int App::RunMainLoop()
             // because they verify different things and could legitimately be
             // scheduled apart later; the harness asserts each one's presence, so
             // a probe silently losing its arming site fails loudly.
+            // The IBL consumption probe's NEGATIVE CONTROL, one frame AHEAD of
+            // the verify frame - so it is a raster frame by the same argument
+            // that makes the verify frame one, and it is the last frame before
+            // it. Armed first because the ordering is what the pair means:
+            // control, then live, with nothing between them that could change
+            // the scene.
+            //
+            // The control renders one frame with the environment switched off. It
+            // is not the capture frame and it is not the last frame, so nothing
+            // observable outside the probe depends on it.
+            if (!m_smokeIBLControlRequested &&
+                smokeRasterVerifyFrame > 1 &&
+                m_frameCount >= smokeRasterVerifyFrame - 1)
+            {
+                m_smokeIBLControlRequested = true;
+                m_verifyIBLControlThisFrame = true;
+                core::Log::Infof("[SMOKE] ibl_consume_control_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+            }
+
             if (!m_smokeRasterVerifyRequested && m_frameCount >= smokeRasterVerifyFrame)
             {
                 m_smokeRasterVerifyRequested = true;
                 m_verifyDrawRecordsThisFrame = true;
                 m_verifyShadowThisFrame      = true;
+                m_verifyIBLConsumeThisFrame  = true;
                 core::Log::Infof("[SMOKE] draw_probe_frame=%llu",
                                  static_cast<unsigned long long>(m_frameCount));
                 core::Log::Infof("[SMOKE] shadow_probe_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+                core::Log::Infof("[SMOKE] ibl_consume_frame=%llu",
                                  static_cast<unsigned long long>(m_frameCount));
             }
 
@@ -1349,7 +1372,28 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
     const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
                                   !renderedPathTracing;
-    m_renderer.BeginFrameResources(m_device, maxDrawsHint, probeDrawRecords);
+    // The IBL consumption probe. TWO frames, and the pair is the assertion: the
+    // control frame renders with the environment switched off and asserts every
+    // word reads zero, the live frame asserts every word is nonzero and that the
+    // cube really is the environment cube. See src/render/ibl_consume_probe.h -
+    // an assertion that merely passes with the feature present is the exact thing
+    // this repository keeps shipping.
+    const bool probeIBLControl = m_verifyIBLControlThisFrame && !renderedPathTracing;
+    const bool probeIBLConsume = m_verifyIBLConsumeThisFrame && !renderedPathTracing;
+
+    // ONE flag arms the pixel-stage probe permutation, because basic_ps writes
+    // BOTH probes from the same PSO behind the same root-constant gate. Keeping
+    // the ARMING unified is deliberate: two schedules that must stay in step is
+    // the shape of the bug that left the shadow probe on a path-traced frame. The
+    // READBACKS are separate, which is what lets the control frame run the pixel
+    // probe without also re-reading the draw records.
+    const bool probeRasterPixels = probeDrawRecords || probeIBLControl || probeIBLConsume;
+    m_renderer.BeginFrameResources(m_device, maxDrawsHint, probeRasterPixels);
+
+    // Not latched on the renderer side - the value is supplied every frame, so a
+    // missed reset cannot leave the environment switched off for the rest of a
+    // run. This is the ONLY caller that ever passes true.
+    m_renderer.SetIBLDisabledForFrame(probeIBLControl);
     // The first IN-FLIGHT replacement, not the first replacement.
     //
     // This tracked StructuredBufferReallocations() when it arrived, and against
@@ -1479,6 +1523,15 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         m_verifyShadowThisFrame = false;
     if (probeDrawRecords && !m_renderer.RecordDrawProbeReadback(m_device))
         m_verifyDrawRecordsThisFrame = false;
+    // Recorded on BOTH probe frames - the control and the live one - because the
+    // pair is the assertion. Reading back only the live frame would leave the
+    // control arming a probe nobody looks at.
+    if ((probeIBLControl || probeIBLConsume) &&
+        !m_renderer.RecordIBLConsumeProbeReadback(m_device))
+    {
+        m_verifyIBLControlThisFrame = false;
+        m_verifyIBLConsumeThisFrame = false;
+    }
 
     // Everything that records into this frame's arena has now done so. Clearing
     // the guard HERE is what makes it able to catch a pass added above
@@ -1506,11 +1559,75 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         gpuRetiredForReadback = true;
     }
 
-    if ((probeShadow || probeDrawRecords) && !gpuRetiredForReadback)
+    if ((probeShadow || probeDrawRecords || probeIBLControl || probeIBLConsume) &&
+        !gpuRetiredForReadback)
     {
         if (!m_device.WaitForGpu())
             return false;
         gpuRetiredForReadback = true;
+    }
+
+    // The IBL consumption probe, both frames. Reduced by the SHIPPED
+    // ReduceIBLConsumeProbe (render/ibl_consume_probe.cpp), which
+    // tests/test_ibl_consume_probe.cpp drives directly on a machine with no
+    // device - so the verdict logic is covered by CPU cases and the GPU supplies
+    // only the block.
+    //
+    // The two frames log under DIFFERENT marker keys. That shape is mandatory
+    // rather than tidy: smoke_test.ps1 stores markers in a hashtable, so a shared
+    // key would collapse the pair to whichever logged last and the harness would
+    // assert one frame twice while believing it had checked both.
+    if (probeIBLControl || probeIBLConsume)
+    {
+        const bool live = probeIBLConsume;
+        m_verifyIBLControlThisFrame = false;
+        m_verifyIBLConsumeThisFrame = false;
+
+        render::IBLConsumeValidation ibl = {};
+        if (!m_renderer.ReadIBLConsumeProbe(ibl, live))
+        {
+            core::Log::Error("GPU IBL consumption probe readback failed");
+            return false;
+        }
+
+        const char* prefix = live ? "ibl_consume" : "ibl_consume_control";
+        core::Log::Infof(
+            "[SMOKE] %s=%s %s_shaded_pixels=%u %s_cube_samples=%u "
+            "%s_env_zero_pixels=%u",
+            prefix, ibl.ok ? "ok" : "failed",
+            prefix, ibl.shadedPixels,
+            prefix, ibl.cubeSamples,
+            prefix, ibl.envZeroPixels);
+        core::Log::Infof(
+            "[SMOKE] %s_spec_max=%.6f %s_diffuse_max=%.6f %s_in_final_max=%.6f "
+            "%s_radiance_max=%.6f %s_mirror_max=%.6f %s_sky_rel_err=%.6f",
+            prefix, ibl.envSpecularMax,
+            prefix, ibl.envDiffuseMax,
+            prefix, ibl.envInFinalMax,
+            prefix, ibl.radianceMax,
+            prefix, ibl.mirrorLuminanceMax,
+            prefix, ibl.skyRelError);
+        core::Log::Infof(
+            "[SMOKE] %s_reached=%s %s_consumption=%s %s_identity=%s",
+            prefix, ibl.reachedOk ? "ok" : "failed",
+            prefix, ibl.consumptionOk ? "ok" : "failed",
+            prefix, ibl.identityOk ? "ok" : "failed");
+
+        if (!ibl.ok)
+        {
+            if (live)
+                core::Log::Error(
+                    "basic_ps.hlsl did not consume the environment cube as shipped: "
+                    "the raster path either skipped the IBL terms, dropped them out "
+                    "of finalColor, or sampled a resource that is not the "
+                    "prefiltered sky at t0/space6");
+            else
+                core::Log::Error(
+                    "The IBL consumption probe's NEGATIVE CONTROL failed: with "
+                    "iblParams.z forced to 0 the environment terms did not vanish. "
+                    "That means the live assertion beside it proves nothing - it "
+                    "would pass with the feature absent");
+        }
     }
 
     if (probeDrawRecords && m_verifyDrawRecordsThisFrame)

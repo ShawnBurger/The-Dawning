@@ -147,7 +147,7 @@ SHColor9 PackIrradianceCoefficients(const SHColor9& radiance)
     return packed;
 }
 
-Vec3f EvaluateIrradiance(const SHColor9& packed, const Vec3f& normal)
+Vec3f EvaluateIrradianceRaw(const SHColor9& packed, const Vec3f& normal)
 {
     float basis[kSHCoefficientCount];
     SHBasisL2(normal, basis);
@@ -156,6 +156,19 @@ Vec3f EvaluateIrradiance(const SHColor9& packed, const Vec3f& normal)
     for (uint32_t k = 0; k < kSHCoefficientCount; ++k)
         e += packed.c[k] * basis[k];
     return e;
+}
+
+// The clamp is not a nicety - it is the last line of DawningIrradianceSH in
+// shaders/ibl_common.hlsli, and this function's entire purpose is to be that
+// function. Without it the GPU agreement probe compared two different functions
+// and passed only because this sky's reconstruction never goes negative, which
+// made a property of the environment look like a property of the code.
+Vec3f EvaluateIrradiance(const SHColor9& packed, const Vec3f& normal)
+{
+    const Vec3f e = EvaluateIrradianceRaw(packed, normal);
+    return Vec3f{ e.x > 0.0f ? e.x : 0.0f,
+                  e.y > 0.0f ? e.y : 0.0f,
+                  e.z > 0.0f ? e.z : 0.0f };
 }
 
 } // namespace core

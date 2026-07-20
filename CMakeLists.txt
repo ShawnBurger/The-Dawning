@@ -64,6 +64,7 @@ set(RENDER_SOURCES
     src/render/renderer.cpp
     src/render/environment_ibl.cpp
     src/render/gpu_draw_records.cpp
+    src/render/ibl_consume_probe.cpp
     src/render/debug_overlay.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
@@ -81,6 +82,7 @@ set(RENDER_HEADERS
     src/render/camera.h
     src/render/renderer.h
     src/render/gpu_draw_records.h
+    src/render/ibl_consume_probe.h
     src/render/debug_overlay.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
@@ -112,6 +114,7 @@ set(SHADER_FILES
     shaders/ibl_probe_ps.hlsl
     shaders/ibl_common.hlsli
     shaders/ibl_eval_probe_ps.hlsl
+    shaders/ibl_consume_probe.hlsli
 )
 
 set(ECS_HEADERS
@@ -148,6 +151,7 @@ set(TEST_SOURCES
     tests/test_rt_texture_lod.cpp
     tests/test_sky_energy.cpp
     tests/test_sh_irradiance.cpp
+    tests/test_ibl_consume_probe.cpp
 )
 
 set(TEST_HEADERS
@@ -334,6 +338,13 @@ add_executable(TheDawningTests
     # path_tracer.cpp or rt_pipeline.cpp - both pull in d3d12.h.
     src/render/rt_texture_lod.cpp
     src/render/rt_texture_lod.h
+    # The IBL consumption probe's layout and verdict logic. Safe here for the
+    # third time and the same reason: ibl_consume_probe.h includes only <cstdint>
+    # and no D3D12 header, so tests/test_ibl_consume_probe.cpp drives the SHIPPED
+    # reduction rather than a copy of it. The GPU supplies the 64-byte block;
+    # every threshold and every verdict below it is decided here.
+    src/render/ibl_consume_probe.cpp
+    src/render/ibl_consume_probe.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

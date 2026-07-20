@@ -106,6 +106,12 @@ StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
 // permutation so the two PSOs agree on the root-constant layout.
 #if DAWNING_DRAW_PROBE
 RWByteAddressBuffer drawRecordProbe : register(u0, space4);
+// The IBL CONSUMPTION probe, u1/space4. Same permutation, same PSO, same probe
+// frames, same early-Z argument - so it costs the shipping pipeline exactly
+// nothing and inherits a frame schedule that is already known to be reached in
+// the mode people actually execute. See shaders/ibl_consume_probe.hlsli for what
+// it claims and why the six startup probes do not claim it.
+RWByteAddressBuffer iblConsumeProbe : register(u1, space4);
 #endif
 
 // Which record this draw owns. Declared identically in basic_vs.hlsl and
@@ -166,6 +172,16 @@ SamplerState        envSampler : register(s2);
 
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
 #include "ibl_common.hlsli"    // the ONE IBL evaluation, shared with the probe (and DXR at Stage 4)
+
+// Probe permutation only. sky_common.hlsli is what lets the consumption probe
+// compare the CUBE against the closed-form sky it is a prefiltered version of,
+// which is the claim that catches a wrong descriptor at t0/space6. It is pulled
+// in here rather than unconditionally so the shipping PSO's instruction count is
+// untouched; the file is a pure function of direction with no resources.
+#if DAWNING_DRAW_PROBE
+#include "sky_common.hlsli"
+#include "ibl_consume_probe.hlsli"
+#endif
 
 // Returns 1 for fully lit, 0 for fully shadowed.
 //
@@ -404,6 +420,12 @@ float4 main(PSInput input) : SV_TARGET
     // analysis is satisfied by construction, the same shape ComputeShadow keeps.
     float3 envDiffuse  = (float3)0.0;
     float3 envSpecular = (float3)0.0;
+    // The prefiltered radiance the shading fetch LOADED and the direction it
+    // loaded it along, reported out of the shipped evaluation below. Read only by
+    // the consumption probe; FXC removes them from the shipping permutation.
+    float3 envRadiance = (float3)0.0;
+    float3 envR        = float3(0.0, 1.0, 0.0);
+    bool   sampledCube = false;
     if (iblParams.z != 0.0)
     {
         // The ENVIRONMENT Fresnel split: NdotV and roughness-aware, standing in
@@ -416,8 +438,10 @@ float4 main(PSInput input) : SV_TARGET
         float3 irradiance = DawningIrradianceSH(iblSH, N);
         envDiffuse = kD_env * baseColor * irradiance / PI;
 
-        envSpecular = DawningSpecularIBL(envCube, envSampler, N, V,
-                                         materialRoughness, F0, iblParams.x);
+        envSpecular = DawningSpecularIBLWitnessed(envCube, envSampler, N, V,
+                                                  materialRoughness, F0, iblParams.x,
+                                                  envRadiance, envR);
+        sampledCube = true;
     }
 
     // ORM occlusion multiplies ENVIRONMENT terms only and never direct light -
@@ -451,6 +475,31 @@ float4 main(PSInput input) : SV_TARGET
     // exclude it from the prefilter integral or delete the analytic directional
     // light - keeping both double-counts the brightest thing in the scene.
     float3 finalColor = direct + envDiffuse + envSpecular + emission;
+
+    // -------------------------------------------------------------------------
+    // The IBL CONSUMPTION probe. AFTER the combine, deliberately.
+    // -------------------------------------------------------------------------
+    // This is the only evidence in the tree that the RASTER PATH consumes the
+    // environment, as opposed to shaders/ibl_common.hlsli computing it correctly
+    // when asked. Every other IBL assertion passes with this whole block deleted
+    // and with the wrong descriptor bound at t0/space6; see the header of
+    // shaders/ibl_consume_probe.hlsli for why, and for the negative control the
+    // harness runs to prove these words are not merely more of the same.
+    //
+    // `finalColor - direct - emission` rather than `envDiffuse + envSpecular`:
+    // the subtraction is what makes the witness be about the SUM ABOVE. Written
+    // the other way it would stay green with the environment terms deleted from
+    // that line while the variables kept their values.
+#if DAWNING_DRAW_PROBE
+    if (drawProbeEnabled != 0)
+    {
+        DawningWriteIBLConsumption(iblConsumeProbe, envDiffuse, envSpecular,
+                                   finalColor - direct - emission, sampledCube);
+        if (sampledCube)
+            DawningWriteIBLIdentity(iblConsumeProbe, envCube, envSampler,
+                                    envR, envRadiance);
+    }
+#endif
 
     // Linear HDR out. Tone mapping happens once, in tonemap_ps.hlsl, so that
     // the scene exists as linear radiance in a buffer that bloom/exposure/TAA

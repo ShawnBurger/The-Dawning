@@ -18,11 +18,21 @@
 //
 // WHAT THESE DO NOT COVER, SAID PLAINLY: they witness ibl_common.hlsli. They do
 // NOT witness basic_ps.hlsl's CALL SITE. A change that deleted the `if
-// (iblParams.z != 0)` block from basic_ps would leave every assertion here
-// green. Closing that would need a probe written from the main opaque pass on a
-// raster frame, which is the draw-record probe's territory and is out of scope
-// here. The evidence for the call site is the measured corridor luminance and
-// the [SMOKE] ibl_enabled marker, and both are weaker than this.
+// (iblParams.z != 0)` block from basic_ps leaves every assertion here green, and
+// so does binding the WRONG DESCRIPTOR as the environment cube - these passes
+// reach the cube through EnvironmentIBL's own SRV heap and cannot see what the
+// raster root signature has bound at t0/space6.
+//
+// THAT IS NOW COVERED, and it is covered somewhere else on purpose:
+// shaders/ibl_consume_probe.hlsli, written from basic_ps's consumption site into
+// a UAV on a raster frame - "the draw-record probe's territory", which is where
+// this note previously said the fix would have to live. It also runs a NEGATIVE
+// CONTROL frame, so the claim is not merely that its assertions pass with the
+// feature present but that they fail with it absent.
+//
+// Nothing in THIS file changed as a result. The paragraph above is still exactly
+// true of every entry point below, and it stays here so the next reader does not
+// mistake six green markers for evidence about the raster path.
 //
 // Every entry point is indexed by SV_POSITION.x, so probe slot i is pixel i and
 // there is no separate index plumbing to get wrong.

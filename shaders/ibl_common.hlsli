@@ -183,9 +183,23 @@ float3 DawningPrefilteredRadiance(TextureCube<float4> envCube, SamplerState envS
 // at high roughness, and single-scattering GGX loses energy at high roughness so
 // rough metal comes out darker than ground truth. Multi-scatter compensation is
 // a ~5-line follow-up (IBL_DESIGN.md 9.4) and is deliberately NOT folded in here.
-float3 DawningSpecularIBL(TextureCube<float4> envCube, SamplerState envSampler,
-                          float3 N, float3 V, float roughness, float3 F0,
-                          float mipCount)
+// THE ONE IMPLEMENTATION. The two extra `out` parameters report the exact
+// prefiltered radiance this evaluation LOADED and the exact direction it loaded
+// it along - not a second fetch, not a recomputed reflection vector.
+//
+// They exist for shaders/ibl_consume_probe.hlsli, which needs the shading load
+// itself as evidence. A probe that re-derived R and re-sampled the cube would
+// witness its own read, which is the failure mode the draw-record probe was
+// rebuilt to remove; handing the values out of the shipped evaluation is what
+// makes the witness be about the shipped evaluation.
+//
+// FXC dead-code-eliminates both outputs in the permutation that ignores them, so
+// the ordinary PSO pays nothing and - the property that matters more - both
+// permutations run bit-identical shading maths.
+float3 DawningSpecularIBLWitnessed(TextureCube<float4> envCube, SamplerState envSampler,
+                                   float3 N, float3 V, float roughness, float3 F0,
+                                   float mipCount,
+                                   out float3 outPrefiltered, out float3 outR)
 {
     float  NdotV = saturate(dot(N, V));
     float3 R     = reflect(-V, N);
@@ -193,7 +207,21 @@ float3 DawningSpecularIBL(TextureCube<float4> envCube, SamplerState envSampler,
     float3 prefiltered = DawningPrefilteredRadiance(envCube, envSampler, R, roughness, mipCount);
     float2 ab          = DawningEnvBRDFApprox(NdotV, roughness);
 
+    outPrefiltered = prefiltered;
+    outR           = R;
     return prefiltered * (F0 * ab.x + ab.y);
+}
+
+// The plain signature, for callers with nothing to witness. A forwarder, NOT a
+// copy: there is still exactly one evaluation of the split-sum in this tree.
+float3 DawningSpecularIBL(TextureCube<float4> envCube, SamplerState envSampler,
+                          float3 N, float3 V, float roughness, float3 F0,
+                          float mipCount)
+{
+    float3 unusedRadiance;
+    float3 unusedR;
+    return DawningSpecularIBLWitnessed(envCube, envSampler, N, V, roughness, F0,
+                                       mipCount, unusedRadiance, unusedR);
 }
 
 #endif // THE_DAWNING_IBL_COMMON_HLSLI

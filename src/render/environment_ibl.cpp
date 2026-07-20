@@ -1119,6 +1119,7 @@ bool EnvironmentIBL::ReadbackAndValidate()
             float worstGrazing  = 1e30f;
             float worstExcess   = 0.0f;
             float worstShortfall = 1e30f;
+            float worstDielectric = 0.0f;
             // The vacuity guard for the two smooth-row claims: they look at a
             // single grid point each, and a grid that no longer contains
             // (roughness 0, NdotV 0/1) would satisfy them by never evaluating.
@@ -1145,6 +1146,11 @@ bool EnvironmentIBL::ReadbackAndValidate()
                 // established this restriction and why widening it back would be
                 // asserting against physics rather than for it.
                 const float dielectric = dielectricF0 * A + B;
+                // The dielectric energy claim, over the WHOLE grid rather than
+                // the smooth row. It is not covered by metalReflectance above:
+                // at F0 = 1 the expression is symmetric in A and B, so the metal
+                // reading is blind to exactly the asymmetries this one sees.
+                worstDielectric = (std::max)(worstDielectric, dielectric);
                 if (roughness <= 0.0f && NdotV >= 1.0f)
                 {
                     worstNormal = (std::max)(worstNormal, std::fabs(dielectric - dielectricF0));
@@ -1162,6 +1168,7 @@ bool EnvironmentIBL::ReadbackAndValidate()
             m_validation.worstGrazingReflectance   = (worstGrazing > 1e29f) ? 0.0f : worstGrazing;
             m_validation.worstEnergyExcess         = worstExcess;
             m_validation.worstEnergyShortfall      = (worstShortfall > 1e29f) ? 0.0f : worstShortfall;
+            m_validation.worstDielectricExcess     = worstDielectric;
         }
 
         // ---- Stage 3.2: roughness -> mip ------------------------------------
@@ -1314,7 +1321,15 @@ bool EnvironmentIBL::ReadbackAndValidate()
         (m_validation.worstNormalIncidenceError < kEnvBRDFNormalIncidenceTolerance) &&
         (m_validation.worstGrazingReflectance   > kEnvBRDFGrazingFloor) &&
         (m_validation.worstEnergyExcess         < kEnvBRDFEnergyCeiling) &&
-        (m_validation.worstEnergyShortfall      > kEnvBRDFEnergyFloor);
+        (m_validation.worstEnergyShortfall      > kEnvBRDFEnergyFloor) &&
+        // The dielectric energy bound. Added because the F0 = 1 ceiling beside
+        // it CANNOT see a dielectric overshoot - it reads A + B, and the
+        // dielectric quantity is 0.04*A + B - so "no energy creation" was
+        // asserted for one material and merely hoped for the other. It is a
+        // wider bound than the metal one, honestly, because the fit really does
+        // overshoot by 4.2% at grazing incidence on a smooth surface; see
+        // kEnvBRDFDielectricEnergyCeiling for the measurement and the argument.
+        (m_validation.worstDielectricExcess     < kEnvBRDFDielectricEnergyCeiling);
 
     m_validation.mipSweepOk =
         (m_validation.mipSweepSlots == kEnvProbeCount) &&
@@ -1388,14 +1403,16 @@ bool EnvironmentIBL::LogMarkers(uint32_t descriptorSlot, uint32_t firstMaterialS
     core::Log::Infof("[SMOKE] ibl_env_brdf=%s ibl_env_brdf_slots=%u "
                      "ibl_env_brdf_smooth_samples=%u "
                      "ibl_env_brdf_normal_err=%.6f ibl_env_brdf_grazing=%.6f "
-                     "ibl_env_brdf_max_energy=%.6f ibl_env_brdf_min_energy=%.6f",
+                     "ibl_env_brdf_max_energy=%.6f ibl_env_brdf_min_energy=%.6f "
+                     "ibl_env_brdf_max_dielectric=%.6f",
                      m_validation.envBRDFOk ? "pass" : "fail",
                      m_validation.envBRDFSlots,
                      m_validation.envBRDFSmoothRowSamples,
                      m_validation.worstNormalIncidenceError,
                      m_validation.worstGrazingReflectance,
                      m_validation.worstEnergyExcess,
-                     m_validation.worstEnergyShortfall);
+                     m_validation.worstEnergyShortfall,
+                     m_validation.worstDielectricExcess);
 
     core::Log::Infof("[SMOKE] ibl_spec_mip_monotonic=%s ibl_spec_mip_slots=%u "
                      "ibl_spec_mip_worst_step=%.8f ibl_spec_mip_rise=%.6f",
@@ -1464,7 +1481,8 @@ bool EnvironmentIBL::LogMarkers(uint32_t descriptorSlot, uint32_t firstMaterialS
     if (!m_validation.envBRDFOk)
         core::Log::Errorf("IBL env-BRDF failed: %u/%u slots, normal-incidence error %.6f "
                           "(need < %.4f), grazing reflectance %.6f (need > %.2f), F0=1 "
-                          "reflectance in [%.4f, %.4f] (need (%.2f, %.2f]). "
+                          "reflectance in [%.4f, %.4f] (need (%.2f, %.2f]), F0=0.04 peak "
+                          "%.4f (need < %.2f). "
                           "DawningEnvBRDFApprox no longer behaves like a split-sum BRDF - "
                           "check for an A/B swap or a re-expression in terms of "
                           "DawningGeometrySmithG1, which uses a DIFFERENT Smith k.",
@@ -1472,7 +1490,8 @@ bool EnvironmentIBL::LogMarkers(uint32_t descriptorSlot, uint32_t firstMaterialS
                           m_validation.worstNormalIncidenceError, kEnvBRDFNormalIncidenceTolerance,
                           m_validation.worstGrazingReflectance, kEnvBRDFGrazingFloor,
                           m_validation.worstEnergyShortfall, m_validation.worstEnergyExcess,
-                          kEnvBRDFEnergyFloor, kEnvBRDFEnergyCeiling);
+                          kEnvBRDFEnergyFloor, kEnvBRDFEnergyCeiling,
+                          m_validation.worstDielectricExcess, kEnvBRDFDielectricEnergyCeiling);
     if (!m_validation.mipSweepOk)
         core::Log::Errorf("IBL mip monotonicity failed: %u/%u slots, worst backward step %.8f "
                           "(need > %.5f), total rise %.6f (need > %.3f). roughness -> mip is "
