@@ -2,12 +2,11 @@
 #include "asset/gltf_importer.h"
 #include "asset/source_snapshot.h"
 
-#include <algorithm>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <span>
 #include <vector>
 
@@ -40,11 +39,6 @@ bool ReadFile(
     return static_cast<bool>(stream) &&
            static_cast<bool>(stream.read(reinterpret_cast<char*>(bytes.data()),
                                          static_cast<std::streamsize>(bytes.size())));
-}
-
-bool IsEmbeddedUri(const std::string& uri)
-{
-    return uri.empty() || uri.starts_with("data:");
 }
 
 bool PathsReferToSameFile(
@@ -129,6 +123,15 @@ int main(int argc, char** argv)
                   << scanned.error << '\n';
         return 1;
     }
+    std::string aliasedDependency;
+    if (asset::OutputPathAliasesSourceDependency(
+            absoluteOutput, sourcePath.parent_path(), scanned.dependencies,
+            aliasedDependency))
+    {
+        std::cerr << "cooked output path aliases source dependency: "
+                  << aliasedDependency << '\n';
+        return 2;
+    }
     const asset::SourceSnapshotResult snapshots = asset::CaptureSourceDependencies(
         sourcePath.parent_path(), scanned.dependencies, importLimits, cookedLimits);
     if (!snapshots.Succeeded())
@@ -137,21 +140,33 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    asset::GltfImportResult imported =
-        asset::ImportGltfMemory(sourceBytes, sourcePath, importLimits);
+    std::vector<asset::GltfExternalBuffer> externalBuffers;
+    try
+    {
+        externalBuffers.reserve(snapshots.dependencies.size());
+        for (const asset::SourceDependencySnapshot& snapshot : snapshots.dependencies)
+        {
+            if (snapshot.isBuffer)
+            {
+                externalBuffers.push_back({
+                    snapshot.uri,
+                    std::span<const std::byte>(snapshot.payloadBytes)
+                });
+            }
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        std::cerr << "external buffer snapshot table exceeds available memory\n";
+        return 1;
+    }
+
+    asset::GltfImportResult imported = asset::ImportGltfMemoryWithExternalBuffers(
+        sourceBytes, sourcePath, externalBuffers, importLimits);
     if (!imported.Succeeded())
     {
         std::cerr << "import failed [" << asset::GltfImportStatusName(imported.status)
                   << "]: " << imported.error << '\n';
-        return 1;
-    }
-
-    std::string snapshotError;
-    if (asset::VerifySourceDependenciesUnchanged(
-            sourcePath.parent_path(), snapshots.dependencies, snapshotError) !=
-        asset::SourceSnapshotStatus::Success)
-    {
-        std::cerr << "dependency verification failed: " << snapshotError << '\n';
         return 1;
     }
 
@@ -168,36 +183,14 @@ int main(int argc, char** argv)
 
     // External images become self-contained cooked payloads while retaining
     // their URI as dependency identity for incremental rebuilds.
-    std::vector<std::string> externalImageUris;
-    for (const asset::GltfSourceDependency& dependency : scanned.dependencies)
+    std::string imageSnapshotError;
+    if (asset::EmbedExternalImageSnapshots(
+            imported.model, scanned.dependencies, snapshots.dependencies,
+            importLimits, cookedLimits, imageSnapshotError) !=
+        asset::SourceSnapshotStatus::Success)
     {
-        if (dependency.kind == asset::GltfDependencyKind::Image)
-            externalImageUris.push_back(dependency.uri);
-    }
-    size_t externalImageIndex = 0;
-    for (asset::ImageSource& image : imported.model.images)
-    {
-        if (IsEmbeddedUri(image.uri))
-            continue;
-        if (externalImageIndex >= externalImageUris.size())
-        {
-            std::cerr << "external image dependency enumeration is inconsistent\n";
-            return 1;
-        }
-        const std::string& decodedUri = externalImageUris[externalImageIndex++];
-        const auto snapshot = std::find_if(
-            snapshots.dependencies.begin(), snapshots.dependencies.end(),
-            [&decodedUri](const asset::SourceDependencySnapshot& candidate) {
-                return candidate.uri == decodedUri && candidate.isImage;
-            });
-        if (snapshot == snapshots.dependencies.end())
-        {
-            std::cerr << "external image snapshot is missing: " << decodedUri << '\n';
-            return 1;
-        }
-        image.embeddedBytes.resize(snapshot->imageBytes.size());
-        std::memcpy(image.embeddedBytes.data(), snapshot->imageBytes.data(),
-                    snapshot->imageBytes.size());
+        std::cerr << "external image embedding failed: " << imageSnapshotError << '\n';
+        return 1;
     }
 
     const asset::CookedBuildResult cooked =
@@ -209,7 +202,24 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    std::string snapshotError;
+    if (asset::VerifySourceDependenciesUnchanged(
+            sourcePath.parent_path(), snapshots.dependencies, snapshotError) !=
+        asset::SourceSnapshotStatus::Success)
+    {
+        std::cerr << "dependency verification failed: " << snapshotError << '\n';
+        return 1;
+    }
+
     std::string writeError;
+    if (PathsReferToSameFile(absoluteSource, absoluteOutput) ||
+        asset::OutputPathAliasesSourceDependency(
+            absoluteOutput, sourcePath.parent_path(), scanned.dependencies,
+            aliasedDependency))
+    {
+        std::cerr << "cooked output became an alias of source input before publication\n";
+        return 2;
+    }
     const asset::CookedModelStatus writeStatus =
         asset::WriteCookedModelFileAtomic(outputPath, cooked.bytes, writeError, cookedLimits);
     if (writeStatus != asset::CookedModelStatus::Success)

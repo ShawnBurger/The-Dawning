@@ -15,7 +15,8 @@ enum class SourceSnapshotStatus : uint8_t
     Success,
     IoError,
     ResourceLimitExceeded,
-    Changed
+    Changed,
+    InvalidData
 };
 
 struct SourceDependencySnapshot
@@ -24,8 +25,9 @@ struct SourceDependencySnapshot
     uint64_t byteSize = 0;
     Sha256Digest sha256;
     uint64_t maxBytes = 0;
+    bool isBuffer = false;
     bool isImage = false;
-    std::vector<std::byte> imageBytes;
+    std::vector<std::byte> payloadBytes;
 };
 
 struct SourceSnapshotResult
@@ -47,5 +49,19 @@ SourceSnapshotStatus VerifySourceDependenciesUnchanged(
     const std::filesystem::path& sourceDirectory,
     const std::vector<SourceDependencySnapshot>& snapshots,
     std::string& error);
+
+SourceSnapshotStatus EmbedExternalImageSnapshots(
+    ImportedModel& model,
+    const std::vector<GltfSourceDependency>& dependencies,
+    const std::vector<SourceDependencySnapshot>& snapshots,
+    const GltfImportLimits& importLimits,
+    const CookedModelLimits& cookedLimits,
+    std::string& error);
+
+bool OutputPathAliasesSourceDependency(
+    const std::filesystem::path& output,
+    const std::filesystem::path& sourceDirectory,
+    const std::vector<GltfSourceDependency>& dependencies,
+    std::string& aliasedUri);
 
 } // namespace asset

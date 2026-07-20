@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -534,6 +535,42 @@ TEST_CASE(GltfImporter_ReportsDecodedExternalBufferDependencies)
         }
     }
     std::filesystem::remove_all(directory, errorCode);
+}
+
+TEST_CASE(GltfImporter_UsesCapturedExternalBufferWithoutDiskRead)
+{
+    const std::array<float, 9> positions = {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f
+    };
+    const std::span<const std::byte> positionBytes =
+        std::as_bytes(std::span<const float>(positions));
+    const std::array<asset::GltfExternalBuffer, 1> snapshots = {{
+        "mesh.bin", positionBytes
+    }};
+    const std::filesystem::path missingDirectory =
+        std::filesystem::temp_directory_path() / "the_dawning_missing_buffer_snapshot";
+    std::error_code errorCode;
+    std::filesystem::remove_all(missingDirectory, errorCode);
+
+    const asset::GltfImportResult result = asset::ImportGltfMemoryWithExternalBuffers(
+        BuildExternalBufferGltf("%6d%65sh.bin"),
+        missingDirectory / "model.gltf",
+        snapshots);
+    CHECK(result.Succeeded());
+    if (result.Succeeded())
+    {
+        CHECK_EQ(result.model.VertexCount(), uint64_t{ 3 });
+        CHECK_APPROX(result.model.primitives[0].vertices[1].position.x, 1.0f);
+    }
+
+    const asset::GltfImportResult missing = asset::ImportGltfMemoryWithExternalBuffers(
+        BuildExternalBufferGltf("mesh.bin"),
+        missingDirectory / "model.gltf",
+        {});
+    CHECK_FALSE(missing.Succeeded());
+    CHECK_EQ(missing.status, asset::GltfImportStatus::BufferLoadError);
 }
 
 TEST_CASE(GltfImporter_RejectsOutOfRangeMaterialFactors)

@@ -596,6 +596,136 @@ TEST_CASE(AssetCompiler_DetectsDependencyMutationDuringCook)
     std::filesystem::remove_all(directory, errorCode);
 }
 
+TEST_CASE(AssetCompiler_SnapshotEnforcesAggregateExternalImageLimit)
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "the_dawning_snapshot_image_limit_test";
+    std::error_code errorCode;
+    std::filesystem::remove_all(directory, errorCode);
+    std::filesystem::create_directories(directory, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (errorCode)
+        return;
+
+    for (const char* name : { "first.png", "second.png" })
+    {
+        std::ofstream stream(directory / name, std::ios::binary);
+        stream << "four";
+    }
+    const std::vector<asset::GltfSourceDependency> dependencies = {
+        { "first.png", asset::GltfDependencyKind::Image },
+        { "second.png", asset::GltfDependencyKind::Image }
+    };
+    asset::GltfImportLimits importLimits;
+    asset::CookedModelLimits cookedLimits;
+    importLimits.maxEmbeddedImageBytes = 100;
+    cookedLimits.maxEmbeddedImageBytes = 7;
+
+    const asset::SourceSnapshotResult captured = asset::CaptureSourceDependencies(
+        directory, dependencies, importLimits, cookedLimits);
+    CHECK_FALSE(captured.Succeeded());
+    CHECK_EQ(captured.status, asset::SourceSnapshotStatus::ResourceLimitExceeded);
+    CHECK(captured.dependencies.size() <= 1);
+    std::filesystem::remove_all(directory, errorCode);
+}
+
+TEST_CASE(AssetCompiler_SnapshotEnforcesAggregateExternalBufferLimit)
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "the_dawning_snapshot_buffer_limit_test";
+    std::error_code errorCode;
+    std::filesystem::remove_all(directory, errorCode);
+    std::filesystem::create_directories(directory, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (errorCode)
+        return;
+
+    for (const char* name : { "first.bin", "second.bin" })
+    {
+        std::ofstream stream(directory / name, std::ios::binary);
+        stream << "four";
+    }
+    const std::vector<asset::GltfSourceDependency> dependencies = {
+        { "first.bin", asset::GltfDependencyKind::Buffer },
+        { "second.bin", asset::GltfDependencyKind::Buffer }
+    };
+    asset::GltfImportLimits importLimits;
+    importLimits.maxBufferBytes = 7;
+
+    const asset::SourceSnapshotResult captured = asset::CaptureSourceDependencies(
+        directory, dependencies, importLimits);
+    CHECK_FALSE(captured.Succeeded());
+    CHECK_EQ(captured.status, asset::SourceSnapshotStatus::ResourceLimitExceeded);
+    CHECK(captured.dependencies.size() <= 1);
+    std::filesystem::remove_all(directory, errorCode);
+}
+
+TEST_CASE(AssetCompiler_ChargesRepeatedExternalImagesWhenMaterialized)
+{
+    asset::ImportedModel model;
+    model.images.resize(2);
+    model.images[0].uri = "shared.png";
+    model.images[1].uri = "shared.png";
+    const std::vector<asset::GltfSourceDependency> dependencies = {
+        { "shared.png", asset::GltfDependencyKind::Image },
+        { "shared.png", asset::GltfDependencyKind::Image }
+    };
+    asset::SourceDependencySnapshot snapshot;
+    snapshot.uri = "shared.png";
+    snapshot.isImage = true;
+    snapshot.payloadBytes.assign(4, std::byte{ 0x7f });
+    const std::vector<asset::SourceDependencySnapshot> snapshots = { snapshot };
+    asset::GltfImportLimits importLimits;
+    asset::CookedModelLimits cookedLimits;
+    importLimits.maxEmbeddedImageBytes = 100;
+    cookedLimits.maxEmbeddedImageBytes = 7;
+
+    std::string error;
+    CHECK_EQ(asset::EmbedExternalImageSnapshots(
+                 model, dependencies, snapshots, importLimits, cookedLimits, error),
+             asset::SourceSnapshotStatus::ResourceLimitExceeded);
+    CHECK_EQ(model.images[0].embeddedBytes.size(), size_t{ 4 });
+    CHECK(model.images[1].embeddedBytes.empty());
+    CHECK(error.find("aggregate limit") != std::string::npos);
+}
+
+TEST_CASE(AssetCompiler_RejectsOutputAliasesOfSourceDependencies)
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "the_dawning_dependency_alias_test";
+    std::error_code errorCode;
+    std::filesystem::remove_all(directory, errorCode);
+    std::filesystem::create_directories(directory, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (errorCode)
+        return;
+
+    const std::filesystem::path dependencyPath = directory / "texture.png";
+    {
+        std::ofstream stream(dependencyPath, std::ios::binary);
+        stream << "source texture";
+    }
+    const std::vector<asset::GltfSourceDependency> dependencies = {
+        { "texture.png", asset::GltfDependencyKind::Image }
+    };
+    std::string aliasedUri;
+    CHECK(asset::OutputPathAliasesSourceDependency(
+        dependencyPath, directory, dependencies, aliasedUri));
+    CHECK_EQ(aliasedUri, std::string("texture.png"));
+
+    const std::filesystem::path hardlinkPath = directory / "cooked.tdmodel";
+    std::filesystem::create_hard_link(dependencyPath, hardlinkPath, errorCode);
+    CHECK_FALSE(static_cast<bool>(errorCode));
+    if (!errorCode)
+    {
+        CHECK(asset::OutputPathAliasesSourceDependency(
+            hardlinkPath, directory, dependencies, aliasedUri));
+    }
+    CHECK_FALSE(asset::OutputPathAliasesSourceDependency(
+        directory / "unrelated.tdmodel", directory, dependencies, aliasedUri));
+    std::filesystem::remove_all(directory, errorCode);
+}
+
 TEST_CASE(AssetCompiler_RejectsInvalidModelBeforeWriting)
 {
     asset::ImportedModel invalid = BuildRepresentativeModel();

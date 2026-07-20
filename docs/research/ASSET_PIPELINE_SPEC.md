@@ -201,12 +201,15 @@ size, and SHA-256; duplicate source references are canonicalized. External
 buffer and image URIs are percent-decoded and hashed, and external images are
 embedded from those same captured bytes so moving the cooked artifact does not
 sever its textures. Dependencies are snapshotted before import and hashed again
-after import; any concurrent mutation aborts the cook rather than pairing model
-data with a different dependency identity. The source file also has a SHA-256
-in the header. The offline compiler validates memory,
-writes a process-unique temporary sibling, reloads that temporary file, and only
-then atomically replaces the destination. Concurrent publishers retry bounded
-Windows sharing conflicts. The loader has configurable caps for file and
+after import. External buffers are imported directly from the immutable captured
+bytes, so even a change-and-restore race cannot pair model data with a different
+dependency identity. Repeated image references are charged each time their
+payload is materialized, while external buffer and image snapshots have separate
+aggregate budgets. The source file also has a SHA-256 in the header. The offline
+compiler rejects outputs that alias the source or any external dependency,
+validates memory, writes a process-unique temporary sibling, reloads that
+temporary file, and only then atomically replaces the destination. Concurrent
+publishers retry bounded Windows sharing conflicts. The loader has configurable caps for file and
 section sizes, strings, geometry, tables, dependencies, and embedded images;
 the builder enforces the same caps before constructing its sections.
 
@@ -214,9 +217,10 @@ Texture bytes are currently preserved in their source PNG/JPEG/KTX/DDS form,
 which the existing engine loaders understand. GPU block compression and mipmap
 generation are intentionally not claimed by this slice; they belong in a later
 texture-cooking revision and must bump the relevant section version when added.
-Likewise, this stage produces and validates CPU `ImportedModel` data but does not
-yet upload cooked geometry to D3D12. That runtime bridge follows after the active
-renderer ownership lane lands.
+The landed model bridge already uploads `ImportedModel` geometry imported from
+GLTF to D3D12. This stage deliberately does not change renderer-owned code, so a
+direct `.tdmodel` loader into that same GPU bridge remains the next runtime asset
+step.
 
 Production measurements on 2026-07-20:
 
@@ -228,9 +232,11 @@ CPU tests cover known SHA-256 vectors, deterministic canonical serialization,
 complete data round trip, whole-file corruption, truncation, bad magic,
 unsupported versions, symmetric builder/loader limits, CRC-correct allocation
 bombs, atomic preservation, external dependency identity, and invalid source
-models. Both production Meshy GLBs compile and reload successfully without
-D3D12. A two-process publication stress test produced a valid byte-identical
-artifact with no orphan temporary files.
+models, aggregate external snapshot and materialization limits, immutable-buffer
+imports, dependency output aliases, and concurrent source changes.
+Both production Meshy GLBs compile and reload successfully without D3D12. A
+two-process publication stress test produced a valid byte-identical artifact
+with no orphan temporary files.
 
 **Stage 4 - Content directory and manifest.** Data-driven scene definition so
 adding an asset does not mean editing `app.cpp`. This is the "data-driven systems"
