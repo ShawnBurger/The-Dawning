@@ -626,7 +626,9 @@ asset/render lanes. The current order is:
 - Acceptance gates: docs diff check and source audit
 - Negative controls: no atmosphere implementation claim without runtime code/tests
 - Latest commit: `1e636d1` on `main`
-- Next action: retire the clean research worktree after reachability is verified
+- Next action: the worktree is clean but `a7c836f` is not an ancestor of `main`;
+  compare it with integrated commit `1e636d1`, then archive/remove only after the
+  integration manager confirms content equivalence and branch retention policy
 
 ### WS-003: Coordinate/rebase Stage 0
 
@@ -641,16 +643,19 @@ asset/render lanes. The current order is:
 - Owned paths: `src/sim/reference_frame.h`, `src/sim/reference_frame.cpp`,
   `tests/test_reference_frame.cpp`
 - Excluded paths: `src/render/**`, `shaders/**`, asset pipeline
-- Shared-file locks: `CMakeLists.txt` locked to WS-003 until its committed handoff
+- Shared-file locks: WS-003 carries a proposed `CMakeLists.txt` patch. The file
+  remains `INTEGRATION_ONLY`: no other active branch edits it, and Codex reconciles
+  the final registration change during integration.
 - Interface contract: simulation exposes camera-relative transforms without
   renderer ownership of world coordinates
 - Dependencies: architecture and physics research already merged
 - Acceptance gates: precision negative control, rebase continuity, deterministic
   replay, Debug/Release tests, raster/stable/full smoke after integration
 - Negative controls: naive narrow-before-subtract must fail at planetary scale
-- Latest commit: uncommitted active work based on `b197701`; do not enter or edit
-  the worktree
-- Next action: Claude completes, commits, and hands off Stage 0 for Codex review
+- Latest commit: `98ec517` (`Sim Stage 0: galactic world position + hierarchical
+  reference frames`), based on `b197701`; the worktree remains Claude-owned
+- Next action: Claude hands off the committed Stage 0 range for Codex review; do
+  not enter or edit the worktree
 
 ### WS-004: Playable-ship vertical slice
 
