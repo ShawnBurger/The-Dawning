@@ -79,12 +79,24 @@ StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
 // witnesses the probe's own load, and stays green with the line below changed
 // to materialBuffer[0]. Moving it here is what closes that gap.
 //
-// The cost: declaring a UAV in a pixel shader defeats early-Z for this PSO in
-// every configuration, not just on probed frames, because the declaration is
-// part of the compiled shader while `drawProbeEnabled` only gates the write.
-// That is a real and permanent cost, accepted because the alternative is a
-// material index that nothing checks.
+// COMPILED OUT UNLESS DAWNING_DRAW_PROBE IS DEFINED, and that is not tidiness.
+// Declaring a UAV in a pixel shader defeats early-Z for the whole PSO. A
+// runtime gate cannot buy it back: `drawProbeEnabled` gates the WRITE, but it
+// is the DECLARATION that tells the hardware this shader may have side effects,
+// so a b3-gated probe still costs early-Z on every pixel of every frame. That
+// is a per-frame cost on the main opaque pass, paid in Release, to serve an
+// assertion that runs on one frame of a smoke run.
+//
+// So Renderer::CreatePSO compiles this file TWICE: once plain for m_pso, the
+// PSO every real frame uses, which now declares no UAV and keeps early-Z; and
+// once with DAWNING_DRAW_PROBE=1 for m_psoDrawProbe, bound only on the frame the
+// probe runs. The probe therefore still works in EVERY configuration, Debug and
+// Release alike - it is not compiled away in shipping builds, it is moved off
+// the hot PSO. The runtime `drawProbeEnabled` gate is kept inside the probe
+// permutation so the two PSOs agree on the root-constant layout.
+#if DAWNING_DRAW_PROBE
 RWByteAddressBuffer drawRecordProbe : register(u0, space4);
+#endif
 
 // Which record this draw owns. Declared identically in basic_vs.hlsl and
 // shadow_vs.hlsl; the vertex stage reads objectIndex, this stage reads
@@ -281,10 +293,12 @@ float4 main(PSInput input) : SV_TARGET
     // Witness the record THIS SHADER SHADES WITH, not a second load of it. `mat`
     // is the variable every line below reads; hashing anything else here would
     // reintroduce exactly the blind spot this probe exists to remove.
+#if DAWNING_DRAW_PROBE
     if (drawProbeEnabled != 0)
     {
         DawningWriteMaterialProbe(drawRecordProbe, objectIndex, mat);
     }
+#endif
 
     float3 N = normalize(input.normalWS);
     if (mat.useNormalTexture != 0)

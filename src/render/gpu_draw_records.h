@@ -288,9 +288,10 @@ void WriteObjectRecord(ObjectData& out,
 // subsequent frame of every run, and its reallocate-and-DeferredRelease branch -
 // which is the ONLY place three frames in flight can use-after-free, because CPU
 // writes to persistently mapped UPLOAD memory are not synchronised by resource
-// barriers - executed only behind an opt-in -ForceGrow smoke switch. An untaken
-// branch behind an unrun flag is not coverage. That switch has since been
-// removed outright; the default path covers strictly more than it did.
+// barriers - executed only behind the opt-in -ForceGrow smoke switch. An untaken
+// branch behind an unrun flag is not coverage, so the branch is now on the
+// DEFAULT path in both smoke modes; -ForceGrow survives as the heavier case on
+// top of it rather than as the only way in.
 //
 // The floors are now small enough that GROWTH IS STRUCTURAL, not incidental:
 //

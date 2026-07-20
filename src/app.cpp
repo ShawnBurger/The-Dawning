@@ -56,6 +56,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
     options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
+    options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
@@ -673,6 +674,34 @@ int App::RunMainLoop()
 
     const uint64_t smokeRTStartFrame = SmokeFrameForTime(m_options.smokeRTDelaySeconds);
     const uint64_t smokeEndFrame = SmokeFrameForTime(m_options.smokeSeconds);
+
+    // THE DRAW-RECORD PROBE FRAME, and it is deliberately NOT the final frame.
+    //
+    // The probe is written by basic_vs, shadow_vs and basic_ps. A path-traced
+    // frame runs none of the three, so the probe requires a RASTER frame.
+    //
+    // It used to ride along with the capture on smokeEndFrame. Under -RasterOnly
+    // that is a raster frame and the probe ran; in the DEFAULT smoke mode the run
+    // ends in path tracing, so probeDrawRecords was false on the single frame
+    // that ever asked for it and the default run carried NO probe coverage at
+    // all. That is the same class of gap as an assertion sitting behind a flag
+    // nobody passes: the check exists, reads as coverage, and is never reached.
+    //
+    // So the probe runs on the LAST RASTER FRAME of whichever mode is active -
+    // smokeEndFrame under -RasterOnly, and the frame before path tracing takes
+    // over otherwise. With the default 0.25 s delay that is frame 14, which is
+    // AFTER ApplySmokeGrowthStress's frame-8 churn: the probe therefore reads an
+    // object buffer that has already been grown and deferred-released mid-run,
+    // not the pristine first allocation.
+    //
+    // The smokeRTStartFrame > 1 guard covers --smoke-rt-delay=0, where no raster
+    // frame exists at all. That configuration cannot be probed; it falls back to
+    // the end frame, where probeDrawRecords stays false and the harness's
+    // draw_probe_frame marker is absent rather than silently wrong.
+    const uint64_t smokeDrawProbeFrame =
+        (m_options.smokeRT && smokeRTStartFrame > 1) ? smokeRTStartFrame - 1
+                                                     : smokeEndFrame;
+    m_smokeDrawProbeRequested = false;
     if (m_options.smoke)
     {
         core::Log::Infof("[SMOKE] timeline=fixed fixed_hz=60 target_frames=%llu",
@@ -784,11 +813,21 @@ int App::RunMainLoop()
                 }
             }
 
+            // Armed once, on the last raster frame - see smokeDrawProbeFrame
+            // above. Separate from the end-of-run block below precisely because
+            // the two frames are not the same frame in the default mode.
+            if (!m_smokeDrawProbeRequested && m_frameCount >= smokeDrawProbeFrame)
+            {
+                m_smokeDrawProbeRequested = true;
+                m_verifyDrawRecordsThisFrame = true;
+                core::Log::Infof("[SMOKE] draw_probe_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+            }
+
             if (m_frameCount >= smokeEndFrame)
             {
                 m_captureThisFrame = m_options.smokeCapture;
                 m_verifyShadowThisFrame = true;
-                m_verifyDrawRecordsThisFrame = true;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");
                 core::Log::Infof("[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u",
                                  m_renderer.ConstantRingPeakBytes(),
@@ -1235,22 +1274,38 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // to raster wrote at whatever offset the last raster frame left behind.
     // Sizing hint for the per-draw structured buffers.
     //
-    // Raster smoke inflates it on a ramp so the buffers REALLOCATE repeatedly
-    // by default. That branch - allocate kFrameCount replacements, unmap
-    // and DeferredRelease the old ones, swap - is the only code in this change
-    // that can use-after-free, because kFrameCount frames may still be reading
-    // the outgoing buffers, and in an ordinary run it never executes at all: the
+    // Smoke inflates it on a ramp so the buffers REALLOCATE repeatedly by
+    // default. That branch - allocate kFrameCount replacements, unmap and
+    // DeferredRelease the old ones, swap - is the only code in this change that
+    // can use-after-free, because kFrameCount frames may still be reading the
+    // outgoing buffers, and in an ordinary run it never executes at all: the
     // demo scene's draw count sits under kMinObjectCapacity, so
     // EnsureFrameStructuredBuffer early-outs every frame after the first.
+    //
+    // BOTH SMOKE MODES, not raster only. This ramp was gated on
+    // `m_options.smoke && !m_options.smokeRT`, which silently left the DXR run
+    // with only the reallocations App::ApplySmokeGrowthStress's frame-8 churn
+    // produces: MEASURED, the default run performed 4 replacements with 2 in
+    // flight, against 15 and 13 for -RasterOnly. The buffers are allocated,
+    // grown and deferred-released by BeginFrameResources on EVERY frame
+    // regardless of which path consumes them, so the fence hazard is identical
+    // in both modes and there is no reason for the DXR run to carry a quarter of
+    // the coverage. Making it unconditional brings the default run to the same
+    // ramp as -RasterOnly.
+    //
+    // --smoke-force-grow steepens it further. It is the opt-in heavy case, and
+    // it is deliberately NOT the coverage floor: the harness asserts against
+    // what the DEFAULT ramp produces, so the switch can only ever add.
     //
     // The ramp is deliberately fast enough to cross a capacity boundary while
     // earlier frames are still in flight, which is precisely the condition the
     // DeferredRelease fence guard exists for. Run it under --gpu-validation to
     // put the swap under GPU-based validation as well.
     uint32_t maxDrawsHint = m_scene.MeshInstanceCount();
-    if (m_options.smoke && !m_options.smokeRT)
+    if (m_options.smoke)
     {
-        maxDrawsHint += static_cast<uint32_t>(m_frameCount) * 4u;
+        const uint32_t rampPerFrame = m_options.smokeForceGrow ? 16u : 4u;
+        maxDrawsHint += static_cast<uint32_t>(m_frameCount) * rampPerFrame;
     }
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
     const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&

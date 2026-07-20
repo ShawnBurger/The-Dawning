@@ -296,6 +296,82 @@ TEST_CASE(GpuDrawRecords_MaterialRecordCarriesItsOwnIndex)
     CHECK_EQ(render::HashMaterialData(a), render::HashMaterialData(b));
 }
 
+// RESTORED. This case was deleted during the probe merge with no mention, and
+// two of its assertions had no replacement anywhere in the tree or in the GPU
+// probe:
+//
+//   * the memcmp: that for identical geometry the record is byte-identical up to
+//     recordId, i.e. that the slot index perturbs NOTHING but the stamp. Without
+//     it, a WriteObjectRecord that folded the index into, say, worldRow0.w would
+//     still satisfy every surviving case - the ids would differ, the hashes
+//     would differ, and the GPU probe would still be green, because the probe
+//     compares the shader's load against the SAME CPU record and both sides
+//     would carry the same corruption.
+//   * the recordPad zeroing: that the three pad uints are WRITTEN, not
+//     inherited. gpu_draw_records.hlsli hashes the pad on the GPU side and
+//     HashObjectData hashes it on the CPU side, so an uninitialised pad makes
+//     the two agree only by luck. That failure is nondeterministic - it depends
+//     on what was in the buffer slot before - which is exactly the kind the GPU
+//     probe reports as an unexplained intermittent mismatch.
+//
+// GpuDrawRecords_ObjectRecordCarriesItsOwnIndex replaced only the id-stamping
+// half, and it probes indices 11 and 12; index 0 is added back here because 0 is
+// the value every wrong-element failure collapses to.
+TEST_CASE(GpuDrawRecords_RecordIdStampsTheAllocatedIndex)
+{
+    const core::Mat4x4 world  = AwkwardWorld();
+    const core::Mat4x4 normal = core::Mat4x4::InverseTranspose3x3(world);
+
+    render::ObjectData a = {};
+    render::ObjectData b = {};
+    render::WriteObjectRecord(a, world, normal, 0u);
+    render::WriteObjectRecord(b, world, normal, 41u);
+
+    CHECK_EQ(a.recordId, 0u);
+    CHECK_EQ(b.recordId, 41u);
+
+    // Same geometry, so everything before the stamp is byte-identical: the slot
+    // index reaches recordId and nothing else.
+    CHECK(std::memcmp(&a, &b, offsetof(render::ObjectData, recordId)) == 0);
+
+    // The pad is written, not inherited. Both hash functions cover it, so a
+    // stale pad desynchronises CPU and GPU nondeterministically.
+    CHECK_EQ(b.recordPad[0], 0u);
+    CHECK_EQ(b.recordPad[1], 0u);
+    CHECK_EQ(b.recordPad[2], 0u);
+
+    // Written into pre-dirtied storage, because zero-initialised locals would
+    // pass the pad checks above whether WriteObjectRecord clears them or not.
+    render::ObjectData dirty;
+    std::memset(&dirty, 0xAB, sizeof(dirty));
+    render::WriteObjectRecord(dirty, world, normal, 7u);
+    CHECK_EQ(dirty.recordId, 7u);
+    CHECK_EQ(dirty.recordPad[0], 0u);
+    CHECK_EQ(dirty.recordPad[1], 0u);
+    CHECK_EQ(dirty.recordPad[2], 0u);
+}
+
+// The material record needs the same guarantee, and it has no CPU-side test that
+// its pad word survives a dirty slot either. MaterialData is written field by
+// field by the renderer rather than through a single helper, so this pins the
+// two words the probe hashes but nothing else reads.
+TEST_CASE(GpuDrawRecords_MaterialRecordPadIsStableUnderHashing)
+{
+    render::MaterialData a = {};
+    render::MaterialData b = {};
+    a.albedo[0] = b.albedo[0] = 0.5f;
+    a.recordId = b.recordId = 9;
+
+    // materialPad is hashed on both sides (see DawningHashMaterialData), so two
+    // records equal in every meaningful field must also agree on the pad or the
+    // GPU probe reports a mismatch that no source-level difference explains.
+    CHECK_EQ(a.materialPad0, 0u);
+    CHECK_EQ(render::HashMaterialData(a), render::HashMaterialData(b));
+
+    b.materialPad0 = 1;
+    CHECK(render::HashMaterialData(a) != render::HashMaterialData(b));
+}
+
 // recordId sits where materialPad0 was, so the 80-byte layout the DXR path also
 // uses is untouched. If this ever moves, shaders/gpu_draw_records.hlsli and the
 // static_asserts in gpu_draw_records.h must move with it.

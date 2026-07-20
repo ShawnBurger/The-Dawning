@@ -255,14 +255,17 @@ public:
     //   * The capacity floors are smaller than any real scene and Init allocates
     //     AT them, so frame ZERO reallocates. This is the harmless case - see
     //     the in-flight counter below for why it is called that.
-    //   * Raster smoke then RAMPS the draw hint every frame, and growth is
-    //     geometric, so the buffers are replaced repeatedly mid-run with frames
-    //     genuinely outstanding. The +80 entities App::ApplySmokeGrowthStress
-    //     adds at frame 8 do the same in BOTH smoke modes.
+    //   * Smoke then RAMPS the draw hint every frame - in BOTH modes; it was
+    //     briefly raster-only, which quietly left the DXR run with a quarter of
+    //     the coverage - and growth is geometric, so the buffers are replaced
+    //     repeatedly mid-run with frames genuinely outstanding. The +80 entities
+    //     App::ApplySmokeGrowthStress adds at frame 8 do the same in both modes.
     //
-    // The -ForceGrow switch that used to be the ONLY way to reach this branch
-    // is gone - its ramp did not survive the merge that rewrote the sizing-hint
-    // logic, and the default path is now far heavier than it ever was.
+    // -ForceGrow used to be the ONLY way to reach this branch. It no longer is:
+    // the sizing-hint ramp runs by default in BOTH smoke modes, so the default
+    // run is already heavier than -ForceGrow ever was. The switch is still
+    // there and still steepens the ramp - it is the opt-in heavy case, not the
+    // coverage floor, and tools/smoke_test.ps1 asserts against the default.
     uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
     // The subset of the above that ran with at least one frame already recorded
     // and never waited upon - the genuinely hazardous case, and the only one a
@@ -547,6 +550,28 @@ private:
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
     ComPtr<ID3D12PipelineState> m_pso;
+
+    // The probe permutation of the main PSO: identical state, pixel shader
+    // compiled with DAWNING_DRAW_PROBE so it declares the probe UAV. Bound ONLY
+    // on the frame the draw-record probe runs.
+    //
+    // It exists because a pixel shader that declares a UAV loses early-Z for the
+    // whole PSO, in every configuration, and no runtime flag can buy that back -
+    // `drawProbeEnabled` gates the write, but the DECLARATION is what marks the
+    // shader as side-effecting. Keeping the probe on a separate PSO is what lets
+    // m_pso stay early-Z-eligible on every ordinary frame while the probe still
+    // ships and still runs in Release.
+    ComPtr<ID3D12PipelineState> m_psoDrawProbe;
+
+    // The main-pass PSO for THIS frame. Every site that binds the opaque pipeline
+    // must go through here, or a probe frame would rasterise with the PSO whose
+    // pixel shader cannot write the probe and the material half would read as
+    // "unshaded" for every draw.
+    ID3D12PipelineState* MainPSO() const
+    {
+        return m_drawProbeEnabled ? m_psoDrawProbe.Get() : m_pso.Get();
+    }
+
     ComPtr<ID3D12PipelineState> m_skyPSO;
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than

@@ -117,7 +117,7 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            cbuffer, so each cascade costs one flat 256-byte upload and the four
            cascades share one set of object records. Ring peak is 1792 bytes,
            flat, in both smoke modes
-           Raster smoke validates draw records ON THE GPU through one merged
+           BOTH smoke modes validate draw records ON THE GPU through one merged
            probe at u0/space4, 16 bytes per object record. Each slot carries two
            independent claims: a HASH of every field of the record the shader
            loaded, which catches CPU/HLSL layout drift, and a MARKER read out of
@@ -137,12 +137,24 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            materialBuffer[0]. All four mutations are watched failing: object
            indexing in each vertex shader, material indexing in the pixel
            shader, and the deferred-release fence tagging.
-           A third b3 constant gates the writes to the final smoke frame, so
-           ordinary frames pay no per-invocation witness cost. The UAV
-           DECLARATION in basic_ps is not gated and cannot be - it defeats
-           early-Z for that PSO in every configuration, permanently. That is a
-           real cost, accepted because the alternative is a material index that
-           nothing checks
+           The probe runs on the LAST RASTER FRAME of the run, not the final
+           frame. The final frame is path-traced in the default mode, which runs
+           none of the three shaders, so probing there gave the default run zero
+           probe coverage - an assertion that existed and was never reached. In
+           the default mode the probe frame is now frame 14, ahead of the RT
+           switch and inside the frame 8..16 growth churn, so it also reads a
+           buffer that has already been grown and deferred-released mid-run.
+           A third b3 constant gates the writes to that frame, so ordinary
+           frames pay no per-invocation witness cost. The UAV DECLARATION in
+           basic_ps is GATED TOO, behind DAWNING_DRAW_PROBE: declaring a UAV in
+           a pixel shader defeats early-Z for the whole PSO, and a runtime flag
+           cannot buy it back, because it is the declaration and not the write
+           that marks the shader side-effecting. So Renderer::CreatePSO compiles
+           basic_ps twice - m_pso without the UAV for every real frame, and
+           m_psoDrawProbe with it, bound only on the probe frame. The main
+           opaque pass keeps early-Z in Release and the probe is still compiled
+           into shipping builds; the cost is one extra PSO. The vertex shaders
+           are not permuted - early-Z is a pixel-stage property
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
            and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a

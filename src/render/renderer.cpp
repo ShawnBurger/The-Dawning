@@ -105,6 +105,7 @@ void Renderer::Shutdown()
     m_textureHeap.Reset();
     m_skyPSO.Reset();
     m_pso.Reset();
+    m_psoDrawProbe.Reset();
     m_rootSig.Reset();
     m_textureDescSize = 0;
     m_textureAllocator.ReclaimAll();
@@ -912,9 +913,21 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[2].Descriptor.ShaderRegister = 0;
         rootParams[2].Descriptor.RegisterSpace  = 3;
         rootParams[2].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
-        // The smoke probe hashes MaterialData in the vertex stage as well as
-        // the pixel shader consuming it normally.
-        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+        // PIXEL, not ALL.
+        //
+        // This said ALL, justified by "the smoke probe hashes MaterialData in the
+        // vertex stage as well as the pixel shader consuming it normally". That
+        // justification described an arrangement this merge specifically
+        // DISPROVED and then deleted: basic_vs declared materialBuffer for the
+        // probe and for nothing else, which meant the probe witnessed its own
+        // load and stayed green with basic_ps reading materialBuffer[0]. The
+        // declaration is gone from basic_vs.hlsl; grep space3 across shaders/ and
+        // basic_ps.hlsl is the only hit.
+        //
+        // So the pixel stage is now the only stage that declares t0/space3, and
+        // PIXEL is both the accurate visibility and the tighter one. Widening it
+        // back to ALL would be reinstating the description of a bug.
+        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
         // Slot 3: Material texture table (t0-t127)
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -972,6 +985,12 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // words. The material half MUST come from the pixel stage - that is the
         // stage that consumes materialBuffer, and a witness taken anywhere else
         // stays green while the shading load reads element 0.
+        //
+        // Stays ALL even though the pixel stage declares this UAV only in the
+        // DAWNING_DRAW_PROBE permutation of basic_ps. One root signature serves
+        // both permutations, and a root parameter the bound shader does not
+        // declare is simply unused - narrowing this to VERTEX would break the
+        // probe PSO for no gain.
         rootParams[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
         rootParams[7].Descriptor.ShaderRegister = 0;
         rootParams[7].Descriptor.RegisterSpace  = 4;
@@ -1024,10 +1043,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[1].Descriptor.RegisterSpace  = 0;
         rootParams[1].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // PIXEL for the same reason as the v1.1 branch above: basic_ps is the
+        // only stage that declares t0/space3. The two branches must stay
+        // identical.
         rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[2].Descriptor.ShaderRegister = 0;
         rootParams[2].Descriptor.RegisterSpace  = 3;
-        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
@@ -1122,7 +1144,33 @@ bool Renderer::CreatePSO(ID3D12Device* device)
 
     auto psBytecode = CompileShaderFromFile(L"shaders/basic_ps.hlsl", "main", "ps_5_1", psDefines);
 
-    if (!vsBytecode || !psBytecode)
+    // The SAME pixel shader, compiled a second time with the draw-record probe's
+    // UAV declared. See the DAWNING_DRAW_PROBE block in shaders/basic_ps.hlsl:
+    // declaring a UAV in a pixel shader defeats early-Z for the entire PSO, and
+    // a runtime flag cannot undo that because it is the declaration, not the
+    // write, that marks the shader as having side effects.
+    //
+    // Two PSOs off one source file is the cheapest way to keep BOTH properties:
+    // m_pso - what every real frame draws with - carries no UAV and keeps
+    // early-Z in Release, and m_psoDrawProbe still carries the probe in EVERY
+    // configuration so the verification is not compiled out of shipping builds.
+    // The cost is one extra PSO object and one extra FXC invocation at start-up.
+    //
+    // The vertex shaders are NOT permuted. Their probe UAV is real but harmless:
+    // early-Z is a pixel-stage property, and a UAV declared in a vertex shader
+    // costs nothing on the depth path. Keeping one VS bytecode also keeps the
+    // two PSOs byte-identical apart from the pixel stage.
+    const D3D_SHADER_MACRO psProbeDefines[] = {
+        { "MAX_RASTER_TEXTURES",  maxRasterTexturesText },
+        { "SHADOW_CASCADE_COUNT", cascadeCountText },
+        { "SHADOW_MAP_SIZE",      shadowMapSizeText },
+        { "DAWNING_DRAW_PROBE",   "1" },
+        { nullptr, nullptr }
+    };
+    auto psProbeBytecode =
+        CompileShaderFromFile(L"shaders/basic_ps.hlsl", "main", "ps_5_1", psProbeDefines);
+
+    if (!vsBytecode || !psBytecode || !psProbeBytecode)
     {
         core::Log::Error("Failed to compile shaders for main PSO");
         return false;
@@ -1182,7 +1230,21 @@ bool Renderer::CreatePSO(ID3D12Device* device)
     }
 
     m_pso->SetName(L"MainGraphicsPSO");
+
+    // Identical in every field except the pixel bytecode, so the probe frame
+    // rasterises exactly what an ordinary frame does.
+    psoDesc.PS.pShaderBytecode = psProbeBytecode->GetBufferPointer();
+    psoDesc.PS.BytecodeLength  = psProbeBytecode->GetBufferSize();
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoDrawProbe));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (draw probe) failed: 0x%08X", hr);
+        return false;
+    }
+    m_psoDrawProbe->SetName(L"MainGraphicsPSO_DrawProbe");
+
     core::Log::Info("Graphics PSO created (VS+PS, depth on, CW front, back-face cull)");
+    core::Log::Info("Draw-probe PSO created (same state, probe UAV in the pixel stage)");
     return true;
 }
 
@@ -1798,9 +1860,10 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     ID3D12DescriptorHeap* heaps[] = { m_textureHeap.Get() };
     cmd->SetDescriptorHeaps(1, heaps);
 
-    // Set pipeline state
+    // Set pipeline state. MainPSO() picks the probe permutation on a probe frame
+    // and the early-Z-eligible one on every other frame.
     cmd->SetGraphicsRootSignature(m_rootSig.Get());
-    cmd->SetPipelineState(m_pso.Get());
+    cmd->SetPipelineState(MainPSO());
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     // Cache view-projection
@@ -1892,7 +1955,7 @@ void Renderer::DrawSky(D3D12Device& device)
     cmd->IASetIndexBuffer(nullptr);
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmd->DrawInstanced(3, 1, 0, 0);
-    cmd->SetPipelineState(m_pso.Get());
+    cmd->SetPipelineState(MainPSO());
 }
 
 // =============================================================================
