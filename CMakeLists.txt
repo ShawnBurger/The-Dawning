@@ -131,11 +131,15 @@ set(ECS_HEADERS
 set(SIM_SOURCES
     src/sim/rigid_body.cpp
     src/sim/thrusters.cpp
+    src/sim/flight_control.cpp
+    src/sim/physics_system.cpp
 )
 
 set(SIM_HEADERS
     src/sim/rigid_body.h
     src/sim/thrusters.h
+    src/sim/flight_control.h
+    src/sim/physics_system.h
 )
 
 set(SCENE_SOURCES
@@ -167,6 +171,8 @@ set(TEST_SOURCES
     tests/test_sh_irradiance.cpp
     tests/test_ibl_consume_probe.cpp
     tests/test_rigid_body.cpp
+    tests/test_flight_control.cpp
+    tests/test_physics_system.cpp
 )
 
 set(TEST_HEADERS
@@ -364,14 +370,21 @@ add_executable(TheDawningTests
     src/render/ibl_consume_probe.cpp
     src/render/ibl_consume_probe.h
     # Flight & physics integrator. GPU-free on the same sanctioned footing as
-    # shadow_cascades.cpp: sim/*.h include only core/types.h and ecs/components.h
-    # (both device-free), so tests/test_rigid_body.cpp drives the SHIPPED
-    # semi-implicit-Euler integrator and thruster wrench math, not a copy. Do NOT
-    # add physics_system.cpp here if it is ever written to include a render header.
+    # shadow_cascades.cpp: sim/*.h include only core/types.h, ecs/components.h and
+    # ecs/registry.h (all device-free), so the flight tests drive the SHIPPED
+    # semi-implicit-Euler integrator, thruster wrench math, control allocation,
+    # flight-assist law and the ECS physics system — not a copy. physics_system.cpp
+    # includes only ecs/registry.h (STL-only, already compiled here by test_ecs.cpp)
+    # plus the other sim headers, so it stays test-eligible. Do NOT add anything
+    # here that pulls in a D3D12 or render header.
     src/sim/rigid_body.cpp
     src/sim/rigid_body.h
     src/sim/thrusters.cpp
     src/sim/thrusters.h
+    src/sim/flight_control.cpp
+    src/sim/flight_control.h
+    src/sim/physics_system.cpp
+    src/sim/physics_system.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

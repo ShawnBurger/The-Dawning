@@ -4,6 +4,7 @@
 
 #include "scene.h"
 #include "../ecs/systems.h"
+#include "../sim/physics_system.h"
 #include "../core/log.h"
 #include <cstddef>
 #include <cstdint>
@@ -111,7 +112,8 @@ void Scene::UpdateSystems(double dt)
 {
     SystemVelocity(dt);
     SystemRotation(dt);
-    // Future systems: physics, AI, etc.
+    SystemFlightPhysics(dt);
+    // Future systems: collision, gravity, AI, etc.
 }
 
 // =============================================================================
@@ -135,6 +137,20 @@ void Scene::SystemRotation(double dt)
             transform.rotation = (transform.rotation * delta).Normalized();
         }
     );
+}
+
+// =============================================================================
+// System: Flight physics — six-DOF rigid bodies (Transform + RigidBody)
+// =============================================================================
+// Runs the Stage-2 control->allocation/assist->wrench->integrate pipeline once
+// per fixed step. This is called from UpdateSystems, which app.cpp drains on the
+// RULE-6 fixed-timestep accumulator (`while (ConsumeFixedStep()) UpdateSystems(
+// GetFixedDt())`), so it advances by a constant dt independent of the render
+// frame. It keys on RigidBody, disjoint from SystemVelocity's Velocity movers, so
+// the two coexist without touching the same entities.
+void Scene::SystemFlightPhysics(double dt)
+{
+    sim::StepFlightPhysics(m_registry, dt);
 }
 
 // =============================================================================
