@@ -231,3 +231,40 @@ is in flight.
 | RT capture noise floor | 1 per channel |
 | Distant-ground contrast vs raster | 4.876 → 1.694 (raster 1.582) after ray cones |
 | First generated asset | 15,562 verts / 19,193 tris, 8.7 MB GLB + ~12 MB textures, 15 credits |
+
+
+## Update: image-based lighting complete (all 4 stages) + specular fidelity
+
+The rendering vertical reached its milestone. IBL landed in four stages plus a
+specular-fidelity pass, and the generated corridor that motivated the whole asset
+pipeline no longer renders near-black (raster corridor mean luminance 66.96 ->
+98.59). Confirmed by eye, not only by metric: the metallic asset now reflects the
+environment, the gold sphere carries a proper environment specular highlight, and
+F1 no longer changes the lighting model because raster and the DXR stable preview
+evaluate the same environment from the same coefficients (harness reports SH
+diffuse delta 0).
+
+Test suite grew 156 -> 173 across these stages; all green, all three smoke modes.
+
+Techniques worth carrying forward, both now in the tree:
+- The CONSUMPTION PROBE plus NEGATIVE CONTROL FRAME. The recurring defect all
+  session was assertions that pass when the feature is ABSENT. The fix: the shader
+  writes what it ACTUALLY loaded/added into a UAV, and the frame BEFORE the verify
+  frame renders with the feature forced off and asserts every word reads zero
+  while pixels are still shaded. The assertion is thus shown IN-RUN to fail with
+  the feature absent, permanently, not once by a developer who remembered to try.
+- Five separate design errors in IBL_DESIGN.md were caught by COUNTING against the
+  tree rather than trusting the document - a descriptor offset that indexed one
+  past the end of the heap, root DWORDs attributed to the wrong stage twice, a
+  stale struct size. Verify layout numbers; never carry them.
+
+Honest non-results recorded rather than buried: the corridor's ~23-luminance gap
+to the DXR-full reference did NOT close, because specular occlusion is a provable
+identity on an asset that ships no AO map. That is now task #29 (environment
+occlusion), found by looking at the rendered image rather than the numbers -
+shadows wash out because IBL fill is not visibility-occluded.
+
+The next pillar per MASTER_ENGINE_SPEC is flight and physics (Phase 4). It is
+CPU-only, unit-testable, and the lane where Vec3d finally earns its keep, since
+orbital distances are exactly where float precision dies. Three deep-dive docs for
+it already exist under docs/research/.
