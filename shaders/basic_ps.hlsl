@@ -6,6 +6,7 @@
 // =============================================================================
 
 #include "display_common.hlsli"
+#include "gpu_draw_records.hlsli"
 
 // Supplied by Renderer::CreatePSO from core::kShadowCascadeCount and
 // Renderer::kShadowMapSize. The fallbacks exist only for compiling this file
@@ -68,36 +69,34 @@ cbuffer CBPerFrame : register(b1)
     float4   cascadeFadeLo      : packoffset(c25);                   // 400..415 (reserved)
 };
 
-// Per-draw material record. Keep byte-identical with struct MaterialData in
-// src/render/gpu_draw_records.h, which static_asserts the size and every
-// offset. A root SRV is a bare GPU virtual address with no descriptor, so there
-// is no StructureByteStride for the runtime to check against the 80 bytes FXC
-// computes here - these two declarations are the only thing keeping the layouts
-// together.
-//
-// Field for field the old CBMaterial (b2). No member straddles a 16-byte
-// boundary, so cbuffer packing and StructuredBuffer tight packing agree
-// exactly: the bytes did not move when this left the constant buffer, only the
-// register did. The DXR path already carries the same 80-byte shape as a
-// StructuredBuffer element in path_trace.hlsl.
-struct MaterialData
-{
-    float4 albedo;         // Base color (RGB) + alpha
-    float  roughness;      // 0 = mirror, 1 = matte
-    float  metallic;       // 0 = dielectric, 1 = metal
-    uint   useAlbedoTexture;
-    uint   useNormalTexture;
-    uint   albedoTextureIndex;
-    uint   normalTextureIndex;
-    uint   useOrmTexture;
-    uint   ormTextureIndex;
-    float3 emissive;
-    float  emissiveStrength;
-    uint   useEmissiveTexture;
-    uint   emissiveTextureIndex;
-    uint2  materialPad;
-};
 StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
+
+// The merged draw-record probe, MATERIAL half. See gpu_draw_records.hlsli.
+//
+// This lives in the pixel shader and nowhere else, because this is the only
+// stage that consumes materialBuffer. The earlier arrangement hashed the
+// material record from basic_vs, which reads it for no other purpose - that
+// witnesses the probe's own load, and stays green with the line below changed
+// to materialBuffer[0]. Moving it here is what closes that gap.
+//
+// COMPILED OUT UNLESS DAWNING_DRAW_PROBE IS DEFINED, and that is not tidiness.
+// Declaring a UAV in a pixel shader defeats early-Z for the whole PSO. A
+// runtime gate cannot buy it back: `drawProbeEnabled` gates the WRITE, but it
+// is the DECLARATION that tells the hardware this shader may have side effects,
+// so a b3-gated probe still costs early-Z on every pixel of every frame. That
+// is a per-frame cost on the main opaque pass, paid in Release, to serve an
+// assertion that runs on one frame of a smoke run.
+//
+// So Renderer::CreatePSO compiles this file TWICE: once plain for m_pso, the
+// PSO every real frame uses, which now declares no UAV and keeps early-Z; and
+// once with DAWNING_DRAW_PROBE=1 for m_psoDrawProbe, bound only on the frame the
+// probe runs. The probe therefore still works in EVERY configuration, Debug and
+// Release alike - it is not compiled away in shipping builds, it is moved off
+// the hot PSO. The runtime `drawProbeEnabled` gate is kept inside the probe
+// permutation so the two PSOs agree on the root-constant layout.
+#if DAWNING_DRAW_PROBE
+RWByteAddressBuffer drawRecordProbe : register(u0, space4);
+#endif
 
 // Which record this draw owns. Declared identically in basic_vs.hlsl and
 // shadow_vs.hlsl; the vertex stage reads objectIndex, this stage reads
@@ -112,6 +111,7 @@ cbuffer CBDrawIndex : register(b3)
 {
     uint objectIndex;
     uint materialIndex;
+    uint drawProbeEnabled;
 };
 
 // Size comes from Renderer::kMaxRasterTextures, passed as a define at compile
@@ -289,6 +289,16 @@ float3 ApplyNormalMap(float3 normalWS, float3 positionWS, float2 uv, uint textur
 float4 main(PSInput input) : SV_TARGET
 {
     MaterialData mat = materialBuffer[materialIndex];
+
+    // Witness the record THIS SHADER SHADES WITH, not a second load of it. `mat`
+    // is the variable every line below reads; hashing anything else here would
+    // reintroduce exactly the blind spot this probe exists to remove.
+#if DAWNING_DRAW_PROBE
+    if (drawProbeEnabled != 0)
+    {
+        DawningWriteMaterialProbe(drawRecordProbe, objectIndex, mat);
+    }
+#endif
 
     float3 N = normalize(input.normalWS);
     if (mat.useNormalTexture != 0)

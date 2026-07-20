@@ -18,37 +18,10 @@
 // surface at a hard ceiling near 341 entities. They now live in growable,
 // kFrameCount-instanced upload buffers indexed by a per-draw root constant.
 //
-// NOTHING VALIDATES THESE LAYOUTS AT RUNTIME. A root SRV is a bare GPU virtual
-// address: SetGraphicsRootShaderResourceView takes no StructureByteStride and
-// there is no SRV descriptor for the debug layer to cross-check against the
-// shader's computed struct size. A one-byte disagreement between these structs
-// and their HLSL counterparts reads shifted garbage for every element after the
-// first, silently. The static_asserts below and the unit tests beside them are
-// the whole of the CPU-side defence.
-//
-// THE DRAW-INDEX WITNESS. The static_asserts pin the LAYOUT. They cannot pin
-// the thing that actually goes wrong, which is a draw reading the wrong
-// ELEMENT: the root constant at b3 failing to reach a shader, someone
-// "simplifying" it to SV_InstanceID (which at SM 5.1 excludes
-// StartInstanceLocation and hands every draw 0), or a shader hardcoding
-// objectBuffer[0]. All of those render a plausible image.
-//
-// So ObjectData carries `recordId`, which the CPU sets to the element's own
-// index, and both vertex shaders write the recordId they LOADED into a
-// u0/space2 UAV slot selected by the root constant they were GIVEN. Correct
-// indexing means witness[i] == i + 1 for every allocated record; any of the
-// failures above collapses the written values to a single one. The round trip
-// through GPU memory is the point - it closes the loop between "the index the
-// CPU allocated" and "the record the GPU read", which is precisely the gap a
-// root SRV leaves open. Renderer::ReadDrawIndexWitness does the reduction and
-// App emits it as the draw_index_* smoke markers.
-//
-// This replaced a golden-value gate on the rendered capture's mean luminance
-// and colour-bucket count. That gate measured the right invariant only
-// indirectly and depended on which assets happened to sit in build/<Config>,
-// which is build output rather than tracked source; it was mis-calibrated twice
-// in one round before being deleted. The witness depends on nothing but the
-// draw loop.
+// Root SRVs carry no StructureByteStride, so the runtime and debug layer cannot
+// validate these layouts. Static assertions pin the CPU side, a shared HLSL
+// include pins both raster stages to one declaration, and raster smoke hashes
+// every field the GPU consumed and compares it with the mapped upload records.
 // =============================================================================
 
 #include "../core/types.h"
@@ -59,9 +32,10 @@ namespace render
 {
 
 // =============================================================================
-// ObjectData — per-draw transform record, 96 bytes
+// ObjectData — per-draw transform record, 112 bytes
 // =============================================================================
-// Matches `struct ObjectData` in shaders/basic_vs.hlsl and shaders/shadow_vs.hlsl.
+// Matches `struct ObjectData` in shaders/gpu_draw_records.hlsli, which both
+// vertex shaders include.
 //
 // EXPLICIT float4 ROWS, NOT float4x4, and that is load bearing rather than
 // stylistic. render/mesh.h records that StructuredBuffer elements do NOT get
@@ -93,10 +67,21 @@ struct ObjectData
     // InverseTranspose3x3 of that matrix, same transposed shape, w component 0.
     // Normals are covectors: reusing `world` skews them under non-uniform scale.
     float normalMatrix[12];   // 48..95
-    // THE ELEMENT'S OWN INDEX, written by the CPU, read back by the GPU. See
-    // "the draw-index witness" below: this field plus the u0/space2 UAV is what
-    // turns "each draw reads its own record" from an untestable claim into a
-    // measurement. It is not used for rendering and never should be.
+    // THE ELEMENT'S OWN INDEX, stamped by the CPU at the slot it is writing.
+    //
+    // This is what makes the probe's marker word witness the record the shader
+    // LOADED rather than the root constant it was HANDED. A marker derived from
+    // `objectIndex` would be a witness of itself: perfectly correct while the
+    // very next line read objectBuffer[0]. Derived from a field INSIDE the
+    // record, it collapses to a single value the moment indexing breaks, and it
+    // does so whatever the records happen to contain.
+    //
+    // The field hashes beside it cover a different failure - layout drift and
+    // content corruption - and cannot cover this one, because two records whose
+    // contents happen to coincide hash identically. The two words are
+    // complementary, which is why the merged probe carries both.
+    //
+    // Not used for rendering, and never should be.
     uint32_t recordId;        // 96..99
     // Explicit tail padding to a multiple of 16. NOT decorative: FXC computes a
     // StructuredBuffer stride from the HLSL struct, and a bare trailing uint
@@ -107,7 +92,7 @@ struct ObjectData
     uint32_t recordPad[3];    // 100..111
 };
 static_assert(sizeof(ObjectData) == 112,
-              "ObjectData must match struct ObjectData in basic_vs.hlsl / shadow_vs.hlsl");
+              "ObjectData must match struct ObjectData in gpu_draw_records.hlsli");
 static_assert(offsetof(ObjectData, world) == 0, "ObjectData.world must sit at byte 0");
 static_assert(offsetof(ObjectData, normalMatrix) == 48,
               "ObjectData.normalMatrix must sit at byte 48");
@@ -119,7 +104,7 @@ static_assert(offsetof(ObjectData, recordPad) == 100,
 // =============================================================================
 // MaterialData — per-draw material record, 80 bytes
 // =============================================================================
-// Matches `struct MaterialData` in shaders/basic_ps.hlsl. Field for field the
+// Matches `struct MaterialData` in shaders/gpu_draw_records.hlsli. Field for field the
 // old CBMaterial: every 16-byte block is exactly filled and no member straddles
 // a boundary, so cbuffer packing and StructuredBuffer tight packing produce
 // identical offsets. The bytes do not move; only the register does. The two pad
@@ -143,8 +128,20 @@ struct MaterialData
     float emissiveStrength;         // 60
     uint32_t useEmissiveTexture;    // 64
     uint32_t emissiveTextureIndex;  // 68
-    uint32_t materialPad0;          // 72
-    uint32_t materialPad1;          // 76
+    // Same self-identifying index as ObjectData::recordId, for the same reason,
+    // and it costs nothing: this word was materialPad0, written as zero and read
+    // by nobody. The size and every other offset are unchanged, so the DXR
+    // path's separate RTMaterialData (rt_pipeline.h) is untouched.
+    //
+    // This one is load bearing in a way the object marker is not. The material
+    // index is consumed in basic_ps.hlsl, and the records the raster demo builds
+    // are not guaranteed to differ from one another - two entities sharing an
+    // albedo and a roughness produce byte-identical MaterialData. A probe that
+    // relied on the field hash alone would therefore be blind to a pixel shader
+    // reading materialBuffer[0] whenever record 0 happened to match. Stamping
+    // the index into the record removes that dependency on scene content.
+    uint32_t recordId;              // 72
+    uint32_t materialPad0;          // 76
 };
 static_assert(sizeof(MaterialData) == 80,
               "MaterialData must match struct MaterialData in basic_ps.hlsl");
@@ -161,8 +158,62 @@ static_assert(offsetof(MaterialData, emissive) == 48, "");
 static_assert(offsetof(MaterialData, emissiveStrength) == 60, "");
 static_assert(offsetof(MaterialData, useEmissiveTexture) == 64, "");
 static_assert(offsetof(MaterialData, emissiveTextureIndex) == 68, "");
-static_assert(offsetof(MaterialData, materialPad0) == 72, "");
-static_assert(offsetof(MaterialData, materialPad1) == 76, "");
+static_assert(offsetof(MaterialData, recordId) == 72, "");
+static_assert(offsetof(MaterialData, materialPad0) == 76, "");
+
+// =============================================================================
+// DrawProbeRecord — the merged GPU witness, 16 bytes per object record
+// =============================================================================
+// ONE UAV, one readback, one per-draw cost. Two verification schemes were built
+// for this feature independently and both landed in the tree; this record is
+// their reconciliation rather than a choice between them.
+//
+//   objectHash / materialHash  hash EVERY field of the record the shader
+//                              loaded. Catches a CPU/HLSL layout disagreement -
+//                              a stride or offset drift that shifts every
+//                              element after the first - which an index witness
+//                              cannot see, because shifted garbage still comes
+//                              from the right ELEMENT.
+//   objectMarker / materialMarker  the recordId INSIDE the loaded record, + 1.
+//                              Catches wrong-element indexing, which the hashes
+//                              cannot reliably see: two records with equal
+//                              contents hash equal, so a shader stuck on
+//                              element 0 stays green for as long as the scene
+//                              happens to agree with element 0.
+//
+// The two are genuinely complementary - each covers a failure the other is
+// blind to - which is why the merged probe carries both instead of shipping the
+// two original probes side by side. Two UAVs, two readbacks and two per-vertex
+// costs for overlapping evidence would have been the worse trade.
+//
+// The +1 is what distinguishes an unwritten slot from a draw that legitimately
+// read record 0. The buffer is zero-filled before every probed frame.
+//
+// WHO WRITES WHICH WORDS. The object words come from the VERTEX stage, in both
+// basic_vs and shadow_vs. The material words come from the PIXEL stage, in
+// basic_ps, beside the `mat` it shades with - NOT from the vertex shader. That
+// placement is the entire point of the material half: the material index is
+// consumed in the pixel shader, and a probe that reads materialBuffer in a
+// different stage witnesses its own read rather than the shading one. It would
+// stay green with basic_ps hardcoded to materialBuffer[0].
+//
+// The cost of witnessing it at the consumption site is that pixel-stage writes
+// only happen for draws that actually shade pixels. A fully occluded or
+// backface-culled draw leaves its material words zero. The reader treats a
+// both-zero pair as "not shaded" rather than as a mismatch, and the harness
+// asserts on the COUNT that did get shaded - see Renderer::ReadDrawProbe.
+struct DrawProbeRecord
+{
+    uint32_t objectHash;
+    uint32_t objectMarker;
+    uint32_t materialHash;
+    uint32_t materialMarker;
+};
+static_assert(sizeof(DrawProbeRecord) == 16,
+              "DrawProbeRecord must match the RWByteAddressBuffer layout in the raster shaders");
+
+uint32_t HashObjectData(const ObjectData& record);
+uint32_t HashMaterialData(const MaterialData& record);
 
 // =============================================================================
 // CBPerPass — per-PASS view-projection, 64 bytes
@@ -193,8 +244,8 @@ static_assert(sizeof(CBPerPass) == 64,
 //
 // `recordIndex` is the element index this record is being written AT, and it is
 // a required parameter rather than something the caller may forget: the whole
-// value of the witness is that recordId is stamped by whoever chose the slot.
-// Both call sites already hold the index the cursor handed them.
+// value of the marker word is that recordId is stamped by whoever chose the
+// slot. The call site already holds the index the cursor handed it.
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
                        const core::Mat4x4& normalMatrix,
@@ -238,7 +289,9 @@ void WriteObjectRecord(ObjectData& out,
 // which is the ONLY place three frames in flight can use-after-free, because CPU
 // writes to persistently mapped UPLOAD memory are not synchronised by resource
 // barriers - executed only behind the opt-in -ForceGrow smoke switch. An untaken
-// branch behind an unrun flag is not coverage.
+// branch behind an unrun flag is not coverage, so the branch is now on the
+// DEFAULT path in both smoke modes; -ForceGrow survives as the heavier case on
+// top of it rather than as the only way in.
 //
 // The floors are now small enough that GROWTH IS STRUCTURAL, not incidental:
 //
@@ -265,16 +318,27 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws);
 
 // Capacity a FrameStructuredBuffer grows to when `elementCount` is requested.
 // Never shrinks: shrinking would mean destroying a buffer a recorded command
-// list may still reference. The headroom is what makes growth amortise.
+// list may still reference.
 //
-// Headroom is added only when growing from an EXISTING allocation. The first
-// allocation - currentCapacity 0 - is sized exactly, for two reasons. It is not
+// Growth from an EXISTING allocation is geometric - at least 1.5x, with
+// kCapacityHeadroom as the floor on the step - so a steadily expanding scene
+// does not recreate all kFrameCount resources at a fixed rate.
+//
+// The FIRST allocation, currentCapacity 0, is sized exactly instead. It is not
 // a reallocation, so there is no old buffer to release and nothing to amortise
-// against. And it is what makes the floors mean what they say: a buffer created
-// at kMinObjectCapacity holds kMinObjectCapacity elements, so the first frame
-// with a real scene must cross it. Folding headroom into the initial allocation
-// would silently hand a 4-element floor a 68-element buffer and put the whole
-// engine back under the floor.
+// against. And it is what makes the capacity floors mean what they say: a
+// buffer created at kMinObjectCapacity holds kMinObjectCapacity elements, so
+// the first frame with a real scene must cross it. Folding the headroom into
+// the initial allocation would silently hand a 4-element floor a 64-element
+// buffer, the demo scene's 34 records would fit inside it, and the frame-zero
+// grow would stop happening.
+//
+// Both halves are load bearing and they are load bearing for DIFFERENT
+// assertions. The exact first allocation is what produces the frame-zero grow;
+// the geometric steps are what let the smoke ramp keep crossing boundaries
+// mid-run. The harness asserts on both counts separately, precisely because
+// only the second kind can use-after-free.
+
 constexpr uint32_t kCapacityHeadroom = 64;
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount);
 

@@ -12,7 +12,9 @@
 //   t0/space2: StructuredBuffer<ObjectData>   — per-draw transforms  (root SRV)
 //   t0/space3: StructuredBuffer<MaterialData> — per-draw material    (root SRV)
 //   b1:        CBPerFrame   — light, ambient, camera basis, lightViewProj
-//   b3:        CBDrawIndex  — { objectIndex, materialIndex }, root 32-bit constants
+//   b3:        CBDrawIndex  — { objectIndex, materialIndex, drawProbeEnabled },
+//                             root 32-bit constants
+//   u0/space4: RWByteAddressBuffer — merged draw-record probe    (root UAV)
 //   b4:        CBPerPass    — viewProj; light matrix in the shadow pass, camera
 //                             matrix in the main pass. Once per pass, not per draw.
 //   b0 and b2 are permanently free: they were CBPerObject and CBMaterial, and
@@ -33,6 +35,51 @@
 
 namespace render
 {
+
+// The merged draw-record probe's reduction. See DrawProbeRecord in
+// gpu_draw_records.h for what the GPU writes and why.
+//
+// SPLIT BY PASS, and that is not cosmetic. A single "mismatch" count tells you
+// the GPU disagreed with the CPU and nothing else; you then go looking through
+// three shaders. Shadow and main are disjoint ranges of the same buffer, so
+// attributing each mismatch to its range costs one comparison and localises a
+// failure to a specific vertex shader. The distinct counts do the same job from
+// the other direction: the classic breakage - a hardcoded element, a lost root
+// constant, SV_InstanceID at SM 5.1 - collapses a whole pass to ONE distinct
+// marker, which is a far more legible symptom than N hash mismatches.
+struct DrawProbeValidation
+{
+    // Shadow pass: object buffer range [0, shadowRecords).
+    uint32_t shadowRecordsChecked = 0;
+    uint32_t shadowDistinctMarkers = 0;
+    uint32_t shadowMismatches = 0;
+
+    // Main pass: object buffer range [shadowRecords, objectRecords).
+    uint32_t mainRecordsChecked = 0;
+    uint32_t mainDistinctMarkers = 0;
+    uint32_t mainMismatches = 0;
+
+    // Material records, witnessed by basic_ps at the slot it shaded with.
+    //
+    // `materialRecordsChecked` counts main-pass slots whose material words were
+    // WRITTEN. It can legitimately be less than mainRecordsChecked: the pixel
+    // stage does not run for a draw that shades no pixels, so an occluded or
+    // fully back-facing draw leaves its material words zero. Those are skipped
+    // rather than counted as mismatches, which is why the harness asserts on
+    // this count and on materialDistinctMarkers rather than on equality with
+    // the main-pass record count.
+    uint32_t materialRecordsChecked = 0;
+    uint32_t materialDistinctMarkers = 0;
+    uint32_t materialMismatches = 0;
+
+    // Main-pass slots the pixel stage never wrote. Reported so that a run where
+    // this grows unexpectedly is visible rather than silently shrinking the
+    // material evidence.
+    uint32_t materialRecordsUnshaded = 0;
+
+    uint32_t ObjectRecordsChecked() const { return shadowRecordsChecked + mainRecordsChecked; }
+    uint32_t ObjectMismatches() const { return shadowMismatches + mainMismatches; }
+};
 
 // =============================================================================
 // Constant buffer structs (must match HLSL cbuffer layouts exactly)
@@ -140,7 +187,8 @@ public:
     // pass records anything and before either root SRV is bound - so an
     // already-bound SRV's virtual address can never be invalidated under a
     // recorded draw.
-    void BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint);
+    void BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint,
+                             bool enableDrawProbe = false);
 
     // Clears the stale-state guard. Called at the end of App::RenderFrame.
     void EndFrameResources() { m_frameResourcesBegun = false; }
@@ -200,10 +248,24 @@ public:
     // mapped UPLOAD memory are not synchronised by resource barriers.
     //
     // This used to read zero in an ordinary run, which is what --smoke-force-grow
-    // existed to work around. It no longer does: the capacity floors are smaller
-    // than any real scene and Init allocates AT them, so frame one reallocates
-    // and the smoke growth test's +80 entities reallocate again mid-run. See
-    // gpu_draw_records.h.
+    // existed to work around. It no longer does, and TWO independent mechanisms
+    // now keep it off zero, kept from both sides of this merge because they
+    // stress different things:
+    //
+    //   * The capacity floors are smaller than any real scene and Init allocates
+    //     AT them, so frame ZERO reallocates. This is the harmless case - see
+    //     the in-flight counter below for why it is called that.
+    //   * Smoke then RAMPS the draw hint every frame - in BOTH modes; it was
+    //     briefly raster-only, which quietly left the DXR run with a quarter of
+    //     the coverage - and growth is geometric, so the buffers are replaced
+    //     repeatedly mid-run with frames genuinely outstanding. The +80 entities
+    //     App::ApplySmokeGrowthStress adds at frame 8 do the same in both modes.
+    //
+    // -ForceGrow used to be the ONLY way to reach this branch. It no longer is:
+    // the sizing-hint ramp runs by default in BOTH smoke modes, so the default
+    // run is already heavier than -ForceGrow ever was. The switch is still
+    // there and still steepens the ramp - it is the opt-in heavy case, not the
+    // coverage floor, and tools/smoke_test.ps1 asserts against the default.
     uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
     // The subset of the above that ran with at least one frame already recorded
     // and never waited upon - the genuinely hazardous case, and the only one a
@@ -219,6 +281,13 @@ public:
     }
     uint32_t ShadowRecords() const { return m_reportedShadowRecords; }
     uint32_t MainRecords() const { return m_reportedMainRecords; }
+
+    // Smoke-only GPU evidence for the root-SRV record contract. The final
+    // raster frame hashes the object and material fields the vertex shaders
+    // actually read, copies those hashes to READBACK memory, and compares them
+    // with the CPU upload records after the queue retires.
+    bool RecordDrawProbeReadback(D3D12Device& device);
+    bool ReadDrawProbe(DrawProbeValidation& validation);
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
@@ -324,40 +393,6 @@ public:
     bool ReadShadowMapCoverage(uint32_t cascade,
                                float& writtenFraction,
                                float& minDepth) const;
-
-    // =========================================================================
-    // The draw-index witness
-    // =========================================================================
-    // GPU-side evidence that every draw read ITS OWN per-object record.
-    //
-    // This is the invariant a root SRV leaves completely unguarded: it is a bare
-    // GPU virtual address with no descriptor and no StructureByteStride, so
-    // neither the runtime nor the debug layer can tell that basic_vs.hlsl
-    // indexed objectBuffer with the root constant it was handed rather than with
-    // a constant 0. The failure renders the whole scene with one entity's
-    // transform and still looks like a scene.
-    //
-    // The CPU-side markers next door - object_records_peak, shadow_records,
-    // main_records - cannot cover this. They count what was WRITTEN. Every one
-    // of them is still perfectly correct while the GPU reads the wrong element.
-    //
-    // Mechanism: ObjectData::recordId holds the element's own index; both vertex
-    // shaders write the recordId they LOADED into witness[root constant]. A
-    // correct frame therefore leaves the identity permutation, and every way of
-    // losing the per-draw index collapses it. Two phases, matching the
-    // back-buffer capture and the shadow probe: record the copy into the frame's
-    // command list, then read it once the GPU has retired that frame.
-    bool RecordDrawIndexWitnessReadback(D3D12Device& device);
-    // Reduces the readback. `shadowRecords` / `mainRecords` are the two passes'
-    // record counts latched when the copy was recorded; `*Distinct` counts the
-    // distinct non-zero values each range holds, which equals the record count
-    // exactly when each draw read its own record and collapses towards 1 when
-    // they share one. `mismatches` is the strictly stronger check: slots where
-    // witness[i] != i + 1, i.e. an outright wrong or missing record.
-    bool ReadDrawIndexWitness(D3D12Device& device,
-                              uint32_t& shadowRecords, uint32_t& shadowDistinct,
-                              uint32_t& mainRecords,   uint32_t& mainDistinct,
-                              uint32_t& mismatches);
     // Do the uploaded cascade texel sizes strictly increase with consecutive
     // ratios in (1, 8]? Computed from the table that is ACTUALLY in flight, so
     // it is a check of the live fit rather than a mirror of the constants.
@@ -450,6 +485,8 @@ private:
                                      uint32_t elementCount,
                                      uint64_t elementSize,
                                      const wchar_t* debugName);
+    bool EnsureDrawProbeResources(D3D12Device& device, uint32_t elementCount);
+    bool PrepareDrawProbe(D3D12Device& device);
 
     FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 96
     FrameStructuredBuffer m_materialBuffer;   // stride sizeof(MaterialData) = 80
@@ -494,9 +531,47 @@ private:
     // completed-fence value nor the global fence value works here.
     uint32_t m_framesBegun = 0;
 
+    // A UAV written by the raster vertex shaders only when smoke verification
+    // is enabled. One DEFAULT buffer per frame slot avoids clearing storage a
+    // still-in-flight frame may be writing. The shared zero upload is immutable
+    // and may safely feed every slot's copy.
+    ComPtr<ID3D12Resource> m_drawProbeBuffer[kFrameCount];
+    ComPtr<ID3D12Resource> m_drawProbeZeroUpload;
+    ComPtr<ID3D12Resource> m_drawProbeReadback;
+    uint32_t m_drawProbeCapacity = 0;
+    UINT64 m_drawProbeReadbackBytes = 0;
+    uint32_t m_drawProbeReadbackFrame = 0;
+    uint32_t m_drawProbeRecordCount = 0;
+    uint32_t m_drawProbeShadowRecords = 0;
+    uint32_t m_drawProbeMaterialRecords = 0;
+    bool m_drawProbeEnabled = false;
+    bool m_drawProbeReadbackPending = false;
+
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;
     ComPtr<ID3D12PipelineState> m_pso;
+
+    // The probe permutation of the main PSO: identical state, pixel shader
+    // compiled with DAWNING_DRAW_PROBE so it declares the probe UAV. Bound ONLY
+    // on the frame the draw-record probe runs.
+    //
+    // It exists because a pixel shader that declares a UAV loses early-Z for the
+    // whole PSO, in every configuration, and no runtime flag can buy that back -
+    // `drawProbeEnabled` gates the write, but the DECLARATION is what marks the
+    // shader as side-effecting. Keeping the probe on a separate PSO is what lets
+    // m_pso stay early-Z-eligible on every ordinary frame while the probe still
+    // ships and still runs in Release.
+    ComPtr<ID3D12PipelineState> m_psoDrawProbe;
+
+    // The main-pass PSO for THIS frame. Every site that binds the opaque pipeline
+    // must go through here, or a probe frame would rasterise with the PSO whose
+    // pixel shader cannot write the probe and the material half would read as
+    // "unshaded" for every draw.
+    ID3D12PipelineState* MainPSO() const
+    {
+        return m_drawProbeEnabled ? m_psoDrawProbe.Get() : m_pso.Get();
+    }
+
     ComPtr<ID3D12PipelineState> m_skyPSO;
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
@@ -591,41 +666,6 @@ private:
     static constexpr uint32_t    kShadowProbeSize = 256;
     ComPtr<ID3D12Resource>       m_shadowReadback;
     UINT64                       m_shadowReadbackBytes = 0;
-
-    // -------------------------------------------------------------------------
-    // Draw-index witness storage. See the two public entry points above.
-    // -------------------------------------------------------------------------
-    // One uint per object record, in a DEFAULT heap because UPLOAD heaps cannot
-    // carry ALLOW_UNORDERED_ACCESS. Kept in lockstep with m_objectBuffer.capacity
-    // and rebuilt through the same growth path, so a grown object buffer can
-    // never index past the witness.
-    //
-    // NOT kFrameCount-instanced, unlike the upload buffers. It is written by the
-    // GPU and read by the GPU, so the resource barriers around it mean what they
-    // say - the reason FrameUploadBuffer needs per-frame slots is that CPU
-    // writes to mapped UPLOAD memory are not covered by barriers at all. The
-    // readback copy is fence-guarded by WaitForGpu before anything maps it.
-    bool EnsureDrawIndexWitness(D3D12Device& device, uint32_t elementCount);
-    // Zero the witness at the top of every frame. Without this an unwritten slot
-    // holds the previous frame's value, and "the draw stopped happening" would
-    // read exactly like "the draw happened correctly".
-    void ClearDrawIndexWitness(D3D12Device& device);
-
-    ComPtr<ID3D12Resource> m_drawWitness;          // DEFAULT, UAV
-    // A permanently-zero UPLOAD buffer, the source of the per-frame clear.
-    // ClearUnorderedAccessViewUint is the obvious alternative and is not usable
-    // here: it needs the UAV in BOTH a shader-visible and a non-shader-visible
-    // heap, and only m_textureHeap is bindable. A buffer copy needs no
-    // descriptor at all. Written once at creation and never again, so it raises
-    // none of the mapped-UPLOAD synchronisation questions a per-frame write would.
-    ComPtr<ID3D12Resource> m_drawWitnessZeroes;
-    ComPtr<ID3D12Resource> m_drawWitnessReadback;  // READBACK
-    uint32_t               m_drawWitnessCapacity = 0;   // ELEMENTS
-    // The two passes' record counts as they stood when the readback copy was
-    // recorded. Latched there rather than read at reduction time because
-    // BeginFrameResources resets the cursor for the next frame in between.
-    uint32_t               m_witnessShadowRecords = 0;
-    uint32_t               m_witnessMainRecords   = 0;
 
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
     // slot 1 the shadow map.

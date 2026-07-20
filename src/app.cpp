@@ -55,8 +55,8 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeFullQuality = HasOption(args, "--smoke-full");
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
-    options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
+    options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
@@ -674,6 +674,34 @@ int App::RunMainLoop()
 
     const uint64_t smokeRTStartFrame = SmokeFrameForTime(m_options.smokeRTDelaySeconds);
     const uint64_t smokeEndFrame = SmokeFrameForTime(m_options.smokeSeconds);
+
+    // THE DRAW-RECORD PROBE FRAME, and it is deliberately NOT the final frame.
+    //
+    // The probe is written by basic_vs, shadow_vs and basic_ps. A path-traced
+    // frame runs none of the three, so the probe requires a RASTER frame.
+    //
+    // It used to ride along with the capture on smokeEndFrame. Under -RasterOnly
+    // that is a raster frame and the probe ran; in the DEFAULT smoke mode the run
+    // ends in path tracing, so probeDrawRecords was false on the single frame
+    // that ever asked for it and the default run carried NO probe coverage at
+    // all. That is the same class of gap as an assertion sitting behind a flag
+    // nobody passes: the check exists, reads as coverage, and is never reached.
+    //
+    // So the probe runs on the LAST RASTER FRAME of whichever mode is active -
+    // smokeEndFrame under -RasterOnly, and the frame before path tracing takes
+    // over otherwise. With the default 0.25 s delay that is frame 14, which is
+    // AFTER ApplySmokeGrowthStress's frame-8 churn: the probe therefore reads an
+    // object buffer that has already been grown and deferred-released mid-run,
+    // not the pristine first allocation.
+    //
+    // The smokeRTStartFrame > 1 guard covers --smoke-rt-delay=0, where no raster
+    // frame exists at all. That configuration cannot be probed; it falls back to
+    // the end frame, where probeDrawRecords stays false and the harness's
+    // draw_probe_frame marker is absent rather than silently wrong.
+    const uint64_t smokeDrawProbeFrame =
+        (m_options.smokeRT && smokeRTStartFrame > 1) ? smokeRTStartFrame - 1
+                                                     : smokeEndFrame;
+    m_smokeDrawProbeRequested = false;
     if (m_options.smoke)
     {
         core::Log::Infof("[SMOKE] timeline=fixed fixed_hz=60 target_frames=%llu",
@@ -785,6 +813,17 @@ int App::RunMainLoop()
                 }
             }
 
+            // Armed once, on the last raster frame - see smokeDrawProbeFrame
+            // above. Separate from the end-of-run block below precisely because
+            // the two frames are not the same frame in the default mode.
+            if (!m_smokeDrawProbeRequested && m_frameCount >= smokeDrawProbeFrame)
+            {
+                m_smokeDrawProbeRequested = true;
+                m_verifyDrawRecordsThisFrame = true;
+                core::Log::Infof("[SMOKE] draw_probe_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+            }
+
             if (m_frameCount >= smokeEndFrame)
             {
                 m_captureThisFrame = m_options.smokeCapture;
@@ -846,18 +885,27 @@ int App::RunMainLoop()
                     m_renderer.MaterialBufferCapacity(),
                     m_renderer.ShadowRecords(),
                     m_renderer.MainRecords());
-                // Proof that the reallocation branch actually ran, and - the
-                // part that matters - that it ran with frames in flight. Both
-                // are nonzero on a DEFAULT run now: the capacity floors sit
-                // below any real scene and Renderer::Init allocates at them, so
-                // frame one reallocates, and the +80 growth entities above
-                // reallocate again mid-run while earlier frames are still
-                // executing. --smoke-force-grow is now a heavier case rather
-                // than the only case. See src/render/gpu_draw_records.h.
+                // Proof that the reallocation branch actually ran, that it ran
+                // with frames in flight, and when it first ran.
+                //
+                // The in-flight count is the one with teeth and it is NOT
+                // derivable from the total. Frame zero's grow releases a buffer
+                // no command list has ever bound, so the deferred-release queue
+                // has nothing to protect there: with the fence guard deleted
+                // outright a total-only assertion stays GREEN. Measured, not
+                // assumed. See src/render/gpu_draw_records.h.
+                //
+                // The first-reallocation frame is kept from the other side of
+                // this merge because it says something neither count does: that
+                // replacement happened late enough for all three frame slots to
+                // be outstanding, rather than during start-up.
                 core::Log::Infof("[SMOKE] structured_buffer_reallocations=%u "
                                  "structured_buffer_reallocations_in_flight=%u",
                                  m_renderer.StructuredBufferReallocations(),
                                  m_renderer.StructuredBufferReallocationsInFlight());
+                core::Log::Infof("[SMOKE] first_in_flight_reallocation_frame=%llu",
+                                 static_cast<unsigned long long>(
+                                     m_smokeFirstStructuredBufferReallocationFrame));
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }
@@ -1226,26 +1274,58 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // to raster wrote at whatever offset the last raster frame left behind.
     // Sizing hint for the per-draw structured buffers.
     //
-    // --smoke-force-grow inflates it on a ramp so the buffers REALLOCATE many
-    // times over the run. That branch - allocate kFrameCount replacements, unmap
-    // and DeferredRelease the old ones, swap - is the only code in this change
-    // that can use-after-free, because kFrameCount frames may still be reading
-    // the outgoing buffers, and in an ordinary run it never executes at all: the
+    // Smoke inflates it on a ramp so the buffers REALLOCATE repeatedly by
+    // default. That branch - allocate kFrameCount replacements, unmap and
+    // DeferredRelease the old ones, swap - is the only code in this change that
+    // can use-after-free, because kFrameCount frames may still be reading the
+    // outgoing buffers, and in an ordinary run it never executes at all: the
     // demo scene's draw count sits under kMinObjectCapacity, so
     // EnsureFrameStructuredBuffer early-outs every frame after the first.
+    //
+    // BOTH SMOKE MODES, not raster only. This ramp was gated on
+    // `m_options.smoke && !m_options.smokeRT`, which silently left the DXR run
+    // with only the reallocations App::ApplySmokeGrowthStress's frame-8 churn
+    // produces: MEASURED, the default run performed 4 replacements with 2 in
+    // flight, against 15 and 13 for -RasterOnly. The buffers are allocated,
+    // grown and deferred-released by BeginFrameResources on EVERY frame
+    // regardless of which path consumes them, so the fence hazard is identical
+    // in both modes and there is no reason for the DXR run to carry a quarter of
+    // the coverage. Making it unconditional brings the default run to the same
+    // ramp as -RasterOnly.
+    //
+    // --smoke-force-grow steepens it further. It is the opt-in heavy case, and
+    // it is deliberately NOT the coverage floor: the harness asserts against
+    // what the DEFAULT ramp produces, so the switch can only ever add.
     //
     // The ramp is deliberately fast enough to cross a capacity boundary while
     // earlier frames are still in flight, which is precisely the condition the
     // DeferredRelease fence guard exists for. Run it under --gpu-validation to
     // put the swap under GPU-based validation as well.
     uint32_t maxDrawsHint = m_scene.MeshInstanceCount();
-    if (m_options.smoke && m_options.smokeForceGrow)
+    if (m_options.smoke)
     {
-        maxDrawsHint += static_cast<uint32_t>(m_frameCount) * 4u;
+        const uint32_t rampPerFrame = m_options.smokeForceGrow ? 16u : 4u;
+        maxDrawsHint += static_cast<uint32_t>(m_frameCount) * rampPerFrame;
     }
-    m_renderer.BeginFrameResources(m_device, maxDrawsHint);
-
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
+    const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
+                                  !renderedPathTracing;
+    m_renderer.BeginFrameResources(m_device, maxDrawsHint, probeDrawRecords);
+    // The first IN-FLIGHT replacement, not the first replacement.
+    //
+    // This tracked StructuredBufferReallocations() when it arrived, and against
+    // the capacity floors on this branch that would now always latch frame 0:
+    // Renderer::Init allocates AT kMinObjectCapacity and the demo scene crosses
+    // it immediately, so a total-based "first" is the harmless start-up grow and
+    // an assertion that it happened late would be asserting the opposite of the
+    // truth. The interesting question is when the first replacement ran with
+    // frames already outstanding, which is what the in-flight counter isolates.
+    if (m_options.smoke &&
+        m_smokeFirstStructuredBufferReallocationFrame == UINT64_MAX &&
+        m_renderer.StructuredBufferReallocationsInFlight() > 0)
+    {
+        m_smokeFirstStructuredBufferReallocationFrame = m_frameCount;
+    }
 
     if (renderedPathTracing)
     {
@@ -1350,19 +1430,8 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                              m_renderer.ShadowsAvailable();
     if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
         m_verifyShadowThisFrame = false;
-
-    // The draw-index witness readback, on the same frame and under the same
-    // condition as the shadow probe: it costs a buffer copy and a GPU drain, and
-    // a path-traced frame runs neither raster pass so there is nothing to
-    // witness. Recorded HERE, after every pass has drawn, so the witness holds
-    // this frame's complete set of writes.
-    //
-    // Its own flag rather than m_verifyShadowThisFrame: the two probes fail
-    // independently, and folding them together would let a shadow-copy failure
-    // silently suppress a draw-index marker the harness asserts on.
-    bool probeDrawIndex = probeShadow;
-    if (probeDrawIndex && !m_renderer.RecordDrawIndexWitnessReadback(m_device))
-        probeDrawIndex = false;
+    if (probeDrawRecords && !m_renderer.RecordDrawProbeReadback(m_device))
+        m_verifyDrawRecordsThisFrame = false;
 
     // Everything that records into this frame's arena has now done so. Clearing
     // the guard HERE is what makes it able to catch a pass added above
@@ -1381,11 +1450,61 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             m_device.OutstandingSubmissionCount());
     }
 
+    bool gpuRetiredForReadback = false;
     if (m_captureThisFrame)
     {
         m_captureThisFrame = false;
         if (!m_device.WriteBackBufferCapture(kSmokeCaptureFile))
             return false;
+        gpuRetiredForReadback = true;
+    }
+
+    if ((probeShadow || probeDrawRecords) && !gpuRetiredForReadback)
+    {
+        if (!m_device.WaitForGpu())
+            return false;
+        gpuRetiredForReadback = true;
+    }
+
+    if (probeDrawRecords && m_verifyDrawRecordsThisFrame)
+    {
+        m_verifyDrawRecordsThisFrame = false;
+        render::DrawProbeValidation validation = {};
+        if (!m_renderer.ReadDrawProbe(validation))
+        {
+            core::Log::Error("GPU draw-record probe readback failed");
+            return false;
+        }
+        const bool valid = validation.ObjectRecordsChecked() > 0 &&
+                           validation.materialRecordsChecked > 0 &&
+                           validation.ObjectMismatches() == 0 &&
+                           validation.materialMismatches == 0;
+        // Emitted per PASS, with the pass in the key. The harness stores markers
+        // in a hashtable keyed by name, so a shared key would collapse the two
+        // passes to whichever logged last - green while the other pass was
+        // entirely wrong.
+        core::Log::Infof(
+            "[SMOKE] draw_probe=%s "
+            "draw_probe_shadow_records=%u draw_probe_shadow_distinct=%u "
+            "draw_probe_shadow_mismatches=%u "
+            "draw_probe_main_records=%u draw_probe_main_distinct=%u "
+            "draw_probe_main_mismatches=%u",
+            valid ? "ok" : "failed",
+            validation.shadowRecordsChecked,
+            validation.shadowDistinctMarkers,
+            validation.shadowMismatches,
+            validation.mainRecordsChecked,
+            validation.mainDistinctMarkers,
+            validation.mainMismatches);
+        core::Log::Infof(
+            "[SMOKE] draw_probe_material_records=%u draw_probe_material_distinct=%u "
+            "draw_probe_material_mismatches=%u draw_probe_material_unshaded=%u",
+            validation.materialRecordsChecked,
+            validation.materialDistinctMarkers,
+            validation.materialMismatches,
+            validation.materialRecordsUnshaded);
+        if (!valid)
+            core::Log::Error("GPU consumed per-draw records that differ from the CPU upload contract");
     }
 
     if (probeShadow && m_verifyShadowThisFrame)
@@ -1481,54 +1600,6 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         else
         {
             core::Log::Info("[SMOKE] shadow_map_written=unknown");
-        }
-    }
-
-    if (probeDrawIndex)
-    {
-        // EVERY DRAW READ ITS OWN OBJECT RECORD. This is the assertion that a
-        // root SRV makes otherwise unobservable: no descriptor, no stride,
-        // nothing for the debug layer to check, and a scene rendered entirely
-        // from record 0 still looks like a scene.
-        //
-        // It replaced a golden-value gate on the capture's mean luminance and
-        // colour-bucket count. That gate was measuring this invariant through
-        // the rendered image, which made it depend on which assets happened to
-        // sit in build/<Config> - build output, not tracked source - and it was
-        // mis-calibrated twice in one round on exactly that. It also could not
-        // do the job: pinning shadow_vs to record 0 moved the bucket count by
-        // ONE, less than the drift between two checkouts of the same commit.
-        // These markers are exact integers that depend on nothing but the draw
-        // loop.
-        uint32_t shadowRecords = 0, shadowDistinct = 0;
-        uint32_t mainRecords   = 0, mainDistinct   = 0;
-        uint32_t mismatches    = 0;
-        if (m_renderer.ReadDrawIndexWitness(m_device,
-                                            shadowRecords, shadowDistinct,
-                                            mainRecords, mainDistinct,
-                                            mismatches))
-        {
-            // Both counts and both distincts, per pass, because the two failure
-            // modes are one-sided: basic_vs reading record 0 leaves the shadow
-            // pass perfect, and shadow_vs reading record 0 leaves the main pass
-            // perfect. A single combined number would be dragged only halfway
-            // by either.
-            core::Log::Infof(
-                "[SMOKE] draw_index_shadow_records=%u draw_index_shadow_distinct=%u "
-                "draw_index_main_records=%u draw_index_main_distinct=%u",
-                shadowRecords, shadowDistinct, mainRecords, mainDistinct);
-            // The strong form: witness[i] == i + 1 for every allocated slot.
-            // Distinct counts alone would pass a PERMUTATION of records, which
-            // renders every object with a different object's transform - the
-            // exact failure the disjoint-range design in gpu_draw_records.h is
-            // built to prevent. Reported as a count so a failure says how bad.
-            core::Log::Infof("[SMOKE] draw_index_mismatches=%u", mismatches);
-            core::Log::Infof("[SMOKE] draw_index_identity=%s",
-                             mismatches == 0 ? "yes" : "no");
-        }
-        else
-        {
-            core::Log::Info("[SMOKE] draw_index_identity=unknown");
         }
     }
 

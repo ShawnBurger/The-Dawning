@@ -9,9 +9,29 @@
 #include "gpu_draw_records.h"
 
 #include <algorithm>
+#include <cstring>
+#include <limits>
 
 namespace render
 {
+
+namespace
+{
+
+uint32_t HashWords(const void* data, size_t byteCount)
+{
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint32_t hash = 2166136261u;
+    for (size_t offset = 0; offset < byteCount; offset += sizeof(uint32_t))
+    {
+        uint32_t word = 0;
+        std::memcpy(&word, bytes + offset, sizeof(word));
+        hash = (hash ^ word) * 16777619u;
+    }
+    return hash;
+}
+
+} // namespace
 
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
@@ -51,14 +71,26 @@ void WriteObjectRecord(ObjectData& out,
         out.normalMatrix[r * 4 + 3] = 0.0f;
     }
 
-    // The witness stamp. Deliberately the LAST thing written and deliberately
-    // not derived from anything else in the record: it is the element's own
-    // index, so the vertex shader reading it back through the root constant
-    // proves the two agree. See "the draw-index witness" in the header.
-    out.recordId      = recordIndex;
-    out.recordPad[0]  = 0;
-    out.recordPad[1]  = 0;
-    out.recordPad[2]  = 0;
+    // The self-identifying index. Stamped here, at the slot the cursor chose,
+    // so the GPU-side marker word can report which element was actually loaded.
+    // The padding is written rather than left alone for the same reason the
+    // normal matrix's w is: this buffer is persistently mapped and reused across
+    // frames without clearing, and the hash below covers every byte, so stale
+    // bytes in the tail would make the hash comparison nondeterministic.
+    out.recordId = recordIndex;
+    out.recordPad[0] = 0;
+    out.recordPad[1] = 0;
+    out.recordPad[2] = 0;
+}
+
+uint32_t HashObjectData(const ObjectData& record)
+{
+    return HashWords(&record, sizeof(record));
+}
+
+uint32_t HashMaterialData(const MaterialData& record)
+{
+    return HashWords(&record, sizeof(record));
 }
 
 uint32_t RequiredObjectCapacity(uint32_t maxDraws)
@@ -74,12 +106,20 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws)
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount)
 {
     if (elementCount <= currentCapacity) return currentCapacity;
-    // First allocation: exact. See the header - headroom amortises REPEATED
-    // growth, and there is nothing to amortise against on the way out of zero.
-    // Sizing this exactly is also what keeps a buffer created at a capacity
-    // floor actually AT that floor, so the first real frame has to grow.
+    // First allocation: exact. See the header - the geometric step amortises
+    // REPEATED growth, and there is nothing to amortise against on the way out
+    // of zero. Sizing this exactly is also what keeps a buffer created at a
+    // capacity floor actually AT that floor, so the first real frame has to
+    // grow past it.
     if (currentCapacity == 0) return elementCount;
-    return elementCount + kCapacityHeadroom;
+
+    const uint64_t geometric = static_cast<uint64_t>(currentCapacity) +
+        (std::max)(static_cast<uint64_t>(currentCapacity) / 2u,
+                   static_cast<uint64_t>(kCapacityHeadroom));
+    const uint64_t requested = (std::max)(geometric,
+                                          static_cast<uint64_t>(elementCount));
+    return static_cast<uint32_t>((std::min)(
+        requested, static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
 }
 
 } // namespace render

@@ -56,9 +56,13 @@ core::Mat4x4 AwkwardWorld()
 // compile flag that vanished at build time.
 TEST_CASE(GpuDrawRecords_SizesMatchShaderStructs)
 {
+    // 112, not 96: the record carries its own index plus explicit tail padding
+    // so FXC computes the same stride from the HLSL declaration. Verified
+    // against FXC: `dcl_resource_structured T0[0:0], 112, space=2`.
     CHECK_EQ(sizeof(render::ObjectData), size_t(112));
     CHECK_EQ(sizeof(render::MaterialData), size_t(80));
     CHECK_EQ(sizeof(render::CBPerPass), size_t(64));
+    CHECK_EQ(sizeof(render::DrawProbeRecord), size_t(16));
 
     // Every StructuredBuffer element size must be a multiple of 16, which is
     // what the pad members in MaterialData exist for.
@@ -72,11 +76,10 @@ TEST_CASE(GpuDrawRecords_ObjectBlocksAbut)
 {
     CHECK_EQ(offsetof(render::ObjectData, world), size_t(0));
     CHECK_EQ(offsetof(render::ObjectData, normalMatrix), size_t(48));
-    // The witness stamp starts exactly where the second matrix block ends.
+    // The six float4s the shader slices 3/3 end at byte 96; recordId and its
+    // padding follow, which is why this is not sizeof().
     CHECK_EQ(offsetof(render::ObjectData, recordId),
              offsetof(render::ObjectData, normalMatrix) + size_t(48));
-    CHECK_EQ(offsetof(render::ObjectData, recordId), size_t(96));
-    CHECK_EQ(offsetof(render::ObjectData, recordPad), size_t(100));
 }
 
 // =============================================================================
@@ -98,7 +101,7 @@ TEST_CASE(GpuDrawRecords_WorldRowsReproduceTransformPoint)
     const core::Mat4x4 nrm   = core::Mat4x4::InverseTranspose3x3(world);
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, world, nrm, 0u);
+    render::WriteObjectRecord(rec, world, nrm, 0);
 
     const core::Vec3f p{ 0.37f, -1.9f, 4.25f };
     const core::Vec3f expected = world.TransformPoint(p);
@@ -129,7 +132,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsUseInverseTranspose)
     const core::Mat4x4 nrm   = core::Mat4x4::InverseTranspose3x3(world);
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, world, nrm, 0u);
+    render::WriteObjectRecord(rec, world, nrm, 0);
 
     const core::Vec3f n{ 0.0f, 1.0f, 0.0f };
 
@@ -169,7 +172,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsZeroTheTranslationSlot)
 
     render::ObjectData rec;
     std::memset(&rec, 0xCD, sizeof(rec));   // poison, as a stale frame would
-    render::WriteObjectRecord(rec, world, normal, 0u);
+    render::WriteObjectRecord(rec, world, normal, 5);
 
     CHECK_EQ(rec.normalMatrix[3], 0.0f);
     CHECK_EQ(rec.normalMatrix[7], 0.0f);
@@ -191,7 +194,7 @@ TEST_CASE(GpuDrawRecords_NormalRowsZeroTheTranslationSlot)
     // the named members cannot reach.
     render::ObjectData other;
     std::memset(&other, 0xAB, sizeof(other));
-    render::WriteObjectRecord(other, world, normal, 0u);
+    render::WriteObjectRecord(other, world, normal, 5);
 
     CHECK(std::memcmp(&rec, &other, sizeof(render::ObjectData)) == 0);
 }
@@ -204,26 +207,116 @@ TEST_CASE(GpuDrawRecords_WorldRowsCarryTranslationInW)
     const core::Mat4x4 t = core::Mat4x4::Translation({ 7.0f, -3.0f, 0.25f });
 
     render::ObjectData rec = {};
-    render::WriteObjectRecord(rec, t, core::Mat4x4::InverseTranspose3x3(t), 0u);
+    render::WriteObjectRecord(rec, t, core::Mat4x4::InverseTranspose3x3(t), 0);
 
     CHECK_APPROX_EPS(rec.world[3],  7.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[7], -3.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[11], 0.25f, 1e-6);
 }
 
-// =============================================================================
-// The draw-index witness stamp
-// =============================================================================
+TEST_CASE(GpuDrawRecords_ProbeHashesEveryUploadedWord)
+{
+    render::ObjectData object = {};
+    render::MaterialData material = {};
+    const uint32_t objectBase = render::HashObjectData(object);
+    const uint32_t materialBase = render::HashMaterialData(material);
 
-// recordId must be the index the caller allocated, verbatim. This is the CPU
-// half of the GPU-side assertion described in gpu_draw_records.h: the vertex
-// shaders write back the recordId they LOADED, so a stamp that did not match
-// the slot would make the witness lie in the safe direction - it would report
-// correct indexing while the GPU read the wrong element.
+    for (size_t i = 0; i < sizeof(object) / sizeof(uint32_t); ++i)
+    {
+        render::ObjectData changed = object;
+        const uint32_t value = 0x3F800000u + static_cast<uint32_t>(i);
+        std::memcpy(reinterpret_cast<uint8_t*>(&changed) + i * sizeof(value),
+                    &value, sizeof(value));
+        CHECK(render::HashObjectData(changed) != objectBase);
+    }
+    for (size_t i = 0; i < sizeof(material) / sizeof(uint32_t); ++i)
+    {
+        render::MaterialData changed = material;
+        const uint32_t value = 0x40000000u + static_cast<uint32_t>(i);
+        std::memcpy(reinterpret_cast<uint8_t*>(&changed) + i * sizeof(value),
+                    &value, sizeof(value));
+        CHECK(render::HashMaterialData(changed) != materialBase);
+    }
+}
+
+// =============================================================================
+// The self-identifying records — the other half of the merged probe
+// =============================================================================
+// Two verification schemes for this feature were built independently and both
+// reached the tree: one hashed every field the shaders consumed, the other made
+// each record carry its own index and had the shaders write back the index they
+// LOADED. The probe now carries both, because each is blind to something the
+// other catches, and these cases pin the half the hashes cannot supply.
 //
-// Distinct indices must produce distinct stamps and identical geometry, which
-// is what makes the witness a check on INDEXING rather than on the transforms:
-// the two records below differ in exactly one field.
+// The hash catches layout drift and content corruption. It cannot, on its own,
+// catch a shader stuck on element 0 whenever element 0's CONTENT happens to
+// match the expected record - which is not hypothetical: two entities sharing an
+// albedo, a roughness and a transform produce byte-identical records. The
+// recordId removes that dependency on scene content, because the field differs
+// even when everything around it agrees.
+TEST_CASE(GpuDrawRecords_ObjectRecordCarriesItsOwnIndex)
+{
+    const core::Mat4x4 world = AwkwardWorld();
+    const core::Mat4x4 normal = core::Mat4x4::InverseTranspose3x3(world);
+
+    render::ObjectData a = {};
+    render::ObjectData b = {};
+    render::WriteObjectRecord(a, world, normal, 11);
+    render::WriteObjectRecord(b, world, normal, 12);
+
+    CHECK_EQ(a.recordId, 11u);
+    CHECK_EQ(b.recordId, 12u);
+
+    // THE POINT: same transform, same normal matrix, DIFFERENT slot - and the
+    // records still differ, so the probe's hash word also separates them. A
+    // shader reading the wrong element of two otherwise identical records is
+    // exactly the failure a content hash alone waves through.
+    CHECK(render::HashObjectData(a) != render::HashObjectData(b));
+}
+
+// The material record carries the same field, for the same reason, and it
+// matters MORE here. The material index is consumed in basic_ps, and the demo's
+// materials are not guaranteed to differ from one another at all.
+TEST_CASE(GpuDrawRecords_MaterialRecordCarriesItsOwnIndex)
+{
+    render::MaterialData a = {};
+    render::MaterialData b = {};
+    a.albedo[0] = b.albedo[0] = 0.5f;
+    a.roughness = b.roughness = 0.25f;
+
+    // Byte-identical apart from the slot they were written at.
+    a.recordId = 3;
+    b.recordId = 4;
+    CHECK(render::HashMaterialData(a) != render::HashMaterialData(b));
+
+    // And with the field cleared, two records for different slots really are
+    // indistinguishable - which is what the field exists to prevent.
+    a.recordId = 0;
+    b.recordId = 0;
+    CHECK_EQ(render::HashMaterialData(a), render::HashMaterialData(b));
+}
+
+// RESTORED. This case was deleted during the probe merge with no mention, and
+// two of its assertions had no replacement anywhere in the tree or in the GPU
+// probe:
+//
+//   * the memcmp: that for identical geometry the record is byte-identical up to
+//     recordId, i.e. that the slot index perturbs NOTHING but the stamp. Without
+//     it, a WriteObjectRecord that folded the index into, say, worldRow0.w would
+//     still satisfy every surviving case - the ids would differ, the hashes
+//     would differ, and the GPU probe would still be green, because the probe
+//     compares the shader's load against the SAME CPU record and both sides
+//     would carry the same corruption.
+//   * the recordPad zeroing: that the three pad uints are WRITTEN, not
+//     inherited. gpu_draw_records.hlsli hashes the pad on the GPU side and
+//     HashObjectData hashes it on the CPU side, so an uninitialised pad makes
+//     the two agree only by luck. That failure is nondeterministic - it depends
+//     on what was in the buffer slot before - which is exactly the kind the GPU
+//     probe reports as an unexplained intermittent mismatch.
+//
+// GpuDrawRecords_ObjectRecordCarriesItsOwnIndex replaced only the id-stamping
+// half, and it probes indices 11 and 12; index 0 is added back here because 0 is
+// the value every wrong-element failure collapses to.
 TEST_CASE(GpuDrawRecords_RecordIdStampsTheAllocatedIndex)
 {
     const core::Mat4x4 world  = AwkwardWorld();
@@ -237,14 +330,55 @@ TEST_CASE(GpuDrawRecords_RecordIdStampsTheAllocatedIndex)
     CHECK_EQ(a.recordId, 0u);
     CHECK_EQ(b.recordId, 41u);
 
-    // Same geometry, so everything before the stamp is byte-identical.
+    // Same geometry, so everything before the stamp is byte-identical: the slot
+    // index reaches recordId and nothing else.
     CHECK(std::memcmp(&a, &b, offsetof(render::ObjectData, recordId)) == 0);
 
-    // The pad is written, not inherited. gpu_draw_records.h explains why the
-    // three uints are spelled out on both sides rather than left implicit.
+    // The pad is written, not inherited. Both hash functions cover it, so a
+    // stale pad desynchronises CPU and GPU nondeterministically.
     CHECK_EQ(b.recordPad[0], 0u);
     CHECK_EQ(b.recordPad[1], 0u);
     CHECK_EQ(b.recordPad[2], 0u);
+
+    // Written into pre-dirtied storage, because zero-initialised locals would
+    // pass the pad checks above whether WriteObjectRecord clears them or not.
+    render::ObjectData dirty;
+    std::memset(&dirty, 0xAB, sizeof(dirty));
+    render::WriteObjectRecord(dirty, world, normal, 7u);
+    CHECK_EQ(dirty.recordId, 7u);
+    CHECK_EQ(dirty.recordPad[0], 0u);
+    CHECK_EQ(dirty.recordPad[1], 0u);
+    CHECK_EQ(dirty.recordPad[2], 0u);
+}
+
+// The material record needs the same guarantee, and it has no CPU-side test that
+// its pad word survives a dirty slot either. MaterialData is written field by
+// field by the renderer rather than through a single helper, so this pins the
+// two words the probe hashes but nothing else reads.
+TEST_CASE(GpuDrawRecords_MaterialRecordPadIsStableUnderHashing)
+{
+    render::MaterialData a = {};
+    render::MaterialData b = {};
+    a.albedo[0] = b.albedo[0] = 0.5f;
+    a.recordId = b.recordId = 9;
+
+    // materialPad is hashed on both sides (see DawningHashMaterialData), so two
+    // records equal in every meaningful field must also agree on the pad or the
+    // GPU probe reports a mismatch that no source-level difference explains.
+    CHECK_EQ(a.materialPad0, 0u);
+    CHECK_EQ(render::HashMaterialData(a), render::HashMaterialData(b));
+
+    b.materialPad0 = 1;
+    CHECK(render::HashMaterialData(a) != render::HashMaterialData(b));
+}
+
+// recordId sits where materialPad0 was, so the 80-byte layout the DXR path also
+// uses is untouched. If this ever moves, shaders/gpu_draw_records.hlsli and the
+// static_asserts in gpu_draw_records.h must move with it.
+TEST_CASE(GpuDrawRecords_MaterialRecordIdReusesThePadWord)
+{
+    CHECK_EQ(sizeof(render::MaterialData), size_t(80));
+    CHECK_EQ(offsetof(render::MaterialData, recordId), size_t(72));
 }
 
 // =============================================================================
@@ -408,9 +542,13 @@ TEST_CASE(GpuDrawRecords_GrowthNeverShrinksAndAmortises)
     CHECK_EQ(render::GrownCapacity(500, 100), 500u);
     CHECK_EQ(render::GrownCapacity(500, 500), 500u);
 
-    // Above capacity: grow past the request so the next few additions are free.
-    CHECK_EQ(render::GrownCapacity(500, 501), 501u + render::kCapacityHeadroom);
+    // Above capacity: grow geometrically so a steadily expanding scene does not
+    // recreate all frame-slot resources at a fixed cadence.
+    CHECK_EQ(render::GrownCapacity(500, 501), 750u);
     CHECK(render::GrownCapacity(500, 501) > 500u);
+
+    // From nothing: exact, no headroom. See the next case.
+    CHECK_EQ(render::GrownCapacity(0, 256), 256u);
 
     // Grow, then shrink the demand back down. The capacity must HOLD: shrinking
     // would mean destroying a buffer frames in flight may still be reading.
@@ -443,10 +581,14 @@ TEST_CASE(GpuDrawRecords_FirstAllocationIsExactSoTheFloorsAreReal)
              render::kMinMaterialCapacity);
     CHECK_EQ(render::GrownCapacity(0, 256), 256u);
 
-    // Headroom returns the moment there is an existing allocation to grow FROM,
-    // because from then on it is amortising a real reallocation.
-    CHECK_EQ(render::GrownCapacity(render::kMinObjectCapacity, 256),
-             256u + render::kCapacityHeadroom);
+    // Growth becomes GEOMETRIC the moment there is an existing allocation to
+    // grow from, because from then on it is amortising a real reallocation. The
+    // step is currentCapacity + max(currentCapacity / 2, kCapacityHeadroom), and
+    // the request wins when it is larger than that - which it is here, from a
+    // floor of 4.
+    CHECK_EQ(render::GrownCapacity(render::kMinObjectCapacity, 256), 256u);
+    // Where the geometric step dominates instead, it is what is applied.
+    CHECK_EQ(render::GrownCapacity(1000, 1001), 1500u);
 }
 
 // THE COVERAGE INVARIANT, asserted here so it cannot silently rot: the smoke
@@ -485,8 +627,19 @@ TEST_CASE(GpuDrawRecords_SmokeSceneForcesTwoGrowsByConstruction)
 
     objectCap   = render::GrownCapacity(objectCap,   frameOneObjects);
     materialCap = render::GrownCapacity(materialCap, frameOneMaterials);
-    CHECK_EQ(objectCap,   frameOneObjects   + render::kCapacityHeadroom);
-    CHECK_EQ(materialCap, frameOneMaterials + render::kCapacityHeadroom);
+    // Growth is currentCapacity + max(currentCapacity / 2, kCapacityHeadroom),
+    // or the request if that is larger. From floors of 4 and 2 the geometric
+    // step dominates: 4 + 64 = 68 and 2 + 64 = 66, both above the 34 and 17 the
+    // scene actually needs.
+    //
+    // Asserted as the formula rather than as literals so that changing
+    // kCapacityHeadroom moves this test rather than breaking it - but asserted
+    // at all because the SLACK is what decides how many further grows a run
+    // performs, and the harness has hard minimums on that count.
+    CHECK_EQ(objectCap,   render::kMinObjectCapacity   + render::kCapacityHeadroom);
+    CHECK_EQ(materialCap, render::kMinMaterialCapacity + render::kCapacityHeadroom);
+    CHECK(objectCap   >= frameOneObjects);
+    CHECK(materialCap >= frameOneMaterials);
 
     // ---- Frame eight: +80 entities must not fit either ----------------------
     // The SECOND grow, and the one that matters: it happens mid-run with earlier

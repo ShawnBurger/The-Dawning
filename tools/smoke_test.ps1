@@ -261,7 +261,8 @@ if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 # It used to NEVER EXECUTE in an ordinary run. The demo scene's draw count sat
 # under a 256-element kMinObjectCapacity, so after the first allocation the
 # function early-outed on every frame and the whole branch was reachable only
-# behind -ForceGrow. This block printed "Structured-buffer reallocations: 0" and
+# behind the -ForceGrow switch. This block printed "Structured-buffer
+# reallocations: 0" and
 # moved on - it stated the gap out loud and asserted nothing. An untaken branch
 # behind an unrun flag is not coverage, so the DEFAULT run now takes the branch
 # by construction and these are HARD assertions:
@@ -302,7 +303,7 @@ if ($reallocs -lt 1) {
            "means those floors were raised back above the scene's draw count, or " +
            "the Init allocation was removed, or GrownCapacity started padding the " +
            "first allocation with kCapacityHeadroom again. Do not 'fix' this by " +
-           "deleting the assertion - it exists because this path was previously " +
+           "deleting the assertion - it exists because this path was once " +
            "reachable only under -ForceGrow, which nobody ran.")
 }
 
@@ -332,12 +333,95 @@ if ($reallocsInFlight -lt 1) {
            "capacity of 2*MeshInstanceCount + kCapacityHeadroom.")
 }
 
-if ($ForceGrow -and $reallocs -lt 5) {
+# -ForceGrow: THE OPT-IN HEAVY CASE. Restored, after being deleted on a premise
+# that was wrong.
+#
+# The deletion was justified - in the commit message and in a comment right here
+# - by the claim that -ForceGrow was "doubly dead": that the --smoke-force-grow
+# ramp had not survived a merge, and that the switch "was never declared in
+# smoke_test.ps1's param block", so $ForceGrow was always $null. Checked against
+# the history, BOTH halves are false, and on main the switch was live end to end:
+#
+#   git show main:tools/smoke_test.ps1  ->  line 7  [switch]$ForceGrow,
+#                                           line 68 if ($ForceGrow) { $arguments += "--smoke-force-grow" }
+#   git grep main -- src/               ->  app.h:28    bool smokeForceGrow
+#                                           app.cpp:58  options.smokeForceGrow = HasOption(args, "--smoke-force-grow")
+#                                           app.cpp:1242 if (m_options.smoke && m_options.smokeForceGrow)
+#
+# What actually happened is narrower and worse. The codex side of the merge
+# (5953648) had neither the param declaration nor the src ramp; merge a835f5d
+# took that side for both files while keeping the OTHER side's `if ($ForceGrow
+# -and ...)` assertion body. That merge is what killed the switch. The follow-up
+# commit then observed the corpse it had just created and wrote it up as
+# pre-existing rot, which is how a regression introduced by a merge became a
+# comment telling the next reader the coverage had never existed.
+#
+# It is dead code only in the post-merge tree, and the fix for that is to restore
+# it, not to certify it. The default ramp now runs in BOTH smoke modes, so
+# -ForceGrow is no longer the only way to reach the grow branch; it steepens the
+# ramp (16 draws/frame against the default 4) and remains the heavy case.
+if ($ForceGrow -and $reallocs -lt 20) {
     throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
-           "The grow branch is meant to run many times over under this switch; if the " +
-           "sizing hint no longer crosses capacity boundaries then the heavy case " +
-           "is not being exercised. Check the --smoke-force-grow ramp in " +
-           "App::RenderFrame against kCapacityHeadroom.")
+           "The switch steepens App::RenderFrame's sizing-hint ramp to 16 draws " +
+           "per frame against the default 4, so it must comfortably exceed what " +
+           "a default run already achieves - and a default run of this length " +
+           "performs about 15. A count in the default range means the " +
+           "--smoke-force-grow option stopped reaching m_options.smokeForceGrow, " +
+           "or the ramp no longer crosses capacity boundaries. Check " +
+           "AppOptions::smokeForceGrow in src/app.h and the rampPerFrame " +
+           "selection in App::RenderFrame.")
+}
+
+# KEPT FROM THE OTHER SIDE OF THIS MERGE. The counts say replacement happened
+# with frames outstanding; this says WHEN the first such replacement was, and
+# that is a different claim. A run that only ever replaced during start-up would
+# satisfy a count while never testing a steady-state grow.
+#
+# Note this tracks the first IN-FLIGHT replacement, not the first replacement.
+# The original marker tracked the total, which against these capacity floors
+# would always latch frame 0 - Renderer::Init allocates AT the floor and the
+# demo scene crosses it immediately - so asserting the total's first occurrence
+# happened late would assert the opposite of the truth.
+if (-not $markers.ContainsKey("first_in_flight_reallocation_frame")) {
+    throw "Smoke test did not emit the 'first_in_flight_reallocation_frame' marker."
+}
+$firstInFlight = [uint64]$markers["first_in_flight_reallocation_frame"]
+Write-Host "First in-flight structured-buffer replacement: frame $firstInFlight"
+#
+# ON THE MARGIN, since it is thin and that is deliberate. The bound is 3 =
+# kFrameCount: frames 1..3 are what fill the three slots, so a replacement at or
+# below frame 3 cannot have had a full complement of frames outstanding behind
+# it. MEASURED, with the ramp now running in both modes: frame 5 under
+# -RasterOnly and frame 5 in the default mode, so the margin is two frames.
+#
+# Two frames is small, and widening the bound would NOT make it safer - it would
+# make it wrong. This is a structural bound, not a tuned one: 3 is the value
+# kFrameCount takes, and a run that first replaced in flight at frame 4 would be
+# perfectly correct and would fail a bound of 5. The run is also deterministic -
+# fixed 60 Hz timestep, fixed scene, fixed ramp - so there is no sampling noise
+# for a margin to absorb. What a widened bound would actually catch is the ramp
+# getting steeper, which is not a defect.
+#
+# The complementary risk - the value drifting UP until in-flight replacement
+# stops happening in any useful quantity - is covered by the reallocsInFlight
+# floor above, which is the assertion with teeth.
+#
+# NOT UNDER -ForceGrow, and this is a limitation of the bound rather than of the
+# switch. `3` is a PROXY for "this was not a start-up grow with nothing behind
+# it"; it works because the default ramp needs a few frames to cross the first
+# capacity boundary. -ForceGrow front-loads growth deliberately and reaches its
+# first in-flight replacement on frame 2 - MEASURED - where one frame is
+# genuinely outstanding and the deferred-release fence is genuinely exercised.
+# The proxy calls that a failure; the hazard says otherwise, and the hazard is
+# right. Under -ForceGrow the count assertion above is the one that carries the
+# claim. Narrowing the bound here rather than loosening it for every run keeps
+# the default path's guarantee intact.
+if (-not $ForceGrow -and $firstInFlight -le 3) {
+    throw ("The first in-flight structured-buffer replacement happened on frame " +
+           "$firstInFlight; it must happen after all three frame slots can be in " +
+           "flight (kFrameCount = 3), or the deferred-release fence is being " +
+           "exercised only during start-up when there is nothing outstanding to " +
+           "protect.")
 }
 
 # Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
@@ -372,107 +456,197 @@ if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacit
            $markers["object_records_peak"], $markers["object_capacity"])
 }
 
-# -----------------------------------------------------------------------------
-# The draw-index witness: every draw read ITS OWN per-object record
-# -----------------------------------------------------------------------------
-# THE assertion this harness exists to make about the per-object structured
-# buffer, and the one nothing else can make.
+# =============================================================================
+# THE MERGED DRAW-RECORD PROBE
+# =============================================================================
+# Direct GPU evidence for the root-SRV contract, which nothing else in the
+# runtime can supply: SetGraphicsRootShaderResourceView takes a bare GPU virtual
+# address, so there is no descriptor, no StructureByteStride, and nothing for the
+# debug layer to cross-check. A scene drawn entirely from record 0 renders a
+# perfectly plausible image.
 #
-# Per-object and per-material data live in structured buffers indexed by a
-# per-draw root constant at b3. Those are ROOT SRVs: a bare GPU virtual address,
-# no descriptor, no StructureByteStride. Nothing in the runtime, the debug layer
-# or the PIX capture cross-checks that basic_vs.hlsl indexed objectBuffer with
-# the constant it was handed rather than with a literal 0 - and a scene rendered
-# entirely from record 0 draws every entity with the first entity's transform,
-# which still looks like a scene and passes every loose threshold above.
+# One UAV carries two independent claims per record, because two verification
+# schemes were built for this feature independently and each is blind to
+# something the other catches:
 #
-# The CPU-side counters next door cannot cover it either. shadow_records,
-# main_records and object_records_peak count what was WRITTEN; all three stay
-# perfectly correct while the GPU reads the wrong element.
+#   HASHES   every field of the record the shader loaded. Catches CPU/HLSL
+#            layout drift - a stride or offset disagreement that shifts every
+#            element after the first - which an index witness cannot see,
+#            because shifted garbage still comes from the right element.
+#   MARKERS  the recordId stored INSIDE the loaded record, + 1. Catches
+#            wrong-element indexing, which hashes alone cannot: two records with
+#            equal contents hash equal, so a shader stuck on element 0 stays
+#            green for as long as the scene agrees with element 0.
 #
-# So the shaders write it down. ObjectData carries recordId, set by the CPU to
-# the element's own index; both vertex shaders write the recordId they LOADED
-# into a UAV slot chosen by the root constant they were GIVEN. Correct indexing
-# leaves the identity permutation. See gpu_draw_records.h.
+# The distinct counts are what localise a failure. Every classic breakage here -
+# a hardcoded element, a root constant that stopped reaching a stage,
+# SV_InstanceID at SM 5.1 excluding StartInstanceLocation - collapses a whole
+# pass to ONE distinct marker, and the pass it collapses in names the shader.
 #
-# Raster only: the probe runs on the capture frame, and a path-traced frame runs
-# neither raster pass.
-if ($RasterOnly) {
-    foreach ($k in @("draw_index_identity", "draw_index_mismatches",
-                     "draw_index_shadow_records", "draw_index_shadow_distinct",
-                     "draw_index_main_records",   "draw_index_main_distinct")) {
-        if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
-    }
-
-    $diShadowRecords  = [uint32]$markers["draw_index_shadow_records"]
-    $diShadowDistinct = [uint32]$markers["draw_index_shadow_distinct"]
-    $diMainRecords    = [uint32]$markers["draw_index_main_records"]
-    $diMainDistinct   = [uint32]$markers["draw_index_main_distinct"]
-
-    Write-Host ("Draw-index witness: shadow {0}/{1} distinct, main {2}/{3} distinct, {4} mismatches" -f `
-                $diShadowDistinct, $diShadowRecords, $diMainDistinct, $diMainRecords,
-                $markers["draw_index_mismatches"])
-
-    # Both passes must have drawn something, or the checks below are vacuous:
-    # zero records trivially give zero distinct and zero mismatches.
-    if ($diShadowRecords -lt 2) {
-        throw (("draw_index_shadow_records={0}; fewer than two shadow draws means the " +
-                "distinct-index check cannot distinguish correct indexing from every " +
-                "draw sharing one record.") -f $diShadowRecords)
-    }
-    if ($diMainRecords -lt 2) {
-        throw (("draw_index_main_records={0}; fewer than two main-pass draws means the " +
-                "distinct-index check cannot distinguish correct indexing from every " +
-                "draw sharing one record.") -f $diMainRecords)
-    }
-
-    # DISTINCT INDEX COUNT PER PASS. N draws must have read N different records.
-    # Checked per pass because the two failure modes are one-sided: basic_vs
-    # reading record 0 leaves the shadow pass flawless and vice versa, so a
-    # single combined count would be dragged only halfway by either.
-    #
-    # This is what collapses to 1 when the root constant stops reaching a shader.
-    if ($diShadowDistinct -ne $diShadowRecords) {
-        throw (("Shadow pass read {0} distinct object records across {1} draws. " +
-                "The per-draw root constant at b3 is not reaching shadow_vs.hlsl, or " +
-                "shadow_vs.hlsl is not indexing objectBuffer with it - so multiple " +
-                "shadow draws are rasterising with one entity's transform. A count of " +
-                "1 means every draw read the same record.") -f `
-                $diShadowDistinct, $diShadowRecords)
-    }
-    if ($diMainDistinct -ne $diMainRecords) {
-        throw (("Main pass read {0} distinct object records across {1} draws. " +
-                "The per-draw root constant at b3 is not reaching basic_vs.hlsl, or " +
-                "basic_vs.hlsl is not indexing objectBuffer with it - so multiple " +
-                "draws are shading with one entity's transform. A count of 1 means " +
-                "every draw read the same record.") -f $diMainDistinct, $diMainRecords)
-    }
-
-    # THE STRONG FORM: slot i holds record i, for every allocated slot in both
-    # passes. Asserted as well as the distinct counts because distinctness alone
-    # would accept a PERMUTATION - every draw reading a different record, but not
-    # its own - which renders every object with another object's transform and is
-    # exactly what the disjoint shadow/main ranges in gpu_draw_records.h exist to
-    # prevent. A permutation leaves both distinct counts perfect.
-    Assert-Marker "draw_index_identity" "yes"
-    if ([uint32]$markers["draw_index_mismatches"] -ne 0) {
-        throw (("draw_index_mismatches={0}: that many draws read a record other than " +
-                "the one the cursor allocated for them. Diff shaders/basic_vs.hlsl, " +
-                "shaders/shadow_vs.hlsl and src/render/gpu_draw_records.h - ObjectData " +
-                "must be byte-identical in all three, and a layout disagreement reads " +
-                "shifted garbage that nothing else validates.") -f `
-                $markers["draw_index_mismatches"])
-    }
-
-    # The witness must agree with the counters that are derived independently, or
-    # one of the two is measuring a different frame than it claims.
-    if ($diShadowRecords -ne $shadowRecords -or $diMainRecords -ne $mainRecords) {
-        throw (("Draw-index witness saw shadow={0} main={1} but the record counters " +
-                "reported shadow={2} main={3}. The witness readback and the record " +
-                "counters are describing different frames.") -f `
-                $diShadowRecords, $diMainRecords, $shadowRecords, $mainRecords)
-    }
+# BOTH MODES. This block used to be gated on -RasterOnly, "because the probe is
+# skipped on a path-traced frame and the default smoke run ends in RT" - which
+# was an accurate description of a hole, not a reason for one. The probe ran on
+# the FINAL frame, the default mode path-traces the final frame, so the default
+# run - the one that gets run - executed none of this. App::Run now schedules the
+# probe on the last RASTER frame of whichever mode is active (see
+# smokeDrawProbeFrame), so both modes carry it and the gate is gone.
+#
+# In the default mode that frame is mid-run, not the end frame, and it sits
+# inside ApplySmokeGrowthStress's frame 8..16 window - so the probe covers a
+# larger draw population there than under -RasterOnly, and covers it against a
+# buffer that has already been grown and deferred-released. That is why nothing
+# below compares probe counts against the end-of-run shadow_records/main_records
+# markers: those are a different frame's population. The probe is self-describing
+# and the assertions are internal to it.
+if (-not $markers.ContainsKey("draw_probe_frame")) {
+    throw ("Smoke test did not emit 'draw_probe_frame'. The draw-record probe was " +
+           "never armed. It must run on the last raster frame in BOTH smoke modes - " +
+           "see smokeDrawProbeFrame in App::Run. A missing marker here means the " +
+           "probe went back to riding on the final frame, which is path-traced in " +
+           "the default mode and therefore never probes anything.")
 }
+Write-Host "Draw probe frame: $($markers['draw_probe_frame'])"
+if (-not $RasterOnly -and [uint64]$markers["draw_probe_frame"] -ge [uint64]$markers["frames"]) {
+    throw ("draw_probe_frame=$($markers['draw_probe_frame']) is not before the end of " +
+           "the run ($($markers['frames']) frames). In the default mode the probe must " +
+           "land on a raster frame, which means BEFORE path tracing starts.")
+}
+Assert-Marker "draw_probe" "ok"
+foreach ($k in @("draw_probe_shadow_records", "draw_probe_shadow_distinct",
+                 "draw_probe_shadow_mismatches",
+                 "draw_probe_main_records", "draw_probe_main_distinct",
+                 "draw_probe_main_mismatches",
+                 "draw_probe_material_records", "draw_probe_material_distinct",
+                 "draw_probe_material_mismatches",
+                 "draw_probe_material_unshaded")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+
+$probeShadow         = [uint32]$markers["draw_probe_shadow_records"]
+$probeShadowDistinct = [uint32]$markers["draw_probe_shadow_distinct"]
+$probeMain           = [uint32]$markers["draw_probe_main_records"]
+$probeMainDistinct   = [uint32]$markers["draw_probe_main_distinct"]
+$probeMaterial       = [uint32]$markers["draw_probe_material_records"]
+$probeMatDistinct    = [uint32]$markers["draw_probe_material_distinct"]
+$probeMatUnshaded    = [uint32]$markers["draw_probe_material_unshaded"]
+Write-Host ("Draw probe: shadow $probeShadow/$probeShadowDistinct distinct, " +
+            "main $probeMain/$probeMainDistinct distinct, " +
+            "material $probeMaterial/$probeMatDistinct distinct " +
+            "($probeMatUnshaded unshaded)")
+
+# ---- VACUITY GUARDS, restored -----------------------------------------
+#
+# Zero records trivially give zero distinct and zero mismatches, and ONE record
+# trivially gives one distinct - so with fewer than two draws per pass every
+# assertion below passes while proving nothing. These floors were dropped during
+# the merge on the reasoning that the property held transitively through the
+# shadow/main parity check further up; it does, today, for this scene, which is
+# exactly the kind of coupling that decays silently. An explicit floor costs two
+# comparisons and states the requirement where the requirement is used.
+#
+# TWO, not one: the whole failure mode being hunted is every draw collapsing onto
+# a single record, and a one-draw pass cannot distinguish that from correctness.
+if ($probeShadow -lt 2) {
+    throw ("draw_probe_shadow_records=$probeShadow; fewer than two shadow draws means " +
+           "the distinct-index check below cannot distinguish correct indexing from " +
+           "every draw sharing one record.")
+}
+if ($probeMain -lt 2) {
+    throw ("draw_probe_main_records=$probeMain; fewer than two main-pass draws means " +
+           "the distinct-index check below cannot distinguish correct indexing from " +
+           "every draw sharing one record.")
+}
+# Cross-pass parity AT THE PROBE FRAME. The shadow_records/main_records markers
+# checked earlier are the END-OF-RUN population, which in the default mode is a
+# different frame from the probe frame, so this is the parity claim that applies
+# to the numbers actually being asserted on.
+if ($probeShadow -ne $probeMain) {
+    throw ("At the probe frame the shadow pass issued $probeShadow object records and " +
+           "the main pass $probeMain. The two scene walks must issue the same draws; " +
+           "that parity is what makes 2 x MeshInstanceCount() sufficient capacity.")
+}
+
+# ---- shadow_vs: object indexing --------------------------------------
+if ([uint32]$markers["draw_probe_shadow_mismatches"] -ne 0) {
+    throw ("shadow_vs consumed object records that differ from the CPU upload " +
+           "contract. Either the record layout drifted between " +
+           "src/render/gpu_draw_records.h and shaders/gpu_draw_records.hlsli, or " +
+           "the pass is reading the wrong element.")
+}
+if ($probeShadowDistinct -ne $probeShadow) {
+    throw ("shadow_vs read only $probeShadowDistinct distinct object records across " +
+           "$probeShadow draws. Every draw must load its OWN record; a collapse to " +
+           "one is objectBuffer[0], a lost b3 root constant, or SV_InstanceID, all of " +
+           "which render a plausible image.")
+}
+
+# ---- basic_vs: object indexing ---------------------------------------
+if ([uint32]$markers["draw_probe_main_mismatches"] -ne 0) {
+    throw "basic_vs consumed object records that differ from the CPU upload contract."
+}
+if ($probeMainDistinct -ne $probeMain) {
+    throw ("basic_vs read only $probeMainDistinct distinct object records across " +
+           "$probeMain draws. See the shadow-pass message above - same failure, " +
+           "different shader.")
+}
+
+# ---- basic_ps: MATERIAL indexing -------------------------------------
+#
+# THIS IS THE ASSERTION THIS MERGE EXISTS FOR. Both incoming schemes left the
+# material index unwitnessed at its point of use: one checked only the object
+# half of the b3 root constant, and the other hashed materialBuffer from
+# basic_vs - a stage that reads it for no other purpose, so the check
+# witnessed its own load and stayed green with basic_ps hardcoded to
+# materialBuffer[0]. The material words now come from basic_ps, beside the
+# `mat` every shading line below it reads.
+#
+# The counts are inequalities rather than equalities on purpose. The pixel
+# stage does not run for a draw that shades no pixels, so an occluded or
+# fully back-facing draw legitimately leaves its slot unwritten; those are
+# reported as unshaded rather than counted as mismatches. What must hold is
+# that enough draws DID shade and that they read DIFFERENT records.
+if ([uint32]$markers["draw_probe_material_mismatches"] -ne 0) {
+    throw ("basic_ps consumed material records that differ from the CPU upload " +
+           "contract. The pixel shader is shading with a material record other than " +
+           "the one the CPU wrote for its draw.")
+}
+if ($probeMaterial -lt 2) {
+    throw ("Only $probeMaterial material records were witnessed by basic_ps. The " +
+           "material half of the probe needs at least two shaded draws to say " +
+           "anything; check that the probe UAV is still PIXEL-visible in BOTH " +
+           "hand-written branches of Renderer::CreateRootSignature.")
+}
+if (($probeMaterial + $probeMatUnshaded) -ne $probeMain) {
+    throw ("Material probe slots ($probeMaterial shaded + $probeMatUnshaded unshaded) " +
+           "do not account for all $probeMain main-pass draws at the probe frame.")
+}
+if ($probeMatDistinct -lt 2) {
+    throw ("basic_ps read only $probeMatDistinct distinct material record(s) across " +
+           "$probeMaterial shaded draws. This is the materialBuffer[0] failure: the " +
+           "b3 material index is not reaching the pixel stage, or it is being " +
+           "ignored. It renders a plausible image and no other check in this tree " +
+           "would notice.")
+}
+# WHAT USED TO BE HERE: a hard `$probeMatDistinct -ne $probeMaterial` throw,
+# i.e. exactly one material record per shaded draw. Removed, for two reasons.
+#
+# It could not fire. Renderer::ReadDrawProbe already requires, per slot, that
+# materialMarker == materialIndex + 1 where materialIndex is derived from the
+# slot's own position. If draw_probe_material_mismatches is 0 then every checked
+# slot carried its own distinct index, so distinct == checked follows
+# arithmetically. The assertion was restating its predecessor.
+#
+# And it pinned a policy. One material record per draw is the CURRENT allocation
+# behaviour of the material cursor, not a property of correct indexing: a change
+# that shared one record between draws with the same ecs::Material would be
+# correct and would trip this. That coupling is real, but it belongs in
+# Renderer::ReadDrawProbe - which encodes it deliberately, in C++, next to the
+# cursor it describes - and not additionally in the harness, where it reads as an
+# independent check and is not one.
+#
+# The claims that survive are the ones that do work: mismatches == 0 (each draw
+# shaded with ITS OWN record, verified per slot on the CPU) and distinct >= 2
+# (the population did not collapse onto one record).
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
     throw "Scene shutdown did not retire any raster texture descriptors."
@@ -606,8 +780,8 @@ if (!$NoCapture) {
     # could not see the failure; one tight enough to see it could not stay green.
     #
     # The invariant is now asserted directly and on the GPU side, by the
-    # draw_index_* markers below. Those are exact integers produced by the draw
-    # loop and are independent of the scene, the assets and the lighting.
+    # draw_probe_* markers above. Those hashes and mismatch counts are produced
+    # from the records the shaders consumed and are independent of lighting.
     # DO NOT put a golden-value gate back here. If you want appearance
     # regression testing, the right tool is a reference-image comparison against
     # a committed image, which is a different mechanism with different

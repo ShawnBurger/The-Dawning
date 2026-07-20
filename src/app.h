@@ -22,11 +22,12 @@ struct AppOptions
     bool smokeFullQuality = false;
     bool smokeCapture = false;
     bool smokeResize = false;
-    // Forces the per-draw structured buffers to REALLOCATE repeatedly while
-    // frames are in flight. See App::RenderFrame - this is the only way that
-    // branch executes at all.
-    bool smokeForceGrow = false;
     bool smokeUnlocked = false;
+    // --smoke-force-grow: steepen the structured-buffer sizing ramp so the
+    // reallocate-and-DeferredRelease branch runs far more often than the default
+    // run already makes it. Opt-in heavy case, not the coverage floor - the
+    // default ramp is what the smoke harness asserts against.
+    bool smokeForceGrow = false;
     bool gpuValidation = false;
     bool showOverlay = true;
     double smokeSeconds = 4.0;
@@ -86,6 +87,11 @@ private:
     bool m_smokeRTStarted = false;
     bool m_captureThisFrame = false;
     bool m_verifyShadowThisFrame = false;
+    bool m_verifyDrawRecordsThisFrame = false;
+    // Latches when the draw-record probe has been armed, so it is armed on
+    // exactly one frame. The probe frame is the last RASTER frame, which in the
+    // default smoke mode is mid-run rather than the final frame.
+    bool m_smokeDrawProbeRequested = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;
@@ -102,6 +108,7 @@ private:
     int64_t m_smokeStartCounter = 0;
     int64_t m_smokeCounterFrequency = 0;
     uint32_t m_smokeMaxOutstandingSubmissions = 0;
+    uint64_t m_smokeFirstStructuredBufferReallocationFrame = UINT64_MAX;
     float m_titleTimer = 0.0f;
 
     render::RTQualityMode m_rtQualityMode = render::RTQualityMode::StablePreview;
