@@ -253,8 +253,8 @@ foreach ($k in @("shadow_records", "main_records", "object_records_peak", "objec
 $shadowRecords = [uint32]$markers["shadow_records"]
 $mainRecords   = [uint32]$markers["main_records"]
 if ($shadowRecords -ne $mainRecords) {
-    throw ("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
-           "The two scene walks no longer issue the same draws." -f $shadowRecords, $mainRecords)
+    throw (("Cross-pass record parity broken: shadow_records={0} but main_records={1}. " +
+            "The two scene walks no longer issue the same draws.") -f $shadowRecords, $mainRecords)
 }
 if ($shadowRecords -lt 1) {
     throw "No per-object records were written by either pass; the raster path drew nothing."
@@ -262,8 +262,8 @@ if ($shadowRecords -lt 1) {
 # The object buffer is shared by both passes at disjoint index ranges, so its
 # peak occupancy must be exactly the two counts summed, and must fit.
 if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords)) {
-    throw ("object_records_peak={0} is below shadow+main={1}; the two passes are " +
-           "overlapping in the object buffer rather than taking disjoint ranges." -f `
+    throw (("object_records_peak={0} is below shadow+main={1}; the two passes are " +
+            "overlapping in the object buffer rather than taking disjoint ranges.") -f `
            $markers["object_records_peak"], ($shadowRecords + $mainRecords))
 }
 if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
@@ -293,8 +293,8 @@ if ($RasterOnly) {
     # ever started appending instead of rewinding, shadow_records would jump to
     # 4x main_records and that assertion would fire first.
     if ($shadowRecords -gt $mainRecords) {
-        throw ("shadow_records={0} exceeds main_records={1}; a cascade is appending " +
-               "object records instead of reusing range [0, N)." -f $shadowRecords, $mainRecords)
+        throw (("shadow_records={0} exceeds main_records={1}; a cascade is appending " +
+                "object records instead of reusing range [0, N).") -f $shadowRecords, $mainRecords)
     }
 }
 
@@ -419,22 +419,30 @@ if (!$NoCapture) {
     # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
     # so the capture is deterministic (confirmed identical across repeated runs):
     #
-    #   correct, clean-clone scene           mean 123.0   buckets 60
-    #   correct, generated asset loaded      mean 122.5   buckets 64
-    #   basic_vs objectBuffer[0] (clean)     mean 124.5   buckets 27
+    #   correct, clean-clone scene           mean 122.9   buckets 59
+    #   basic_vs  objectBuffer[0]  (clean)   mean 124.4   buckets 27
+    #   basic_ps  materialBuffer[0] (clean)  mean 121.2   buckets 14
     #
-    # RE-MEASURED after the cascade merge, not carried over. A +/-0.5 band on the
-    # mean catches the mutation at 1.5 off, and the bucket count catches it
-    # outright at 27 against 60. Raster only: the path-traced capture depends on
-    # accumulation depth and is not a golden-value candidate.
+    # All three MEASURED on commit fecd999 (the origin/main merge), Debug, and
+    # the clean-clone value re-confirmed identical in Release and across repeat
+    # runs. A +/-0.5 band on the mean catches both mutations (1.5 and 1.7 off),
+    # and the bucket count catches them outright at 27 and 14 against 59. Raster
+    # only: the path-traced capture depends on accumulation depth and is not a
+    # golden-value candidate.
     #
-    # RE-BASELINED from 128.3/59 to 123.0/60 when four-cascade shadows merged.
-    # The move is attributable to CASCADES, not to the structured-buffer change:
-    # the four-cascade branch independently measured mean 123.0 / 60 buckets on
-    # this same scene BEFORE per-draw data moved out of the constant ring, and
-    # merging the two reproduces that number exactly. So the buffer refactor is
-    # image-neutral, which is what a pure data-plumbing change should be - had
-    # the mean landed anywhere else, that would itself have been the bug.
+    # PROVENANCE, because an earlier revision of this block got it wrong. The
+    # mean moved 128.3 -> 122.9 when four-cascade shadows merged; the bucket
+    # count did NOT move and is still 59, the pre-cascade value. A resolution of
+    # this merge briefly carried 123.0/60 here with a comment claiming the
+    # cascade branch had "independently measured" it. It had not, and could not
+    # have: origin/main a468002 has no golden-value gate at all, only the loose
+    # catastrophic-failure thresholds above. The gate exists solely on this
+    # branch. 60 was never observed on any commit - the harness failed on every
+    # run against it.
+    #
+    # The structured-buffer change is image-neutral, as a pure data-plumbing
+    # change should be: the bucket count is unchanged from before it, and the
+    # mean sits inside the band set by cascades alone.
     #
     # This IS meant to trip on a deliberate lighting or scene change. When it
     # does, re-measure and update the two constants here - do not widen the band
@@ -446,7 +454,16 @@ if (!$NoCapture) {
     # checkout rather than of the commit. A single baseline would therefore pass
     # in a fresh worktree and fail in the canonical checkout, or vice versa, and
     # the failure would look like a rendering regression rather than a missing
-    # file. Both values are measured; neither is a guess.
+    # file.
+    #
+    # ASYMMETRIC CONFIDENCE, and do not read past it. The clean-clone pair is
+    # measured on this commit. The generated-asset pair below is NOT: no .glb is
+    # present in this checkout, so it could not be run, and it is carried over
+    # from the same resolution that had the clean-clone pair wrong. Treat it as
+    # unverified. It is left gating rather than removed because that fails
+    # CLOSED - the first person with the asset gets a loud failure and this
+    # comment, rather than a silent pass on a number nobody checked. If it trips
+    # for you, re-measure and replace it; that is expected, not a regression.
     if ($RasterOnly) {
         if (-not $markers.ContainsKey("generated_asset")) {
             throw "Smoke test did not emit the 'generated_asset' marker; cannot select a raster baseline."
@@ -457,11 +474,13 @@ if (!$NoCapture) {
         $withAsset = ($markers["generated_asset"] -eq "loaded")
 
         if ($withAsset) {
+            # UNVERIFIED - see the asymmetric-confidence note above.
             $goldenMeanLum = 122.5
             $goldenBuckets = 64
         } else {
-            $goldenMeanLum = 123.0
-            $goldenBuckets = 60
+            # Measured on fecd999, Debug and Release, repeat-run stable.
+            $goldenMeanLum = 122.9
+            $goldenBuckets = 59
         }
         $meanTolerance  = 0.5
 
