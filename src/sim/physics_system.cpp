@@ -8,6 +8,7 @@
 #include "thrusters.h"
 
 #include <cmath>
+#include <cstdint>
 
 namespace sim
 {

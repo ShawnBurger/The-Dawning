@@ -6,6 +6,8 @@
 
 #include "rigid_body.h" // InertiaDiagFromInverse — one shared I-from-inverse source
 
+#include <cstdint>
+
 namespace sim
 {
 
