@@ -718,9 +718,13 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 //   Slot 0: Root CBV at b0 (per-object) — 2 DWORDs, hot, changes every draw
 //   Slot 1: Root CBV at b1 (per-frame)  — 2 DWORDs, warm, changes once/frame
 //   Slot 2: Root CBV at b2 (material)   — 2 DWORDs, warm, changes per material
-//   Slot 3: Descriptor table for material textures (t0-t127)
-//   Static sampler at s0
-// Total: 7 DWORDs - well within 64 DWORD limit
+//   Slot 3: Descriptor table for material textures (t0-t127) — 1 DWORD
+//   Slot 4: Descriptor table for the shadow map (t0, space1) — 1 DWORD
+//   Static samplers at s0 (material) and s1 (shadow comparison) — free
+// Total: 8 DWORDs of 64. The comment previously claimed 7 and listed only four
+// slots (it predated the shadow table) while the success log below claimed 9;
+// both were stale, and root-signature space is exactly the thing nobody wants
+// to budget from a wrong number.
 // =============================================================================
 bool Renderer::CreateRootSignature(ID3D12Device* device)
 {
@@ -770,9 +774,15 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     shadowSampler.RegisterSpace    = 0;
     shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
+    // These two assignments used to sit BELOW the array initialiser, so they
+    // mutated a copy nothing ever read and s0 shipped as SHADER_VISIBILITY_ALL
+    // rather than the intended PIXEL. Benign - ALL is a superset and
+    // RegisterSpace 0 is the zero-init value - but the lines read as if they
+    // took effect.
     staticSampler.RegisterSpace    = 0;
     staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = { staticSampler, shadowSampler };
 
     D3D12_ROOT_SIGNATURE_FLAGS flags =
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
@@ -921,7 +931,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 9 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 3 root CBVs + raster texture table + shadow table, 2 static samplers, 8 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
