@@ -88,10 +88,12 @@ private:
     bool m_captureThisFrame = false;
     bool m_verifyShadowThisFrame = false;
     bool m_verifyDrawRecordsThisFrame = false;
-    // Latches when the draw-record probe has been armed, so it is armed on
-    // exactly one frame. The probe frame is the last RASTER frame, which in the
-    // default smoke mode is mid-run rather than the final frame.
-    bool m_smokeDrawProbeRequested = false;
+    // Latches when the raster-frame probes have been armed, so they are armed on
+    // exactly one frame. That frame is the last RASTER frame, which in the
+    // default smoke mode is mid-run rather than the final frame. It carries BOTH
+    // the draw-record probe and the shadow-map probe: each needs a frame on which
+    // the raster pipeline ran, and the final frame is path-traced by default.
+    bool m_smokeRasterVerifyRequested = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;

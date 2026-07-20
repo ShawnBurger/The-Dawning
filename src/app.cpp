@@ -675,33 +675,49 @@ int App::RunMainLoop()
     const uint64_t smokeRTStartFrame = SmokeFrameForTime(m_options.smokeRTDelaySeconds);
     const uint64_t smokeEndFrame = SmokeFrameForTime(m_options.smokeSeconds);
 
-    // THE DRAW-RECORD PROBE FRAME, and it is deliberately NOT the final frame.
+    // THE RASTER VERIFICATION FRAME, and it is deliberately NOT the final frame.
     //
-    // The probe is written by basic_vs, shadow_vs and basic_ps. A path-traced
-    // frame runs none of the three, so the probe requires a RASTER frame.
+    // TWO probes ride it: the draw-record probe and the shadow-map probe. Both
+    // need a RASTER frame. The draw probe is written by basic_vs, shadow_vs and
+    // basic_ps, and a path-traced frame runs none of the three. The shadow probe
+    // reads the cascaded shadow map, and a path-traced frame does not render the
+    // shadow pass at all - RenderFrame's `if (renderedPathTracing)` branch skips
+    // BeginShadowPass outright, so there is no fresh depth to read and
+    // ShadowCascadesRendered() reports the count for a pass that never began.
     //
-    // It used to ride along with the capture on smokeEndFrame. Under -RasterOnly
-    // that is a raster frame and the probe ran; in the DEFAULT smoke mode the run
-    // ends in path tracing, so probeDrawRecords was false on the single frame
-    // that ever asked for it and the default run carried NO probe coverage at
-    // all. That is the same class of gap as an assertion sitting behind a flag
-    // nobody passes: the check exists, reads as coverage, and is never reached.
+    // Both used to ride along with the capture on smokeEndFrame. Under
+    // -RasterOnly that is a raster frame and both ran; in the DEFAULT smoke mode
+    // the run ends in path tracing, so probeDrawRecords and probeShadow were both
+    // false on the single frame that ever asked for them and the default run
+    // carried NO probe coverage at all. That is the same class of gap as an
+    // assertion sitting behind a flag nobody passes: the check exists, reads as
+    // coverage, and is never reached. The draw probe was fixed first; the shadow
+    // and cascade assertions were left behind on the same broken schedule, with
+    // the harness's `if ($RasterOnly)` gate documenting the hole rather than
+    // closing it.
     //
-    // So the probe runs on the LAST RASTER FRAME of whichever mode is active -
+    // So VERIFICATION runs on the LAST RASTER FRAME of whichever mode is active -
     // smokeEndFrame under -RasterOnly, and the frame before path tracing takes
     // over otherwise. With the default 0.25 s delay that is frame 14, which is
-    // AFTER ApplySmokeGrowthStress's frame-8 churn: the probe therefore reads an
-    // object buffer that has already been grown and deferred-released mid-run,
-    // not the pristine first allocation.
+    // AFTER ApplySmokeGrowthStress's frame-8 churn: the draw probe therefore
+    // reads an object buffer that has already been grown and deferred-released
+    // mid-run, not the pristine first allocation.
+    //
+    // CAPTURE stays on smokeEndFrame. The frame an image is taken on and the
+    // frame correctness is verified on are separate concerns - the capture
+    // asserts the default mode's final path-traced image, which is exactly what
+    // it should assert, and decoupling is what lets verification move to a frame
+    // where the raster pipeline actually ran.
     //
     // The smokeRTStartFrame > 1 guard covers --smoke-rt-delay=0, where no raster
     // frame exists at all. That configuration cannot be probed; it falls back to
-    // the end frame, where probeDrawRecords stays false and the harness's
-    // draw_probe_frame marker is absent rather than silently wrong.
-    const uint64_t smokeDrawProbeFrame =
+    // the end frame, where both probe flags stay false and the harness's
+    // draw_probe_frame / shadow_probe_frame markers are absent rather than
+    // silently wrong.
+    const uint64_t smokeRasterVerifyFrame =
         (m_options.smokeRT && smokeRTStartFrame > 1) ? smokeRTStartFrame - 1
                                                      : smokeEndFrame;
-    m_smokeDrawProbeRequested = false;
+    m_smokeRasterVerifyRequested = false;
     if (m_options.smoke)
     {
         core::Log::Infof("[SMOKE] timeline=fixed fixed_hz=60 target_frames=%llu",
@@ -813,21 +829,33 @@ int App::RunMainLoop()
                 }
             }
 
-            // Armed once, on the last raster frame - see smokeDrawProbeFrame
+            // Armed once, on the last raster frame - see smokeRasterVerifyFrame
             // above. Separate from the end-of-run block below precisely because
             // the two frames are not the same frame in the default mode.
-            if (!m_smokeDrawProbeRequested && m_frameCount >= smokeDrawProbeFrame)
+            //
+            // BOTH probes are armed here. They are logged under separate markers
+            // because they verify different things and could legitimately be
+            // scheduled apart later; the harness asserts each one's presence, so
+            // a probe silently losing its arming site fails loudly.
+            if (!m_smokeRasterVerifyRequested && m_frameCount >= smokeRasterVerifyFrame)
             {
-                m_smokeDrawProbeRequested = true;
+                m_smokeRasterVerifyRequested = true;
                 m_verifyDrawRecordsThisFrame = true;
+                m_verifyShadowThisFrame      = true;
                 core::Log::Infof("[SMOKE] draw_probe_frame=%llu",
+                                 static_cast<unsigned long long>(m_frameCount));
+                core::Log::Infof("[SMOKE] shadow_probe_frame=%llu",
                                  static_cast<unsigned long long>(m_frameCount));
             }
 
             if (m_frameCount >= smokeEndFrame)
             {
+                // CAPTURE ONLY. m_verifyShadowThisFrame used to be raised here
+                // too; it is armed on smokeRasterVerifyFrame instead, because in
+                // the default mode this frame is path-traced and renders no
+                // shadow pass, which made every shadow and cascade marker absent
+                // from the run that actually executes by default.
                 m_captureThisFrame = m_options.smokeCapture;
-                m_verifyShadowThisFrame = true;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");
                 core::Log::Infof("[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u",
                                  m_renderer.ConstantRingPeakBytes(),
@@ -1423,10 +1451,18 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     if (m_captureThisFrame && !m_device.RecordBackBufferReadback())
         m_captureThisFrame = false;
 
-    // Probe the shadow map on the same frame the capture is taken, and only in
-    // smoke mode - it costs a copy and a GPU-visible readback.
+    // Probe the shadow map on the last RASTER frame - see smokeRasterVerifyFrame
+    // in App::Run. Only in smoke mode; it costs a copy and a GPU-visible
+    // readback.
+    //
+    // Gated on !renderedPathTracing, the SAME predicate that chose the render
+    // branch above, not on !m_usePathTracing. Those differ when path tracing is
+    // requested but unavailable: the else branch runs, the shadow pass renders,
+    // and the map is perfectly readable, yet the old gate would have declined to
+    // probe it. Using the branch's own predicate means the probe runs exactly
+    // when there is a shadow pass to observe.
     const bool probeShadow = m_verifyShadowThisFrame &&
-                             !m_usePathTracing &&
+                             !renderedPathTracing &&
                              m_renderer.ShadowsAvailable();
     if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
         m_verifyShadowThisFrame = false;
