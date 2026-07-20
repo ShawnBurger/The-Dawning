@@ -39,7 +39,7 @@ cbuffer PerFrameConstants : register(b0, space0)
     uint     g_SamplesPerPixel;
     uint     g_StablePreview;
     uint     g_SeedIndex;       // Wall-clock dispatch counter — RNG decorrelation only
-    uint     g_Pad;
+    float    g_TanHalfFovY;     // tan(fovY/2) from the camera; see RTPerFrameConstants
 };
 
 struct MaterialData
@@ -319,9 +319,12 @@ void RayGen()
     // Use inverse view-proj to unproject near and far points
     // Since we're passing viewProj (not inverse), we reconstruct differently:
     // Simple camera ray construction from position + screen UV
-    float fovRad = 70.0f * PI / 180.0f; // Must match camera FOV
+    // From the camera via the constant buffer, NOT a literal. This was
+    // 70 degrees hardcoded with a comment saying it must match the camera; it
+    // did match, so any future divergence would have been silent - the DXR path
+    // tracing one frustum while raster rasterises another.
     float aspect = float(g_RenderWidth) / float(g_RenderHeight);
-    float tanHalfFov = tan(fovRad * 0.5f);
+    float tanHalfFov = g_TanHalfFovY;
 
     // We need the view direction in world space. Since we don't have the
     // inverse VP easily, reconstruct from camera basis vectors encoded
