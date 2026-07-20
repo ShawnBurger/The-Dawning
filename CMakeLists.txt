@@ -135,6 +135,7 @@ set(TEST_SOURCES
     tests/test_shadow_cascades.cpp
     tests/test_gpu_draw_records.cpp
     tests/test_rt_texture_lod.cpp
+    tests/test_sky_energy.cpp
 )
 
 set(TEST_HEADERS
@@ -291,6 +292,14 @@ add_executable(TheDawningTests
     src/core/types.h
     src/core/shadow_cascades.h
     src/core/shadow_cascades.cpp
+    # CPU evaluation of the procedural sky. GPU-free for the same reason
+    # shadow_cascades.cpp is, but NOT on the same footing: it is a hand-written
+    # MIRROR of shaders/sky_common.hlsli rather than shipped code, and the engine
+    # does not call it. Read the header before relying on any test over it -
+    # tests/test_sky_energy.cpp carries a tripwire that keeps the two in step,
+    # and states precisely what that tripwire does not prove.
+    src/core/sky_radiance.h
+    src/core/sky_radiance.cpp
     ${ECS_HEADERS}
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
@@ -315,6 +324,14 @@ set_target_properties(TheDawningTests PROPERTIES
 )
 
 target_include_directories(TheDawningTests PRIVATE src tests)
+
+# Absolute source path to the sky shader, so the mirror tripwire in
+# tests/test_sky_energy.cpp can read it regardless of the working directory the
+# test binary is launched from. The repo stays relocatable: this is resolved by
+# CMake at configure time, not hardcoded.
+target_compile_definitions(TheDawningTests PRIVATE
+    TD_SHADER_SKY_COMMON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_common.hlsli"
+)
 
 # Intentionally no target_link_libraries(): see the note above.
 

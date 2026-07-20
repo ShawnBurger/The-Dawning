@@ -250,10 +250,37 @@ if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capa
     Write-Host "Constant ring peak: $peak / $cap bytes ($pct%)"
 
     $cascades = if ($markers.ContainsKey("shadow_cascades")) { [int]$markers["shadow_cascades"] } else { 4 }
-    # CBPerFrame rounded up to the 256-byte constant alignment (512 with four
-    # cascade matrices), plus one CBPerPass per shadow cascade and one for the
-    # main pass, plus one spare slot of slack for a future per-pass constant.
-    $flatBudget = 512 + (($cascades + 1) * 256) + 256
+
+    # CBPerFrame's own ring cost comes FROM THE ENGINE, not from a literal here.
+    # It used to be a hardcoded 512 - a mirror of AlignCBSize(sizeof(CBPerFrame))
+    # that nothing kept in step. Any growth of CBPerFrame was silently paid for
+    # out of this budget's slack, so the first append that pushed the aligned
+    # size to 768 would have consumed the entire spare slot below and the NEXT
+    # person to touch the ring would get a failure message telling them per-draw
+    # traffic had leaked in - which would have been false, and would have sent
+    # them debugging the wrong thing entirely.
+    #
+    # The gate exists to measure PER-DRAW traffic leaking into the ring.
+    # CBPerFrame's size is pinned independently by static_asserts in renderer.h;
+    # it does not need a second guard, and making this budget double as one is
+    # what made the message misleading. Read it, do not mirror it.
+    #
+    # The marker is REQUIRED. Defaulting to 512 when it is absent would restore
+    # the literal by the back door on any run where the engine failed to emit it.
+    if (-not $markers.ContainsKey("cb_per_frame_bytes")) {
+        throw ("Marker cb_per_frame_bytes is missing. The constant-ring budget is computed " +
+               "from it and there is deliberately no fallback literal: a default here would " +
+               "silently re-create the hardcoded mirror of AlignCBSize(sizeof(CBPerFrame)) " +
+               "that this marker exists to remove.")
+    }
+    $cbPerFrame = [int]$markers["cb_per_frame_bytes"]
+
+    # Per-frame constant (read above), plus one CBPerPass per shadow cascade and
+    # one for the main pass, plus one spare slot of slack for a future per-pass
+    # constant. Scales with cascade count on purpose. Scales with entity count
+    # NEVER - that flatness is the whole property being guarded.
+    $flatBudget = $cbPerFrame + (($cascades + 1) * 256) + 256
+    Write-Host "Constant ring flat budget: $flatBudget bytes (CBPerFrame $cbPerFrame + $cascades+1 pass CBs + 256 slack)"
 
     if ($peak -gt $flatBudget) {
         $perDrawCost = 0
@@ -267,8 +294,10 @@ if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capa
                "one 256-byte upload per caster would add about $perDrawCost bytes. Find the " +
                "new UploadCB call on a per-draw path and move that data into the object or " +
                "material structured buffer instead. Do NOT raise this budget to make the " +
-               "failure go away: the budget scales with cascade count on purpose and with " +
-               "nothing else, and raising it re-creates the entity ceiling this change removed.")
+               "failure go away: it already tracks CBPerFrame's real size ($cbPerFrame bytes, " +
+               "from the cb_per_frame_bytes marker) and the cascade count, which are the only " +
+               "two things it is allowed to scale with. Adding a constant here re-creates the " +
+               "entity ceiling this change removed.")
     }
 }
 if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
