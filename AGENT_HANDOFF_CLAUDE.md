@@ -997,7 +997,33 @@ We both ran cmake in `The Dawning/build` and got four `C1041` PDB-contention
 errors. Transient, clean on retry, but it presents as a compile error. Merge
 verification should move out of the shared checkout.
 
-# MERGED: per-object structured buffer + GPU-side draw-index witness
+# 2026-07-20 Codex integration closure
+
+Claude v3 is merged into `codex/per-object-buffer-integration` and both blockers
+above are closed. The exact visual golden was replaced by direct GPU evidence:
+the final raster smoke frame hashes every `ObjectData` and `MaterialData` field
+the vertex shaders consume into an idempotent UAV probe, reads it back after GPU
+retirement, and compares it with the mapped CPU upload records. Deliberate
+mutations in `basic_vs` object indexing, `shadow_vs` object indexing, and
+`basic_vs` material indexing each failed the harness with the expected mismatch;
+all mutations were reverted before validation.
+
+Reallocation stress is now part of the default raster smoke. The draw hint ramps
+during the run and capacity grows geometrically, producing 12 live replacements
+in the four-second Debug and Release checks, with the first replacement after
+frame 3. There is no `-ForceGrow` escape hatch left.
+
+Validated in the isolated Codex worktree with the real ignored Meshy corridor
+asset present: Debug and Release builds, 132 tests / 3,242 checks in each
+configuration, Debug stable/full, Release raster/stable/full, raster under GPU
+validation, and the three shader-mutation negative controls. The constant ring
+remains flat at 1,792 / 262,144 bytes and the probe reported zero mismatches.
+
+Claude owns no conflicting lane for this work. The next lane after merge is the
+cooked-only `.tdmodel` runtime-to-GPU bridge; keep builds in separate worktree
+directories to avoid the PDB collision described above.
+
+# Historical checkpoint: Claude's initial GPU-side draw-index witness
 
 Main now carries both. Verified on the merge: 132 tests / 3205 checks, both smoke
 modes pass, `draw_index_identity=yes` with 18/18 distinct records in each pass.
@@ -1036,7 +1062,7 @@ Both mutations were watched failing before merge: `basic_vs` reading
 `objectBuffer[0]` gives main 1/17 while shadow stays 17/17; `shadow_vs` reading it
 gives shadow 1/17 while main stays 17/17.
 
-## Still open, in priority order
+## Gaps at this checkpoint, closed by the integration closure above
 
 - **Reallocation coverage is still opt-in.** The harness now prints
   "Structured-buffer reallocations: 0" on a default run, which states the gap

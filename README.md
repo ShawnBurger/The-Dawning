@@ -98,33 +98,29 @@ verifies proves the engine did not crash; only this proves it drew something. A
 black frame, inverted culling, a shader emitting nothing, or NaN-poisoned output
 would pass every other assertion.
 
-### The draw-index witness
+### The GPU draw-record probe
 
-In raster mode the harness also asserts that **every draw read its own
-per-object record**, via the `draw_index_*` markers.
+In raster mode the harness asserts that every draw consumed the exact
+per-object and per-material records uploaded for it, via the `draw_probe_*`
+markers.
 
-Per-object and per-material data live in structured buffers indexed by a
-per-draw root constant at `b3`. Those are root SRVs — a bare GPU virtual
-address, no descriptor, no `StructureByteStride` — so nothing in the runtime or
-the debug layer can tell that `basic_vs.hlsl` indexed `objectBuffer` with the
-constant it was handed rather than with a literal `0`. That failure renders the
-entire scene with the first entity's transform and still looks like a scene.
-The CPU-side counters (`shadow_records`, `main_records`,
-`object_records_peak`) cannot see it either: they count what was *written*, and
-all of them stay correct while the GPU reads the wrong element.
+The two record buffers are root SRVs: bare GPU virtual addresses without
+descriptors or `StructureByteStride`, so neither D3D12 nor the debug layer can
+detect a wrong index or CPU/HLSL layout drift. The CPU-side record counters only
+measure what was written and cannot prove what a shader read.
 
-So the shaders write it down. `ObjectData` carries a `recordId` field that the
-CPU sets to the element's own index; both vertex shaders write the `recordId`
-they actually *loaded* into a UAV slot chosen by the root constant they were
-*given*. A correct frame leaves the identity permutation, and the harness
-asserts both the per-pass distinct-index count and the exact identity. See
-`src/render/gpu_draw_records.h`.
+On the final raster smoke frame, both vertex shaders hash every field of the
+`ObjectData` they loaded into a root UAV. The main vertex shader also hashes the
+loaded `MaterialData`. Index-plus-one markers distinguish an unwritten slot
+from a valid zero hash. After queue retirement the renderer reads the UAV back
+and compares each value with the mapped upload record. The shared
+`shaders/gpu_draw_records.hlsli` declaration prevents the raster stages from
+drifting apart, while the live GPU comparison covers the CPU-to-HLSL boundary.
 
-Verified by watching it fail, in both directions: pinning `basic_vs.hlsl` to
-`objectBuffer[0]` drops the main pass to 1 distinct record out of 17 with 17
-mismatches, and pinning `shadow_vs.hlsl` drops the shadow pass to 1 out of 17
-with 16 mismatches — while the other pass stays perfect in each case, which is
-why the two passes are counted separately.
+The probe is gated by the third `b3` root constant, so ordinary frames carry no
+UAV writes and `ObjectData` remains 96 bytes. It was verified by watching three
+mutations fail independently: `basic_vs` reading object record 0, `shadow_vs`
+reading object record 0, and `basic_vs` reading material record 0.
 
 This replaced a golden-value gate on the capture's mean luminance and
 colour-bucket count. That gate was measuring the same invariant *through the
@@ -133,8 +129,7 @@ rendered image*, which made it depend on which assets happened to sit in
 twice in one round on exactly that. It also could not do the job: pinning
 `shadow_vs.hlsl` to record 0 moved the bucket count by one and the mean by 0.7,
 less than the legitimate drift between two checkouts of the same commit. The
-witness is exact integers produced by the draw loop, independent of the scene,
-the assets and the lighting.
+probe is independent of the scene's appearance, assets, and lighting.
 
 The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any

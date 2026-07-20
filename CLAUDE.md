@@ -117,14 +117,32 @@ Layer 4: Material System (PARTIAL) — see below. README.md's "Layer 4 material
            cbuffer, so each cascade costs one flat 256-byte upload and the four
            cascades share one set of object records. Ring peak is 1792 bytes,
            flat, in both smoke modes
-           Per-draw record indexing is asserted ON THE GPU by the draw-index
-           witness: ObjectData carries its own index, both vertex shaders write
-           the index they LOADED into a root UAV at u0/space2, and the smoke
-           harness reads it back and requires the identity permutation. This is
-           the only check on the invariant a root SRV leaves unvalidated - no
-           descriptor, no stride, and a scene drawn entirely from record 0 looks
-           plausible. It costs one uint store per vertex in both raster vertex
-           shaders, permanently, in every configuration
+           Raster smoke validates draw records ON THE GPU through one merged
+           probe at u0/space4, 16 bytes per object record. Each slot carries two
+           independent claims: a HASH of every field of the record the shader
+           loaded, which catches CPU/HLSL layout drift, and a MARKER read out of
+           the record's own recordId field, which catches wrong-element
+           indexing. Neither covers the other - shifted garbage still comes from
+           the right element, and two records with equal contents hash equal.
+           The CPU reads the buffer back after queue retirement, compares
+           against the mapped upload records, and reduces to per-pass record,
+           distinct-index and mismatch counts so a failure names a shader.
+           WHICH STAGE WRITES WHAT IS THE LOAD-BEARING PART. Both vertex shaders
+           write the object words, because the vertex stage is where
+           objectBuffer is consumed; basic_ps writes the material words, beside
+           the `mat` it shades with, because the pixel stage is where
+           materialBuffer is consumed. Hashing the material record from the
+           vertex shader - which reads it for no other purpose - witnesses the
+           probe's own load and stays green with basic_ps hardcoded to
+           materialBuffer[0]. All four mutations are watched failing: object
+           indexing in each vertex shader, material indexing in the pixel
+           shader, and the deferred-release fence tagging.
+           A third b3 constant gates the writes to the final smoke frame, so
+           ordinary frames pay no per-invocation witness cost. The UAV
+           DECLARATION in basic_ps is not gated and cannot be - it defeats
+           early-Z for that PSO in every configuration, permanently. That is a
+           real cost, accepted because the alternative is a material index that
+           nothing checks
   Not done: SM 6.6 bindless (raster still compiles vs_5_1/ps_5_1 through FXC)
            and any real mesh file loading. Emissive surfaces shade
            themselves but are NOT light sources - nothing samples them, so a

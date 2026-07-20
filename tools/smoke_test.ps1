@@ -4,7 +4,6 @@ param(
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
-    [switch]$ForceGrow,
     [switch]$Unlocked,
     [switch]$GPUValidation,
     [int]$TimeoutSeconds = 15,
@@ -65,7 +64,6 @@ if (!$RasterOnly)  {
 }
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
-if ($ForceGrow)    { $arguments += "--smoke-force-grow" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if ($GPUValidation){ $arguments += "--gpu-validation" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
@@ -338,6 +336,28 @@ if ($ForceGrow -and $reallocs -lt 5) {
            "sizing hint no longer crosses capacity boundaries then the heavy case " +
            "is not being exercised. Check the --smoke-force-grow ramp in " +
            "App::RenderFrame against kCapacityHeadroom.")
+
+# KEPT FROM THE OTHER SIDE OF THIS MERGE. The counts say replacement happened
+# with frames outstanding; this says WHEN the first such replacement was, and
+# that is a different claim. A run that only ever replaced during start-up would
+# satisfy a count while never testing a steady-state grow.
+#
+# Note this tracks the first IN-FLIGHT replacement, not the first replacement.
+# The original marker tracked the total, which against these capacity floors
+# would always latch frame 0 - Renderer::Init allocates AT the floor and the
+# demo scene crosses it immediately - so asserting the total's first occurrence
+# happened late would assert the opposite of the truth.
+if (-not $markers.ContainsKey("first_in_flight_reallocation_frame")) {
+    throw "Smoke test did not emit the 'first_in_flight_reallocation_frame' marker."
+}
+$firstInFlight = [uint64]$markers["first_in_flight_reallocation_frame"]
+Write-Host "First in-flight structured-buffer replacement: frame $firstInFlight"
+if ($firstInFlight -le 3) {
+    throw ("The first in-flight structured-buffer replacement happened on frame " +
+           "$firstInFlight; it must happen after all three frame slots can be in " +
+           "flight, or the deferred-release fence is being exercised only during " +
+           "start-up when there is nothing outstanding to protect.")
+}
 }
 
 # Cross-pass record parity. Scene::RenderShadowCasters and Scene::RenderEntities
@@ -372,105 +392,132 @@ if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacit
            $markers["object_records_peak"], $markers["object_capacity"])
 }
 
-# -----------------------------------------------------------------------------
-# The draw-index witness: every draw read ITS OWN per-object record
-# -----------------------------------------------------------------------------
-# THE assertion this harness exists to make about the per-object structured
-# buffer, and the one nothing else can make.
+# =============================================================================
+# THE MERGED DRAW-RECORD PROBE
+# =============================================================================
+# Direct GPU evidence for the root-SRV contract, which nothing else in the
+# runtime can supply: SetGraphicsRootShaderResourceView takes a bare GPU virtual
+# address, so there is no descriptor, no StructureByteStride, and nothing for the
+# debug layer to cross-check. A scene drawn entirely from record 0 renders a
+# perfectly plausible image.
 #
-# Per-object and per-material data live in structured buffers indexed by a
-# per-draw root constant at b3. Those are ROOT SRVs: a bare GPU virtual address,
-# no descriptor, no StructureByteStride. Nothing in the runtime, the debug layer
-# or the PIX capture cross-checks that basic_vs.hlsl indexed objectBuffer with
-# the constant it was handed rather than with a literal 0 - and a scene rendered
-# entirely from record 0 draws every entity with the first entity's transform,
-# which still looks like a scene and passes every loose threshold above.
+# One UAV carries two independent claims per record, because two verification
+# schemes were built for this feature independently and each is blind to
+# something the other catches:
 #
-# The CPU-side counters next door cannot cover it either. shadow_records,
-# main_records and object_records_peak count what was WRITTEN; all three stay
-# perfectly correct while the GPU reads the wrong element.
+#   HASHES   every field of the record the shader loaded. Catches CPU/HLSL
+#            layout drift - a stride or offset disagreement that shifts every
+#            element after the first - which an index witness cannot see,
+#            because shifted garbage still comes from the right element.
+#   MARKERS  the recordId stored INSIDE the loaded record, + 1. Catches
+#            wrong-element indexing, which hashes alone cannot: two records with
+#            equal contents hash equal, so a shader stuck on element 0 stays
+#            green for as long as the scene agrees with element 0.
 #
-# So the shaders write it down. ObjectData carries recordId, set by the CPU to
-# the element's own index; both vertex shaders write the recordId they LOADED
-# into a UAV slot chosen by the root constant they were GIVEN. Correct indexing
-# leaves the identity permutation. See gpu_draw_records.h.
+# The distinct counts are what localise a failure. Every classic breakage here -
+# a hardcoded element, a root constant that stopped reaching a stage,
+# SV_InstanceID at SM 5.1 excluding StartInstanceLocation - collapses a whole
+# pass to ONE distinct marker, and the pass it collapses in names the shader.
 #
-# Raster only: the probe runs on the capture frame, and a path-traced frame runs
-# neither raster pass.
+# RASTER ONLY, because the probe is skipped on a path-traced frame and the
+# default smoke run ends in RT.
 if ($RasterOnly) {
-    foreach ($k in @("draw_index_identity", "draw_index_mismatches",
-                     "draw_index_shadow_records", "draw_index_shadow_distinct",
-                     "draw_index_main_records",   "draw_index_main_distinct")) {
+    Assert-Marker "draw_probe" "ok"
+    foreach ($k in @("draw_probe_shadow_records", "draw_probe_shadow_distinct",
+                     "draw_probe_shadow_mismatches",
+                     "draw_probe_main_records", "draw_probe_main_distinct",
+                     "draw_probe_main_mismatches",
+                     "draw_probe_material_records", "draw_probe_material_distinct",
+                     "draw_probe_material_mismatches",
+                     "draw_probe_material_unshaded")) {
         if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
     }
 
-    $diShadowRecords  = [uint32]$markers["draw_index_shadow_records"]
-    $diShadowDistinct = [uint32]$markers["draw_index_shadow_distinct"]
-    $diMainRecords    = [uint32]$markers["draw_index_main_records"]
-    $diMainDistinct   = [uint32]$markers["draw_index_main_distinct"]
+    $probeShadow         = [uint32]$markers["draw_probe_shadow_records"]
+    $probeShadowDistinct = [uint32]$markers["draw_probe_shadow_distinct"]
+    $probeMain           = [uint32]$markers["draw_probe_main_records"]
+    $probeMainDistinct   = [uint32]$markers["draw_probe_main_distinct"]
+    $probeMaterial       = [uint32]$markers["draw_probe_material_records"]
+    $probeMatDistinct    = [uint32]$markers["draw_probe_material_distinct"]
+    $probeMatUnshaded    = [uint32]$markers["draw_probe_material_unshaded"]
+    Write-Host ("Draw probe: shadow $probeShadow/$probeShadowDistinct distinct, " +
+                "main $probeMain/$probeMainDistinct distinct, " +
+                "material $probeMaterial/$probeMatDistinct distinct " +
+                "($probeMatUnshaded unshaded)")
 
-    Write-Host ("Draw-index witness: shadow {0}/{1} distinct, main {2}/{3} distinct, {4} mismatches" -f `
-                $diShadowDistinct, $diShadowRecords, $diMainDistinct, $diMainRecords,
-                $markers["draw_index_mismatches"])
-
-    # Both passes must have drawn something, or the checks below are vacuous:
-    # zero records trivially give zero distinct and zero mismatches.
-    if ($diShadowRecords -lt 2) {
-        throw (("draw_index_shadow_records={0}; fewer than two shadow draws means the " +
-                "distinct-index check cannot distinguish correct indexing from every " +
-                "draw sharing one record.") -f $diShadowRecords)
+    # ---- shadow_vs: object indexing --------------------------------------
+    if ($probeShadow -ne $shadowRecords) {
+        throw ("GPU draw probe covered $probeShadow shadow-pass object records but the " +
+               "pass issued $shadowRecords. shadow_vs did not witness every draw.")
     }
-    if ($diMainRecords -lt 2) {
-        throw (("draw_index_main_records={0}; fewer than two main-pass draws means the " +
-                "distinct-index check cannot distinguish correct indexing from every " +
-                "draw sharing one record.") -f $diMainRecords)
+    if ([uint32]$markers["draw_probe_shadow_mismatches"] -ne 0) {
+        throw ("shadow_vs consumed object records that differ from the CPU upload " +
+               "contract. Either the record layout drifted between " +
+               "src/render/gpu_draw_records.h and shaders/gpu_draw_records.hlsli, or " +
+               "the pass is reading the wrong element.")
+    }
+    if ($probeShadowDistinct -ne $shadowRecords) {
+        throw ("shadow_vs read only $probeShadowDistinct distinct object records across " +
+               "$shadowRecords draws. Every draw must load its OWN record; a collapse to " +
+               "one is objectBuffer[0], a lost b3 root constant, or SV_InstanceID, all of " +
+               "which render a plausible image.")
     }
 
-    # DISTINCT INDEX COUNT PER PASS. N draws must have read N different records.
-    # Checked per pass because the two failure modes are one-sided: basic_vs
-    # reading record 0 leaves the shadow pass flawless and vice versa, so a
-    # single combined count would be dragged only halfway by either.
+    # ---- basic_vs: object indexing ---------------------------------------
+    if ($probeMain -ne $mainRecords) {
+        throw ("GPU draw probe covered $probeMain main-pass object records but the pass " +
+               "issued $mainRecords. basic_vs did not witness every draw.")
+    }
+    if ([uint32]$markers["draw_probe_main_mismatches"] -ne 0) {
+        throw "basic_vs consumed object records that differ from the CPU upload contract."
+    }
+    if ($probeMainDistinct -ne $mainRecords) {
+        throw ("basic_vs read only $probeMainDistinct distinct object records across " +
+               "$mainRecords draws. See the shadow-pass message above - same failure, " +
+               "different shader.")
+    }
+
+    # ---- basic_ps: MATERIAL indexing -------------------------------------
     #
-    # This is what collapses to 1 when the root constant stops reaching a shader.
-    if ($diShadowDistinct -ne $diShadowRecords) {
-        throw (("Shadow pass read {0} distinct object records across {1} draws. " +
-                "The per-draw root constant at b3 is not reaching shadow_vs.hlsl, or " +
-                "shadow_vs.hlsl is not indexing objectBuffer with it - so multiple " +
-                "shadow draws are rasterising with one entity's transform. A count of " +
-                "1 means every draw read the same record.") -f `
-                $diShadowDistinct, $diShadowRecords)
+    # THIS IS THE ASSERTION THIS MERGE EXISTS FOR. Both incoming schemes left the
+    # material index unwitnessed at its point of use: one checked only the object
+    # half of the b3 root constant, and the other hashed materialBuffer from
+    # basic_vs - a stage that reads it for no other purpose, so the check
+    # witnessed its own load and stayed green with basic_ps hardcoded to
+    # materialBuffer[0]. The material words now come from basic_ps, beside the
+    # `mat` every shading line below it reads.
+    #
+    # The counts are inequalities rather than equalities on purpose. The pixel
+    # stage does not run for a draw that shades no pixels, so an occluded or
+    # fully back-facing draw legitimately leaves its slot unwritten; those are
+    # reported as unshaded rather than counted as mismatches. What must hold is
+    # that enough draws DID shade and that they read DIFFERENT records.
+    if ([uint32]$markers["draw_probe_material_mismatches"] -ne 0) {
+        throw ("basic_ps consumed material records that differ from the CPU upload " +
+               "contract. The pixel shader is shading with a material record other than " +
+               "the one the CPU wrote for its draw.")
     }
-    if ($diMainDistinct -ne $diMainRecords) {
-        throw (("Main pass read {0} distinct object records across {1} draws. " +
-                "The per-draw root constant at b3 is not reaching basic_vs.hlsl, or " +
-                "basic_vs.hlsl is not indexing objectBuffer with it - so multiple " +
-                "draws are shading with one entity's transform. A count of 1 means " +
-                "every draw read the same record.") -f $diMainDistinct, $diMainRecords)
+    if ($probeMaterial -lt 2) {
+        throw ("Only $probeMaterial material records were witnessed by basic_ps. The " +
+               "material half of the probe needs at least two shaded draws to say " +
+               "anything; check that the probe UAV is still PIXEL-visible in BOTH " +
+               "hand-written branches of Renderer::CreateRootSignature.")
     }
-
-    # THE STRONG FORM: slot i holds record i, for every allocated slot in both
-    # passes. Asserted as well as the distinct counts because distinctness alone
-    # would accept a PERMUTATION - every draw reading a different record, but not
-    # its own - which renders every object with another object's transform and is
-    # exactly what the disjoint shadow/main ranges in gpu_draw_records.h exist to
-    # prevent. A permutation leaves both distinct counts perfect.
-    Assert-Marker "draw_index_identity" "yes"
-    if ([uint32]$markers["draw_index_mismatches"] -ne 0) {
-        throw (("draw_index_mismatches={0}: that many draws read a record other than " +
-                "the one the cursor allocated for them. Diff shaders/basic_vs.hlsl, " +
-                "shaders/shadow_vs.hlsl and src/render/gpu_draw_records.h - ObjectData " +
-                "must be byte-identical in all three, and a layout disagreement reads " +
-                "shifted garbage that nothing else validates.") -f `
-                $markers["draw_index_mismatches"])
+    if (($probeMaterial + $probeMatUnshaded) -ne $mainRecords) {
+        throw ("Material probe slots ($probeMaterial shaded + $probeMatUnshaded unshaded) " +
+               "do not account for all $mainRecords main-pass draws.")
     }
-
-    # The witness must agree with the counters that are derived independently, or
-    # one of the two is measuring a different frame than it claims.
-    if ($diShadowRecords -ne $shadowRecords -or $diMainRecords -ne $mainRecords) {
-        throw (("Draw-index witness saw shadow={0} main={1} but the record counters " +
-                "reported shadow={2} main={3}. The witness readback and the record " +
-                "counters are describing different frames.") -f `
-                $diShadowRecords, $diMainRecords, $shadowRecords, $mainRecords)
+    if ($probeMatDistinct -lt 2) {
+        throw ("basic_ps read only $probeMatDistinct distinct material record(s) across " +
+               "$probeMaterial shaded draws. This is the materialBuffer[0] failure: the " +
+               "b3 material index is not reaching the pixel stage, or it is being " +
+               "ignored. It renders a plausible image and no other check in this tree " +
+               "would notice.")
+    }
+    if ($probeMatDistinct -ne $probeMaterial) {
+        throw ("basic_ps read $probeMatDistinct distinct material records across " +
+               "$probeMaterial shaded draws; each draw must load its own. Two draws " +
+               "sharing a record means the material cursor handed out a duplicate index.")
     }
 }
 
@@ -606,8 +653,8 @@ if (!$NoCapture) {
     # could not see the failure; one tight enough to see it could not stay green.
     #
     # The invariant is now asserted directly and on the GPU side, by the
-    # draw_index_* markers below. Those are exact integers produced by the draw
-    # loop and are independent of the scene, the assets and the lighting.
+    # draw_probe_* markers above. Those hashes and mismatch counts are produced
+    # from the records the shaders consumed and are independent of lighting.
     # DO NOT put a golden-value gate back here. If you want appearance
     # regression testing, the right tool is a reference-image comparison against
     # a committed image, which is a different mechanism with different
