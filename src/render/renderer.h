@@ -34,6 +34,14 @@
 namespace render
 {
 
+struct DrawProbeValidation
+{
+    uint32_t objectRecordsChecked = 0;
+    uint32_t materialRecordsChecked = 0;
+    uint32_t objectMismatches = 0;
+    uint32_t materialMismatches = 0;
+};
+
 // =============================================================================
 // Constant buffer structs (must match HLSL cbuffer layouts exactly)
 // =============================================================================
@@ -140,7 +148,8 @@ public:
     // pass records anything and before either root SRV is bound - so an
     // already-bound SRV's virtual address can never be invalidated under a
     // recorded draw.
-    void BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint);
+    void BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint,
+                             bool enableDrawProbe = false);
 
     // Clears the stale-state guard. Called at the end of App::RenderFrame.
     void EndFrameResources() { m_frameResourcesBegun = false; }
@@ -196,10 +205,18 @@ public:
     uint32_t MaterialBufferCapacity() const { return m_materialBuffer.capacity; }
     // Times a per-draw structured buffer was REPLACED by a larger one while
     // frames were in flight - the one operation here that can use-after-free.
-    // Zero in an ordinary run, which is exactly why --smoke-force-grow exists.
+    // Raster smoke raises the draw hint over time so this path is exercised by
+    // the default harness instead of depending on an opt-in flag.
     uint32_t StructuredBufferReallocations() const { return m_structuredBufferReallocations; }
     uint32_t ShadowRecords() const { return m_reportedShadowRecords; }
     uint32_t MainRecords() const { return m_reportedMainRecords; }
+
+    // Smoke-only GPU evidence for the root-SRV record contract. The final
+    // raster frame hashes the object and material fields the vertex shaders
+    // actually read, copies those hashes to READBACK memory, and compares them
+    // with the CPU upload records after the queue retires.
+    bool RecordDrawProbeReadback(D3D12Device& device);
+    bool ReadDrawProbe(DrawProbeValidation& validation);
 
     // Diagnostics for the smoke harness and for anyone debugging heap pressure.
     uint32_t TextureDescriptorsInUse() const { return m_textureAllocator.InUse(); }
@@ -397,6 +414,8 @@ private:
                                      uint32_t elementCount,
                                      uint64_t elementSize,
                                      const wchar_t* debugName);
+    bool EnsureDrawProbeResources(D3D12Device& device, uint32_t elementCount);
+    bool PrepareDrawProbe(D3D12Device& device);
 
     FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 96
     FrameStructuredBuffer m_materialBuffer;   // stride sizeof(MaterialData) = 80
@@ -434,6 +453,22 @@ private:
     // is too.
     bool     m_drawOverflowLogged = false;
     uint32_t m_structuredBufferReallocations = 0;
+
+    // A UAV written by the raster vertex shaders only when smoke verification
+    // is enabled. One DEFAULT buffer per frame slot avoids clearing storage a
+    // still-in-flight frame may be writing. The shared zero upload is immutable
+    // and may safely feed every slot's copy.
+    ComPtr<ID3D12Resource> m_drawProbeBuffer[kFrameCount];
+    ComPtr<ID3D12Resource> m_drawProbeZeroUpload;
+    ComPtr<ID3D12Resource> m_drawProbeReadback;
+    uint32_t m_drawProbeCapacity = 0;
+    UINT64 m_drawProbeReadbackBytes = 0;
+    uint32_t m_drawProbeReadbackFrame = 0;
+    uint32_t m_drawProbeRecordCount = 0;
+    uint32_t m_drawProbeShadowRecords = 0;
+    uint32_t m_drawProbeMaterialRecords = 0;
+    bool m_drawProbeEnabled = false;
+    bool m_drawProbeReadbackPending = false;
 
     // Root signature and PSO
     ComPtr<ID3D12RootSignature> m_rootSig;

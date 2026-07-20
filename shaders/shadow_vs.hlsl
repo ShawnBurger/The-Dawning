@@ -16,25 +16,16 @@
 // There is no pixel shader. The PSO binds no render targets and writes only
 // depth, so the rasteriser fills the depth buffer directly.
 //
-// Keep ObjectData byte-identical with struct ObjectData in
-// src/render/gpu_draw_records.h and in basic_vs.hlsl. A root SRV has no
-// descriptor and therefore no StructureByteStride for anything to validate.
+#include "gpu_draw_records.hlsli"
 
-struct ObjectData
-{
-    float4 worldRow0;
-    float4 worldRow1;
-    float4 worldRow2;
-    float4 normalRow0;
-    float4 normalRow1;
-    float4 normalRow2;
-};
 StructuredBuffer<ObjectData> objectBuffer : register(t0, space2);
+RWByteAddressBuffer drawRecordProbe : register(u0, space4);
 
 cbuffer CBDrawIndex : register(b3)
 {
     uint objectIndex;
     uint materialIndex;
+    uint drawProbeEnabled;
 };
 
 cbuffer CBPerPass : register(b4)
@@ -53,6 +44,15 @@ struct VSInput
 float4 main(VSInput input) : SV_POSITION
 {
     ObjectData obj = objectBuffer[objectIndex];
+
+    if (drawProbeEnabled != 0)
+    {
+        const uint probeOffset = objectIndex * 16u;
+        uint ignored;
+        drawRecordProbe.InterlockedOr(
+            probeOffset + 0u, DawningHashObjectData(obj), ignored);
+        drawRecordProbe.InterlockedOr(probeOffset + 4u, objectIndex + 1u, ignored);
+    }
 
     float4 p = float4(input.position, 1.0);
     float3 positionWS = float3(dot(obj.worldRow0, p),

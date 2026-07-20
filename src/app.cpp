@@ -55,7 +55,6 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeFullQuality = HasOption(args, "--smoke-full");
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
-    options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
     options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
@@ -779,6 +778,7 @@ int App::RunMainLoop()
             {
                 m_captureThisFrame = m_options.smokeCapture;
                 m_verifyShadowThisFrame = true;
+                m_verifyDrawRecordsThisFrame = true;
                 core::Log::Infof("[SMOKE] mode=%s", m_options.smokeRT ? "rt" : "raster");
                 core::Log::Infof("[SMOKE] cb_ring_peak=%u cb_ring_capacity=%u",
                                  m_renderer.ConstantRingPeakBytes(),
@@ -836,10 +836,11 @@ int App::RunMainLoop()
                     m_renderer.MaterialBufferCapacity(),
                     m_renderer.ShadowRecords(),
                     m_renderer.MainRecords());
-                // Proof that the reallocation branch actually ran. Zero in an
-                // ordinary run; --smoke-force-grow is what makes it nonzero.
                 core::Log::Infof("[SMOKE] structured_buffer_reallocations=%u",
                                  m_renderer.StructuredBufferReallocations());
+                core::Log::Infof("[SMOKE] first_structured_buffer_reallocation_frame=%llu",
+                                 static_cast<unsigned long long>(
+                                     m_smokeFirstStructuredBufferReallocationFrame));
                 core::Log::Info("Smoke mode complete");
                 m_running = false;
             }
@@ -1176,8 +1177,8 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // to raster wrote at whatever offset the last raster frame left behind.
     // Sizing hint for the per-draw structured buffers.
     //
-    // --smoke-force-grow inflates it on a ramp so the buffers REALLOCATE many
-    // times over the run. That branch - allocate kFrameCount replacements, unmap
+    // Raster smoke inflates it on a ramp so the buffers REALLOCATE repeatedly
+    // by default. That branch - allocate kFrameCount replacements, unmap
     // and DeferredRelease the old ones, swap - is the only code in this change
     // that can use-after-free, because kFrameCount frames may still be reading
     // the outgoing buffers, and in an ordinary run it never executes at all: the
@@ -1189,13 +1190,20 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // DeferredRelease fence guard exists for. Run it under --gpu-validation to
     // put the swap under GPU-based validation as well.
     uint32_t maxDrawsHint = m_scene.MeshInstanceCount();
-    if (m_options.smoke && m_options.smokeForceGrow)
+    if (m_options.smoke && !m_options.smokeRT)
     {
         maxDrawsHint += static_cast<uint32_t>(m_frameCount) * 4u;
     }
-    m_renderer.BeginFrameResources(m_device, maxDrawsHint);
-
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
+    const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
+                                  !renderedPathTracing;
+    m_renderer.BeginFrameResources(m_device, maxDrawsHint, probeDrawRecords);
+    if (m_options.smoke &&
+        m_smokeFirstStructuredBufferReallocationFrame == UINT64_MAX &&
+        m_renderer.StructuredBufferReallocations() > 0)
+    {
+        m_smokeFirstStructuredBufferReallocationFrame = m_frameCount;
+    }
 
     if (renderedPathTracing)
     {
@@ -1300,6 +1308,8 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                              m_renderer.ShadowsAvailable();
     if (probeShadow && !m_renderer.RecordShadowMapReadback(m_device))
         m_verifyShadowThisFrame = false;
+    if (probeDrawRecords && !m_renderer.RecordDrawProbeReadback(m_device))
+        m_verifyDrawRecordsThisFrame = false;
 
     // Everything that records into this frame's arena has now done so. Clearing
     // the guard HERE is what makes it able to catch a pass added above
@@ -1318,11 +1328,46 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             m_device.OutstandingSubmissionCount());
     }
 
+    bool gpuRetiredForReadback = false;
     if (m_captureThisFrame)
     {
         m_captureThisFrame = false;
         if (!m_device.WriteBackBufferCapture(kSmokeCaptureFile))
             return false;
+        gpuRetiredForReadback = true;
+    }
+
+    if ((probeShadow || probeDrawRecords) && !gpuRetiredForReadback)
+    {
+        if (!m_device.WaitForGpu())
+            return false;
+        gpuRetiredForReadback = true;
+    }
+
+    if (probeDrawRecords && m_verifyDrawRecordsThisFrame)
+    {
+        m_verifyDrawRecordsThisFrame = false;
+        render::DrawProbeValidation validation = {};
+        if (!m_renderer.ReadDrawProbe(validation))
+        {
+            core::Log::Error("GPU draw-record probe readback failed");
+            return false;
+        }
+        const bool valid = validation.objectRecordsChecked > 0 &&
+                           validation.materialRecordsChecked > 0 &&
+                           validation.objectMismatches == 0 &&
+                           validation.materialMismatches == 0;
+        core::Log::Infof(
+            "[SMOKE] draw_probe=%s draw_probe_object_records=%u "
+            "draw_probe_material_records=%u draw_probe_object_mismatches=%u "
+            "draw_probe_material_mismatches=%u",
+            valid ? "ok" : "failed",
+            validation.objectRecordsChecked,
+            validation.materialRecordsChecked,
+            validation.objectMismatches,
+            validation.materialMismatches);
+        if (!valid)
+            core::Log::Error("GPU consumed per-draw records that differ from the CPU upload contract");
     }
 
     if (probeShadow && m_verifyShadowThisFrame)

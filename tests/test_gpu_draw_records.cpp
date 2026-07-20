@@ -59,6 +59,7 @@ TEST_CASE(GpuDrawRecords_SizesMatchShaderStructs)
     CHECK_EQ(sizeof(render::ObjectData), size_t(96));
     CHECK_EQ(sizeof(render::MaterialData), size_t(80));
     CHECK_EQ(sizeof(render::CBPerPass), size_t(64));
+    CHECK_EQ(sizeof(render::DrawProbeRecord), size_t(16));
 
     // Every StructuredBuffer element size must be a multiple of 16, which is
     // what the pad members in MaterialData exist for.
@@ -206,6 +207,31 @@ TEST_CASE(GpuDrawRecords_WorldRowsCarryTranslationInW)
     CHECK_APPROX_EPS(rec.world[3],  7.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[7], -3.0f,  1e-6);
     CHECK_APPROX_EPS(rec.world[11], 0.25f, 1e-6);
+}
+
+TEST_CASE(GpuDrawRecords_ProbeHashesEveryUploadedWord)
+{
+    render::ObjectData object = {};
+    render::MaterialData material = {};
+    const uint32_t objectBase = render::HashObjectData(object);
+    const uint32_t materialBase = render::HashMaterialData(material);
+
+    for (size_t i = 0; i < sizeof(object) / sizeof(uint32_t); ++i)
+    {
+        render::ObjectData changed = object;
+        const uint32_t value = 0x3F800000u + static_cast<uint32_t>(i);
+        std::memcpy(reinterpret_cast<uint8_t*>(&changed) + i * sizeof(value),
+                    &value, sizeof(value));
+        CHECK(render::HashObjectData(changed) != objectBase);
+    }
+    for (size_t i = 0; i < sizeof(material) / sizeof(uint32_t); ++i)
+    {
+        render::MaterialData changed = material;
+        const uint32_t value = 0x40000000u + static_cast<uint32_t>(i);
+        std::memcpy(reinterpret_cast<uint8_t*>(&changed) + i * sizeof(value),
+                    &value, sizeof(value));
+        CHECK(render::HashMaterialData(changed) != materialBase);
+    }
 }
 
 // =============================================================================
@@ -368,12 +394,13 @@ TEST_CASE(GpuDrawRecords_GrowthNeverShrinksAndAmortises)
     CHECK_EQ(render::GrownCapacity(500, 100), 500u);
     CHECK_EQ(render::GrownCapacity(500, 500), 500u);
 
-    // Above capacity: grow past the request so the next few additions are free.
-    CHECK_EQ(render::GrownCapacity(500, 501), 501u + render::kCapacityHeadroom);
+    // Above capacity: grow geometrically so a steadily expanding scene does not
+    // recreate all frame-slot resources at a fixed cadence.
+    CHECK_EQ(render::GrownCapacity(500, 501), 750u);
     CHECK(render::GrownCapacity(500, 501) > 500u);
 
     // From nothing.
-    CHECK_EQ(render::GrownCapacity(0, 256), 256u + render::kCapacityHeadroom);
+    CHECK_EQ(render::GrownCapacity(0, 256), 256u);
 
     // Grow, then shrink the demand back down. The capacity must HOLD: shrinking
     // would mean destroying a buffer frames in flight may still be reading.
@@ -390,14 +417,9 @@ TEST_CASE(GpuDrawRecords_GrowthNeverShrinksAndAmortises)
     CHECK_EQ(cap, afterGrowth);   // did not shrink back
 }
 
-// HONEST NOTE, asserted so it cannot rot into a false assumption: the smoke
-// scene never reaches the growth path. Its peak is 91 renderables, i.e. 182
-// object records, which sits UNDER the 256-element floor - so
-// EnsureFrameStructuredBuffer early-outs on every frame of every smoke run and
-// its D3D12 reallocate-and-DeferredRelease branch is exercised by neither smoke
-// mode. The arithmetic above is covered here; the resource swap is not covered
-// anywhere. Raising the floor or lowering it would change that, so pin the
-// relationship down rather than leaving it to be rediscovered.
+// The static demo scene stays under the floor. Raster smoke therefore raises
+// maxDrawsHint over time; changing the floor alone could only alter the first
+// allocation and would never exercise replacement.
 TEST_CASE(GpuDrawRecords_SmokeSceneStaysUnderTheCapacityFloor)
 {
     const uint32_t smokePeakRenderables = 91;   // 11 demo + 80 RTGrowth_*

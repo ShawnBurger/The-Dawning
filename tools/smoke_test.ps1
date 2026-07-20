@@ -4,7 +4,6 @@ param(
     [switch]$RasterOnly,
     [switch]$FullQuality,
     [switch]$ResizeStress,
-    [switch]$ForceGrow,
     [switch]$Unlocked,
     [switch]$GPUValidation,
     [int]$TimeoutSeconds = 15,
@@ -65,7 +64,6 @@ if (!$RasterOnly)  {
 }
 if ($FullQuality)  { $arguments += "--smoke-full" }
 if ($ResizeStress) { $arguments += "--smoke-resize" }
-if ($ForceGrow)    { $arguments += "--smoke-force-grow" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if ($GPUValidation){ $arguments += "--gpu-validation" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
@@ -258,26 +256,27 @@ if ($ResizeStress) { Assert-Marker "resize_requests" "3" }
 # synchronised by resource barriers, so nothing but the deferred-release fence
 # stands between it and a live buffer being freed underneath a frame in flight.
 #
-# In an ordinary run it NEVER EXECUTES. The demo scene's draw count sits under
-# kMinObjectCapacity, so after the first allocation the function early-outs on
-# every frame. -ForceGrow ramps the sizing hint so the buffers reallocate
-# repeatedly, mid-run, with frames genuinely in flight.
+# Raster smoke ramps the sizing hint by default so replacement happens after
+# several frames are already in flight. RT smoke does not use these buffers and
+# therefore does not carry this assertion.
 #
 # Assert it actually happened rather than assuming the flag worked: a hint ramp
 # that stopped crossing capacity boundaries would leave this whole path
 # uncovered again while the run still passed.
-if ($markers.ContainsKey("structured_buffer_reallocations")) {
+if ($RasterOnly) {
+    foreach ($k in @("structured_buffer_reallocations", "first_structured_buffer_reallocation_frame")) {
+        if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+    }
     $reallocs = [int]$markers["structured_buffer_reallocations"]
     Write-Host "Structured-buffer reallocations: $reallocs"
-    if ($ForceGrow -and $reallocs -lt 5) {
-        throw ("-ForceGrow produced only $reallocs structured-buffer reallocations. " +
-               "The grow branch is meant to run many times under this switch; if the " +
-               "sizing hint no longer crosses capacity boundaries then the one code " +
-               "path here that can use-after-free is going untested. Check the " +
-               "--smoke-force-grow ramp in App::RenderFrame against kCapacityHeadroom.")
+    if ($reallocs -lt 4) {
+        throw ("Raster smoke produced only $reallocs structured-buffer reallocations; " +
+               "the default sizing ramp no longer exercises repeated replacement.")
     }
-    if (-not $ForceGrow -and $reallocs -ne 0) {
-        Write-Host "  (note: buffers reallocated without -ForceGrow; the scene outgrew the capacity floor)"
+    $firstRealloc = [uint64]$markers["first_structured_buffer_reallocation_frame"]
+    if ($firstRealloc -le 3) {
+        throw ("The first structured-buffer replacement happened on frame $firstRealloc; " +
+               "it must happen after all three frame slots can be in flight.")
     }
 }
 
@@ -311,6 +310,28 @@ if ([uint32]$markers["object_records_peak"] -lt ($shadowRecords + $mainRecords))
 if ([uint32]$markers["object_records_peak"] -gt [uint32]$markers["object_capacity"]) {
     throw ("object_records_peak={0} exceeds object_capacity={1}; draws were skipped." -f `
            $markers["object_records_peak"], $markers["object_capacity"])
+}
+
+# Direct GPU evidence for the root-SRV contract. The vertex shaders hash the
+# exact ObjectData and MaterialData fields they consumed into a UAV. This catches
+# record-zero indexing, wrong root constants, and CPU/HLSL field-layout drift
+# without pinning the scene's final luminance to an untracked asset set.
+if ($RasterOnly) {
+    Assert-Marker "draw_probe" "ok"
+    foreach ($k in @("draw_probe_object_records", "draw_probe_material_records",
+                      "draw_probe_object_mismatches", "draw_probe_material_mismatches")) {
+        if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+    }
+    if ([uint32]$markers["draw_probe_object_records"] -ne ($shadowRecords + $mainRecords)) {
+        throw "GPU draw probe did not cover every shadow and main object record."
+    }
+    if ([uint32]$markers["draw_probe_material_records"] -ne $mainRecords) {
+        throw "GPU draw probe did not cover every main-pass material record."
+    }
+    if ([uint32]$markers["draw_probe_object_mismatches"] -ne 0 -or
+        [uint32]$markers["draw_probe_material_mismatches"] -ne 0) {
+        throw "GPU draw probe reported a consumed-record mismatch."
+    }
 }
 
 if ([uint64]$markers["descriptors_pending_after_scene_shutdown"] -lt 1) {
@@ -420,76 +441,6 @@ if (!$NoCapture) {
     if ($nonBlackFrac -lt 0.10) { throw "Only $([math]::Round($nonBlackFrac*100,1))% of sampled pixels are non-black." }
     if ($distinct -lt 4)      { throw "Capture has only $distinct distinct colour buckets; the frame is effectively a flat fill." }
 
-    # -------------------------------------------------------------------------
-    # Golden-value gate for the RASTER capture
-    # -------------------------------------------------------------------------
-    # The loose thresholds above catch catastrophic failure and nothing else.
-    # They are not enough: forcing every draw to read per-object record 0 - the
-    # single highest-prior failure mode of per-draw structured-buffer indexing,
-    # and precisely what happens if someone "simplifies" the root constant to
-    # SV_InstanceID at SM 5.1 - renders the whole scene with the first entity's
-    # transform, and STILL passes every check above. That was verified, not
-    # assumed, by building both mutations and watching the harness pass.
-    #
-    # CALIBRATION, measured on this scene at a fixed timestep and a fixed camera,
-    # so the capture is deterministic (confirmed identical across repeated runs):
-    #
-    #   correct                              mean 122.9   buckets 59
-    #   shadow_vs objectBuffer[0]            mean 123.6   buckets 58
-    #   basic_vs  objectBuffer[0]            mean 124.4   buckets 27
-    #
-    # Re-measured against THIS tree, not carried over: the mutation figures in
-    # the previous version of this block were taken before four-cascade shadows
-    # and no longer describe either failure.
-    #
-    # A +/-0.5 band on the mean catches both (0.7 and 1.5 off), and the bucket
-    # count catches both outright. Raster only: the path-traced capture depends
-    # on accumulation depth and is not a golden-value candidate.
-    #
-    # RECALIBRATED for four-cascade shadows. The previous figure, 128.3, was
-    # measured before cascades landed on main and was already stale when this
-    # gate was written - it failed on the first run after merge, against a
-    # correct image. If you are reading this because it failed again, see the
-    # message below.
-    if ($RasterOnly) {
-        $goldenMeanLum  = 122.9
-        $goldenBuckets  = 59
-        $meanTolerance  = 0.5
-
-        # DELIBERATELY does not tell you to update the numbers. The previous
-        # wording ("If that was intended, re-measure and update the golden
-        # values") is what a reader follows on autopilot, and doing that on a
-        # real regression silently retires the only check that pins the HLSL row
-        # layout against gpu_draw_records.h - the layout nothing validates at
-        # runtime, because a root SRV has no descriptor and no stride. Updating
-        # the constants is sometimes right, but it is the LAST step, not the
-        # first.
-        $fixHint = @"
-The rendered raster image changed. Work out WHY before touching these constants.
-  1. Check the bucket count in the same failure. 59 -> ~25 means most draws are
-     reading one object record: the per-draw root constant at b3 is not reaching
-     basic_vs.hlsl. 59 -> 58 points at shadow_vs.hlsl doing the same.
-  2. Diff shaders/basic_vs.hlsl, shaders/shadow_vs.hlsl and
-     src/render/gpu_draw_records.h against each other. ObjectData must be
-     byte-identical in all three; nothing checks this at runtime.
-  3. Compare the capture against a build of origin/main to see whether the
-     change is yours.
-Only once you can NAME the rendering change that moved the mean should you
-re-measure and update goldenMeanLum and goldenBuckets - and record what changed
-in the calibration block above. Widening meanTolerance is not a fix.
-"@
-
-        if ([math]::Abs($meanLum - $goldenMeanLum) -gt $meanTolerance) {
-            $msg = "Raster capture mean luminance is {0:N1}, expected {1:N1} +/- {2:N1}. {3}" -f `
-                   $meanLum, $goldenMeanLum, $meanTolerance, $fixHint
-            throw $msg
-        }
-        if ($distinct -ne $goldenBuckets) {
-            $msg = "Raster capture has {0} distinct colour buckets, expected {1}. {2}" -f `
-                   $distinct, $goldenBuckets, $fixHint
-            throw $msg
-        }
-    }
 }
 
 if ($RasterOnly) {

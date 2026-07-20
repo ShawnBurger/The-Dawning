@@ -5,28 +5,11 @@
 // Left-handed coordinate system: +Z forward, CW winding = front face.
 // =============================================================================
 
-// Per-draw transform record. Keep byte-identical with struct ObjectData in
-// src/render/gpu_draw_records.h, which static_asserts the size and every
-// offset. NOTHING ELSE CHECKS THIS: a root SRV is a bare GPU virtual address
-// with no descriptor, so there is no StructureByteStride for the runtime or the
-// debug layer to compare against the struct size FXC computes here. A one-byte
-// disagreement reads shifted garbage for every element after the first.
-//
-// EXPLICIT float4 ROWS, NOT float4x4. StructuredBuffer elements do not get the
-// column-major reinterpretation that cbuffer matrices do (render/mesh.h says so,
-// and says so because this tree already shipped that bug once on
-// RTInstanceData::normalMatrix). The rows hold the TRANSPOSE of the engine's
-// row-major Mat4x4, so component r is a plain dot with row r.
-struct ObjectData
-{
-    float4 worldRow0;      //  0..15
-    float4 worldRow1;      // 16..31
-    float4 worldRow2;      // 32..47
-    float4 normalRow0;     // 48..63
-    float4 normalRow1;     // 64..79
-    float4 normalRow2;     // 80..95
-};
+#include "gpu_draw_records.hlsli"
+
 StructuredBuffer<ObjectData> objectBuffer : register(t0, space2);
+StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
+RWByteAddressBuffer drawRecordProbe : register(u0, space4);
 
 // Which record this draw owns. A root 32-bit constant, NOT SV_InstanceID: at
 // SM 5.1 SV_InstanceID does not include StartInstanceLocation, so the obvious
@@ -36,6 +19,7 @@ cbuffer CBDrawIndex : register(b3)
 {
     uint objectIndex;
     uint materialIndex;
+    uint drawProbeEnabled;
 };
 
 // Per-PASS view-projection: the camera matrix here, the light matrix in
@@ -68,6 +52,24 @@ VSOutput main(VSInput input)
     VSOutput output;
 
     ObjectData obj = objectBuffer[objectIndex];
+
+    // Smoke-only GPU evidence. Every vertex computes the same two hashes for a
+    // draw, and InterlockedOr is idempotent for identical values, so the result
+    // is deterministic without relying on one particular index-buffer value to
+    // identify a "first" vertex. The probe proves the records the shader
+    // actually consumed, including their field layout.
+    if (drawProbeEnabled != 0)
+    {
+        const uint probeOffset = objectIndex * 16u;
+        uint ignored;
+        drawRecordProbe.InterlockedOr(
+            probeOffset + 0u, DawningHashObjectData(obj), ignored);
+        drawRecordProbe.InterlockedOr(probeOffset + 4u, objectIndex + 1u, ignored);
+        drawRecordProbe.InterlockedOr(
+            probeOffset + 8u,
+            DawningHashMaterialData(materialBuffer[materialIndex]), ignored);
+        drawRecordProbe.InterlockedOr(probeOffset + 12u, materialIndex + 1u, ignored);
+    }
 
     float4 p = float4(input.position, 1.0);
     float3 positionWS = float3(dot(obj.worldRow0, p),

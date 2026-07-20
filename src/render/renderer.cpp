@@ -25,6 +25,10 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreatePSO(device.Device()))           return false;
     if (!CreateSkyPSO(device.Device()))        return false;
     if (!CreateConstantBuffers(device.Device())) return false;
+    // The shaders always carry the smoke probe binding, even though normal
+    // frames branch around every write. Keep a one-record UAV bound so the root
+    // argument is valid under the debug layer before smoke grows it.
+    if (!EnsureDrawProbeResources(device, 1)) return false;
     if (!CreateTextureHeap(device.Device())) return false;
     if (!CreateHDRTarget(device.Device(),
                          static_cast<uint32_t>(device.Width()),
@@ -55,6 +59,12 @@ void Renderer::Shutdown()
     // escape hatch.
     m_objectBuffer.Reset();
     m_materialBuffer.Reset();
+    for (auto& buffer : m_drawProbeBuffer) buffer.Reset();
+    m_drawProbeZeroUpload.Reset();
+    m_drawProbeReadback.Reset();
+    m_drawProbeCapacity = 0;
+    m_drawProbeReadbackBytes = 0;
+    m_drawProbeReadbackPending = false;
     m_bloomBlurPSO.Reset();
     m_bloomPrefilterPSO.Reset();
     m_bloomRootSig.Reset();
@@ -726,19 +736,20 @@ void Renderer::ResolveToBackBuffer(D3D12Device& device)
 // Layout:
 //   Slot 0: Root SRV  t0/space2 — StructuredBuffer<ObjectData>   — 2 DWORDs, VERTEX
 //   Slot 1: Root CBV  b1        — CBPerFrame                     — 2 DWORDs, PIXEL
-//   Slot 2: Root SRV  t0/space3 — StructuredBuffer<MaterialData> — 2 DWORDs, PIXEL
+//   Slot 2: Root SRV  t0/space3 — StructuredBuffer<MaterialData> — 2 DWORDs, ALL
 //   Slot 3: Table     t0-t127/space0 — material textures         — 1 DWORD,  PIXEL
 //   Slot 4: Table     t0/space1      — shadow map                — 1 DWORD,  PIXEL
-//   Slot 5: 32-bit constants b3 — { objectIndex, materialIndex } — 2 DWORDs, ALL
+//   Slot 5: 32-bit constants b3 — { objectIndex, materialIndex, probeEnabled } — 3 DWORDs, ALL
 //   Slot 6: Root CBV  b4        — CBPerPass (viewProj)           — 2 DWORDs, VERTEX
+//   Slot 7: Root UAV  u0/space4 — smoke draw-record probe        — 2 DWORDs, VERTEX
 //   Static samplers at s0 (material) and s1 (shadow comparison) — free
-// Total: 12 DWORDs of 64. 52 free.
+// Total: 15 DWORDs of 64. 49 free.
 //
 // Slots 0 and 2 changed TYPE in place (CBV->SRV) rather than being appended
 // alongside dead parameters: slot 0 was "per-object data, VERTEX-visible" and
-// still is, slot 2 was "material, PIXEL-visible" and still is. Only where the
-// data lives changed, so five of the six existing hardcoded slot indices in
-// this file did not move.
+// still is. Slot 2 is ALL-visible so the smoke probe can hash the exact material
+// record consumed before rasterization. The original six slot indices did not
+// move; slots 6 and 7 were appended.
 //
 // ROOT SRVs rather than descriptor tables, and BeginShadowPass decides this:
 // it calls SetGraphicsRootSignature and SetPipelineState but never
@@ -855,7 +866,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         shadowRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[7] = {};
+        D3D12_ROOT_PARAMETER1 rootParams[8] = {};
 
         // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -879,7 +890,9 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[2].Descriptor.ShaderRegister = 0;
         rootParams[2].Descriptor.RegisterSpace  = 3;
         rootParams[2].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
-        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+        // The smoke probe hashes MaterialData in the vertex stage as well as
+        // the pixel shader consuming it normally.
+        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
         // Slot 3: Material texture table (t0-t127)
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -895,8 +908,9 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[4].DescriptorTable.pDescriptorRanges   = &shadowRange;
         rootParams[4].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
-        // Slot 5: per-draw record indices (b3). TWO uints in ONE parameter, so
-        // a single SetGraphicsRoot32BitConstants per draw writes both and no
+        // Slot 5: per-draw record indices and smoke-probe enable (b3). THREE
+        // uints in ONE parameter, so one SetGraphicsRoot32BitConstants call
+        // writes the complete draw state and no
         // stale root state can survive from one pass into the next. They stay
         // SEPARATE fields rather than one shared index because the two differ
         // by the shadow pass's record count within the main pass, and because
@@ -914,7 +928,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[5].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         rootParams[5].Constants.ShaderRegister = 3;
         rootParams[5].Constants.RegisterSpace  = 0;
-        rootParams[5].Constants.Num32BitValues = 2;
+        rootParams[5].Constants.Num32BitValues = 3;
         rootParams[5].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
 
         // Slot 6: per-pass view-projection (b4). The light matrix during the
@@ -927,6 +941,14 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[6].Descriptor.RegisterSpace  = 0;
         rootParams[6].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
+
+        // Slot 7: smoke-only GPU evidence. Root UAV keeps the shadow pass free
+        // of descriptor-heap dependencies.
+        rootParams[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rootParams[7].Descriptor.ShaderRegister = 0;
+        rootParams[7].Descriptor.RegisterSpace  = 4;
+        rootParams[7].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+        rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -962,7 +984,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // including both smoke modes - would ever catch. v1.0 has no
         // per-descriptor Flags member; volatile is the implicit default there,
         // which is what the v1.1 branch asks for explicitly.
-        D3D12_ROOT_PARAMETER rootParams[7] = {};
+        D3D12_ROOT_PARAMETER rootParams[8] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -977,7 +999,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[2].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[2].Descriptor.ShaderRegister = 0;
         rootParams[2].Descriptor.RegisterSpace  = 3;
-        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParams[2].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
         rootParams[3].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
@@ -992,13 +1014,18 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[5].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         rootParams[5].Constants.ShaderRegister = 3;
         rootParams[5].Constants.RegisterSpace  = 0;
-        rootParams[5].Constants.Num32BitValues = 2;
+        rootParams[5].Constants.Num32BitValues = 3;
         rootParams[5].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
 
         rootParams[6].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[6].Descriptor.ShaderRegister = 4;
         rootParams[6].Descriptor.RegisterSpace  = 0;
         rootParams[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
+
+        rootParams[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rootParams[7].Descriptor.ShaderRegister = 0;
+        rootParams[7].Descriptor.RegisterSpace  = 4;
+        rootParams[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
@@ -1027,7 +1054,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw-index constants + texture table + shadow table, 2 static samplers, 12 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + probe UAV + texture table + shadow table, 2 static samplers, 15 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -1496,7 +1523,110 @@ bool Renderer::EnsureFrameStructuredBuffer(D3D12Device& device,
 // =============================================================================
 // BeginFrameResources — advance the frame slot, above every pass
 // =============================================================================
-void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint)
+bool Renderer::EnsureDrawProbeResources(D3D12Device& device, uint32_t elementCount)
+{
+    elementCount = (std::max)(elementCount, 1u);
+    if (m_drawProbeBuffer[0] && elementCount <= m_drawProbeCapacity)
+        return true;
+
+    const uint32_t newCapacity = GrownCapacity(m_drawProbeCapacity, elementCount);
+    const uint64_t byteSize = static_cast<uint64_t>(newCapacity) * sizeof(DrawProbeRecord);
+    ComPtr<ID3D12Resource> replacement[kFrameCount];
+    ComPtr<ID3D12Resource> zeroUpload;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = byteSize;
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        const HRESULT hr = device.Device()->CreateCommittedResource(
+            &defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+            IID_PPV_ARGS(&replacement[i]));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Draw-record probe UAV allocation failed for slot %u: 0x%08X", i, hr);
+            return false;
+        }
+        wchar_t name[64];
+        swprintf_s(name, L"DrawRecordProbe[%u]", i);
+        replacement[i]->SetName(name);
+    }
+
+    desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    HRESULT hr = device.Device()->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&zeroUpload));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Draw-record probe clear upload allocation failed: 0x%08X", hr);
+        return false;
+    }
+    zeroUpload->SetName(L"DrawRecordProbeZeroUpload");
+
+    void* mapped = nullptr;
+    const D3D12_RANGE noRead = { 0, 0 };
+    hr = zeroUpload->Map(0, &noRead, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("Draw-record probe clear upload map failed: 0x%08X", hr);
+        return false;
+    }
+    std::memset(mapped, 0, static_cast<size_t>(byteSize));
+    zeroUpload->Unmap(0, nullptr);
+
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        device.DeferredRelease(m_drawProbeBuffer[i]);
+        m_drawProbeBuffer[i] = std::move(replacement[i]);
+    }
+    device.DeferredRelease(m_drawProbeZeroUpload);
+    m_drawProbeZeroUpload = std::move(zeroUpload);
+    m_drawProbeCapacity = newCapacity;
+    return true;
+}
+
+bool Renderer::PrepareDrawProbe(D3D12Device& device)
+{
+    if (!m_drawProbeEnabled) return true;
+    if (!m_drawProbeBuffer[m_currentFrame] || !m_drawProbeZeroUpload)
+    {
+        core::Log::Error("Draw-record probe resources are unavailable");
+        return false;
+    }
+
+    auto* cmd = device.CmdList();
+    const uint64_t byteSize = static_cast<uint64_t>(m_drawProbeCapacity) *
+                              sizeof(DrawProbeRecord);
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = m_drawProbeBuffer[m_currentFrame].Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    cmd->ResourceBarrier(1, &barrier);
+    cmd->CopyBufferRegion(m_drawProbeBuffer[m_currentFrame].Get(), 0,
+                          m_drawProbeZeroUpload.Get(), 0, byteSize);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &barrier);
+    return true;
+}
+
+void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint,
+                                   bool enableDrawProbe)
 {
     m_currentFrame = device.FrameIndex();
     m_cbOffset     = 0;   // rewind THIS frame's ring, not some other frame's
@@ -1530,6 +1660,15 @@ void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint)
                                 sizeof(ObjectData), L"ObjectDataBuffer");
     EnsureFrameStructuredBuffer(device, m_materialBuffer, materialsNeeded,
                                 sizeof(MaterialData), L"MaterialDataBuffer");
+
+    m_drawProbeEnabled = enableDrawProbe;
+    m_drawProbeReadbackPending = false;
+    if (m_drawProbeEnabled &&
+        (!EnsureDrawProbeResources(device, objectsNeeded) || !PrepareDrawProbe(device)))
+    {
+        core::Log::Error("Unable to prepare GPU draw-record verification");
+        m_drawProbeEnabled = false;
+    }
 
     m_frameResourcesBegun = true;
     m_frameResourcesViolationLogged = false;
@@ -1656,6 +1795,9 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     if (m_materialBuffer.Valid())
         cmd->SetGraphicsRootShaderResourceView(
             2, m_materialBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+    if (m_drawProbeBuffer[m_currentFrame])
+        cmd->SetGraphicsRootUnorderedAccessView(
+            7, m_drawProbeBuffer[m_currentFrame]->GetGPUVirtualAddress());
 
     cmd->SetGraphicsRootDescriptorTable(3, m_textureHeap->GetGPUDescriptorHandleForHeapStart());
 
@@ -1778,8 +1920,10 @@ void Renderer::DrawMesh(D3D12Device& device, const Mesh& mesh,
 
     // One call writes both indices, so no stale root state can survive from the
     // shadow pass into this one.
-    const uint32_t indices[2] = { objectIndex, materialIndex };
-    cmd->SetGraphicsRoot32BitConstants(5, 2, indices, 0);
+    const uint32_t indices[3] = {
+        objectIndex, materialIndex, m_drawProbeEnabled ? 1u : 0u
+    };
+    cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
 
     // Bind geometry and draw
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
@@ -2069,12 +2213,14 @@ void Renderer::BeginShadowPass(D3D12Device& device, const core::Vec3d& cameraPos
     // per-pass cbuffer. Growth already happened in BeginFrameResources, above
     // every pass, so this address cannot be invalidated under a recorded draw.
     //
-    // Root params 1, 2, 3 and 4 stay unbound, exactly as before this change.
-    // Still legal: the shadow PSO has no pixel shader and all four are
-    // PIXEL-visible. Param 2 becoming an SRV does not affect that.
+    // Root params 1 through 4 stay unbound in the shadow pass. This is legal:
+    // only the shadow vertex shader runs, and it consumes slots 0, 5, 6 and 7.
     if (m_objectBuffer.Valid())
         cmd->SetGraphicsRootShaderResourceView(
             0, m_objectBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+    if (m_drawProbeBuffer[m_currentFrame])
+        cmd->SetGraphicsRootUnorderedAccessView(
+            7, m_drawProbeBuffer[m_currentFrame]->GetGPUVirtualAddress());
 
     // Where this pass's object range starts. Every cascade rewinds to it - see
     // BeginShadowCascade.
@@ -2147,6 +2293,136 @@ void Renderer::EndShadowPass(D3D12Device& device)
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     device.CmdList()->ResourceBarrier(1, &barrier);
     m_shadowIsDepthTarget = false;
+}
+
+bool Renderer::RecordDrawProbeReadback(D3D12Device& device)
+{
+    if (!m_drawProbeEnabled || !m_drawProbeBuffer[m_currentFrame]) return false;
+
+    m_drawProbeRecordCount = m_objectCursor.Next();
+    m_drawProbeShadowRecords = m_shadowRecords;
+    m_drawProbeMaterialRecords = m_materialCursor;
+    m_drawProbeReadbackFrame = m_currentFrame;
+    if (m_drawProbeRecordCount == 0 || m_drawProbeRecordCount > m_drawProbeCapacity)
+    {
+        core::Log::Errorf("Draw-record probe has invalid record count %u/%u",
+                          m_drawProbeRecordCount, m_drawProbeCapacity);
+        return false;
+    }
+
+    const uint64_t byteSize = static_cast<uint64_t>(m_drawProbeRecordCount) *
+                              sizeof(DrawProbeRecord);
+    if (!m_drawProbeReadback || m_drawProbeReadbackBytes < byteSize)
+    {
+        device.DeferredRelease(m_drawProbeReadback);
+        m_drawProbeReadback.Reset();
+        m_drawProbeReadbackBytes = 0;
+
+        D3D12_HEAP_PROPERTIES readbackHeap = {};
+        readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+        desc.Width            = byteSize;
+        desc.Height           = 1;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels        = 1;
+        desc.Format           = DXGI_FORMAT_UNKNOWN;
+        desc.SampleDesc       = { 1, 0 };
+        desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        const HRESULT hr = device.Device()->CreateCommittedResource(
+            &readbackHeap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&m_drawProbeReadback));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Draw-record probe readback allocation failed: 0x%08X", hr);
+            return false;
+        }
+        m_drawProbeReadback->SetName(L"DrawRecordProbeReadback");
+        m_drawProbeReadbackBytes = byteSize;
+    }
+
+    auto* cmd = device.CmdList();
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = m_drawProbeBuffer[m_currentFrame].Get();
+    cmd->ResourceBarrier(1, &uavBarrier);
+
+    D3D12_RESOURCE_BARRIER transition = {};
+    transition.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    transition.Transition.pResource = m_drawProbeBuffer[m_currentFrame].Get();
+    transition.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    transition.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    transition.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd->ResourceBarrier(1, &transition);
+    cmd->CopyBufferRegion(m_drawProbeReadback.Get(), 0,
+                          m_drawProbeBuffer[m_currentFrame].Get(), 0, byteSize);
+    std::swap(transition.Transition.StateBefore, transition.Transition.StateAfter);
+    cmd->ResourceBarrier(1, &transition);
+    m_drawProbeReadbackPending = true;
+    return true;
+}
+
+bool Renderer::ReadDrawProbe(DrawProbeValidation& validation)
+{
+    validation = {};
+    if (!m_drawProbeReadbackPending || !m_drawProbeReadback ||
+        m_drawProbeRecordCount == 0)
+        return false;
+    if (!m_objectBuffer.mapped[m_drawProbeReadbackFrame] ||
+        !m_materialBuffer.mapped[m_drawProbeReadbackFrame])
+        return false;
+
+    const size_t byteSize = static_cast<size_t>(m_drawProbeRecordCount) *
+                            sizeof(DrawProbeRecord);
+    D3D12_RANGE readRange = { 0, byteSize };
+    void* mapped = nullptr;
+    const HRESULT hr = m_drawProbeReadback->Map(0, &readRange, &mapped);
+    if (FAILED(hr) || !mapped)
+    {
+        core::Log::Errorf("Draw-record probe readback map failed: 0x%08X", hr);
+        return false;
+    }
+
+    const auto* actual = static_cast<const DrawProbeRecord*>(mapped);
+    const auto* objects = reinterpret_cast<const ObjectData*>(
+        m_objectBuffer.mapped[m_drawProbeReadbackFrame]);
+    const auto* materials = reinterpret_cast<const MaterialData*>(
+        m_materialBuffer.mapped[m_drawProbeReadbackFrame]);
+
+    for (uint32_t i = 0; i < m_drawProbeRecordCount; ++i)
+    {
+        ++validation.objectRecordsChecked;
+        if (actual[i].objectHash != HashObjectData(objects[i]) ||
+            actual[i].objectMarker != i + 1u)
+        {
+            ++validation.objectMismatches;
+        }
+
+        if (i >= m_drawProbeShadowRecords)
+        {
+            const uint32_t materialIndex = i - m_drawProbeShadowRecords;
+            if (materialIndex < m_drawProbeMaterialRecords)
+            {
+                ++validation.materialRecordsChecked;
+                if (actual[i].materialHash != HashMaterialData(materials[materialIndex]) ||
+                    actual[i].materialMarker != materialIndex + 1u)
+                {
+                    ++validation.materialMismatches;
+                }
+            }
+        }
+        else if (actual[i].materialHash != 0 || actual[i].materialMarker != 0)
+        {
+            ++validation.materialMismatches;
+        }
+    }
+
+    const D3D12_RANGE noWrite = { 0, 0 };
+    m_drawProbeReadback->Unmap(0, &noWrite);
+    m_drawProbeReadbackPending = false;
+    return true;
 }
 
 bool Renderer::RecordShadowMapReadback(D3D12Device& device)
@@ -2349,8 +2625,10 @@ void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
     // Both values written in one call, so no material index left over from the
     // previous frame's main pass can survive into this one - the same reasoning
     // that fills normalMatrix above.
-    const uint32_t indices[2] = { objectIndex, 0u };
-    cmd->SetGraphicsRoot32BitConstants(5, 2, indices, 0);
+    const uint32_t indices[3] = {
+        objectIndex, 0u, m_drawProbeEnabled ? 1u : 0u
+    };
+    cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
 
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
     cmd->IASetIndexBuffer(&mesh.ibView);

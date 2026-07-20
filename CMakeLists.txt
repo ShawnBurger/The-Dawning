@@ -95,6 +95,7 @@ set(SHADER_FILES
     shaders/tonemap_vs.hlsl
     shaders/tonemap_ps.hlsl
     shaders/path_trace.hlsl
+    shaders/gpu_draw_records.hlsli
     shaders/brdf_common.hlsli
     shaders/display_common.hlsli
     shaders/sky_common.hlsli

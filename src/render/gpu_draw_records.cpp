@@ -9,9 +9,29 @@
 #include "gpu_draw_records.h"
 
 #include <algorithm>
+#include <cstring>
+#include <limits>
 
 namespace render
 {
+
+namespace
+{
+
+uint32_t HashWords(const void* data, size_t byteCount)
+{
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint32_t hash = 2166136261u;
+    for (size_t offset = 0; offset < byteCount; offset += sizeof(uint32_t))
+    {
+        uint32_t word = 0;
+        std::memcpy(&word, bytes + offset, sizeof(word));
+        hash = (hash ^ word) * 16777619u;
+    }
+    return hash;
+}
+
+} // namespace
 
 void WriteObjectRecord(ObjectData& out,
                        const core::Mat4x4& world,
@@ -51,6 +71,16 @@ void WriteObjectRecord(ObjectData& out,
     }
 }
 
+uint32_t HashObjectData(const ObjectData& record)
+{
+    return HashWords(&record, sizeof(record));
+}
+
+uint32_t HashMaterialData(const MaterialData& record)
+{
+    return HashWords(&record, sizeof(record));
+}
+
 uint32_t RequiredObjectCapacity(uint32_t maxDraws)
 {
     return (std::max)(kMinObjectCapacity, 2u * maxDraws);
@@ -64,7 +94,14 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws)
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount)
 {
     if (elementCount <= currentCapacity) return currentCapacity;
-    return elementCount + kCapacityHeadroom;
+
+    const uint64_t geometric = static_cast<uint64_t>(currentCapacity) +
+        (std::max)(static_cast<uint64_t>(currentCapacity) / 2u,
+                   static_cast<uint64_t>(kCapacityHeadroom));
+    const uint64_t requested = (std::max)(geometric,
+                                          static_cast<uint64_t>(elementCount));
+    return static_cast<uint32_t>((std::min)(
+        requested, static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
 }
 
 } // namespace render

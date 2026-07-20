@@ -6,6 +6,7 @@
 // =============================================================================
 
 #include "display_common.hlsli"
+#include "gpu_draw_records.hlsli"
 
 // Supplied by Renderer::CreatePSO from core::kShadowCascadeCount and
 // Renderer::kShadowMapSize. The fallbacks exist only for compiling this file
@@ -68,35 +69,6 @@ cbuffer CBPerFrame : register(b1)
     float4   cascadeFadeLo      : packoffset(c25);                   // 400..415 (reserved)
 };
 
-// Per-draw material record. Keep byte-identical with struct MaterialData in
-// src/render/gpu_draw_records.h, which static_asserts the size and every
-// offset. A root SRV is a bare GPU virtual address with no descriptor, so there
-// is no StructureByteStride for the runtime to check against the 80 bytes FXC
-// computes here - these two declarations are the only thing keeping the layouts
-// together.
-//
-// Field for field the old CBMaterial (b2). No member straddles a 16-byte
-// boundary, so cbuffer packing and StructuredBuffer tight packing agree
-// exactly: the bytes did not move when this left the constant buffer, only the
-// register did. The DXR path already carries the same 80-byte shape as a
-// StructuredBuffer element in path_trace.hlsl.
-struct MaterialData
-{
-    float4 albedo;         // Base color (RGB) + alpha
-    float  roughness;      // 0 = mirror, 1 = matte
-    float  metallic;       // 0 = dielectric, 1 = metal
-    uint   useAlbedoTexture;
-    uint   useNormalTexture;
-    uint   albedoTextureIndex;
-    uint   normalTextureIndex;
-    uint   useOrmTexture;
-    uint   ormTextureIndex;
-    float3 emissive;
-    float  emissiveStrength;
-    uint   useEmissiveTexture;
-    uint   emissiveTextureIndex;
-    uint2  materialPad;
-};
 StructuredBuffer<MaterialData> materialBuffer : register(t0, space3);
 
 // Which record this draw owns. Declared identically in basic_vs.hlsl and
@@ -112,6 +84,7 @@ cbuffer CBDrawIndex : register(b3)
 {
     uint objectIndex;
     uint materialIndex;
+    uint drawProbeEnabled;
 };
 
 // Size comes from Renderer::kMaxRasterTextures, passed as a define at compile

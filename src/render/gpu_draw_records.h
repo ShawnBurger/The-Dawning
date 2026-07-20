@@ -124,6 +124,23 @@ static_assert(offsetof(MaterialData, emissiveTextureIndex) == 68, "");
 static_assert(offsetof(MaterialData, materialPad0) == 72, "");
 static_assert(offsetof(MaterialData, materialPad1) == 76, "");
 
+// GPU smoke evidence written by the vertex shaders. The probe hashes the
+// fields the GPU actually loaded, so it catches both a bad per-draw index and a
+// CPU/HLSL layout disagreement. A marker of index + 1 distinguishes an unwritten
+// slot from a legitimate zero hash.
+struct DrawProbeRecord
+{
+    uint32_t objectHash;
+    uint32_t objectMarker;
+    uint32_t materialHash;
+    uint32_t materialMarker;
+};
+static_assert(sizeof(DrawProbeRecord) == 16,
+              "DrawProbeRecord must match the RWByteAddressBuffer layout in the raster shaders");
+
+uint32_t HashObjectData(const ObjectData& record);
+uint32_t HashMaterialData(const MaterialData& record);
+
 // =============================================================================
 // CBPerPass — per-PASS view-projection, 64 bytes
 // =============================================================================
@@ -179,7 +196,8 @@ uint32_t RequiredMaterialCapacity(uint32_t maxDraws);
 
 // Capacity a FrameStructuredBuffer grows to when `elementCount` is requested.
 // Never shrinks: shrinking would mean destroying a buffer a recorded command
-// list may still reference. The headroom is what makes growth amortise.
+// list may still reference. Growth is geometric (at least 1.5x) so a steadily
+// expanding scene does not recreate all kFrameCount resources at a fixed rate.
 constexpr uint32_t kCapacityHeadroom = 64;
 uint32_t GrownCapacity(uint32_t currentCapacity, uint32_t elementCount);
 

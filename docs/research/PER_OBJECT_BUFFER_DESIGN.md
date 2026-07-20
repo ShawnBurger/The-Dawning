@@ -1,9 +1,16 @@
-# Per-Object Structured Buffer Design (agreed plan, NOT yet implemented)
+# Per-Object Structured Buffer Design
 
-Survey, design and judging from workflow wf_a9e2859b-170 completed; the
-implement stage was killed by a session usage limit (resets 6pm CDT) before
-any code was written. This captures the finished design so the work is not
-lost. Implement directly from here when budget allows.
+> Implementation update (2026-07-20): Design option 1 is implemented. The final
+> integration uses a 3-DWORD draw constant (object index, material index, and a
+> smoke-probe enable), an additional root UAV for GPU-read evidence, material
+> visibility `ALL` for probe hashing, and geometric buffer growth. Older details
+> below preserve the pre-implementation reasoning; where they conflict, this
+> update and the implementation are authoritative.
+
+This document began as the completed survey and judged design from workflow
+`wf_a9e2859b-170`. It is retained as the decision record for the implementation
+that now ships, including alternatives and risks that remain useful for later
+batching and bindless work.
 
 **Purpose:** remove the ~341-entity constant-ring ceiling by moving
 per-object and per-material data into structured buffers indexed per draw.

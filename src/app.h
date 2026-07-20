@@ -22,10 +22,6 @@ struct AppOptions
     bool smokeFullQuality = false;
     bool smokeCapture = false;
     bool smokeResize = false;
-    // Forces the per-draw structured buffers to REALLOCATE repeatedly while
-    // frames are in flight. See App::RenderFrame - this is the only way that
-    // branch executes at all.
-    bool smokeForceGrow = false;
     bool smokeUnlocked = false;
     bool gpuValidation = false;
     bool showOverlay = true;
@@ -82,6 +78,7 @@ private:
     bool m_smokeRTStarted = false;
     bool m_captureThisFrame = false;
     bool m_verifyShadowThisFrame = false;
+    bool m_verifyDrawRecordsThisFrame = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;
@@ -98,6 +95,7 @@ private:
     int64_t m_smokeStartCounter = 0;
     int64_t m_smokeCounterFrequency = 0;
     uint32_t m_smokeMaxOutstandingSubmissions = 0;
+    uint64_t m_smokeFirstStructuredBufferReallocationFrame = UINT64_MAX;
     float m_titleTimer = 0.0f;
 
     render::RTQualityMode m_rtQualityMode = render::RTQualityMode::StablePreview;

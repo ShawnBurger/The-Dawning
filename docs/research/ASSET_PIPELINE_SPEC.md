@@ -117,8 +117,9 @@ main at 10% of the ring with the demo scene's 17 renderables and 57% with the 97
 the smoke growth stress creates - against a harness that fails at 75%.
 
 Per-object and per-material data now live in growable, `kFrameCount`-instanced
-structured buffers bound as ROOT SRVs, with the per-draw record index supplied
-as a 2-uint root constant (`b3`). The view-projection moved to a per-PASS
+structured buffers bound as ROOT SRVs, with the per-draw record indices and
+smoke-probe enable supplied as a 3-uint root constant (`b3`). The
+view-projection moved to a per-PASS
 cbuffer (`b4`), uploaded once per pass rather than premultiplied into every
 per-object record. One draw call per entity is unchanged; only where the data
 lives changed.
@@ -153,7 +154,8 @@ The remaining constraints are (1) CPU draw-call submission cost, since one
 `DrawIndexedInstanced` per entity is deliberately retained - instancing and
 merging are the next lever, and this change is a prerequisite for both rather
 than an obstacle; and (2) the 128-slot raster texture heap below, which real
-content exhausts far sooner. This change spends root DWORDs (8 -> 12 of 64)
+content exhausts far sooner. This change spends root DWORDs (8 -> 15 of 64,
+including the smoke-only root UAV and probe-enable constant)
 precisely so it spends ZERO heap slots and does not make (2) worse.
 
 Note the failure character changed rather than disappearing: from a hard cap at
