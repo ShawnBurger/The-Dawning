@@ -21,6 +21,7 @@
 #include "sim/atmosphere.h"
 
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -302,4 +303,131 @@ TEST_CASE(Atmosphere_DragCoefficient_PeaksAtMachOne)
     // (Below M=1 there is no supersonic falloff term, so compare bump-only points.)
     CHECK_APPROX(DragCoefficientAtMach(cd0, 0.9),
                  cd0 * (1.0 + std::exp(-((0.9 - 1.0) * (0.9 - 1.0)) / (2.0 * 0.15 * 0.15))));
+}
+
+// =============================================================================
+// (K) THE CEILING LIMIT IS CONTINUOUS - exact zero at the ceiling is not enough.
+//     Density and therefore dynamic pressure must approach zero from below rather
+//     than retain a finite value until a hard branch cuts it off.
+// =============================================================================
+TEST_CASE(Atmosphere_CeilingApproach_IsContinuousAndMonotone)
+{
+    const AtmosphereModel models[] = {
+        AtmosphereModel::EarthUSSA76(),
+        AtmosphereModel::ExponentialBody(1.225, 8500.0, 100000.0),
+    };
+
+    for (const AtmosphereModel& model : models)
+    {
+        const double c = model.ceiling;
+        const AtmosphereState far  = SampleAtmosphere(model, c - 1000.0);
+        const AtmosphereState near = SampleAtmosphere(model, c - 1.0e-3);
+        const AtmosphereState at   = SampleAtmosphere(model, c);
+
+        CHECK(far.density > 0.0);
+        CHECK(near.density >= 0.0);
+        CHECK(near.density < far.density * 1.0e-6);
+        CHECK_EQ(at.density, 0.0);
+        CHECK(near.pressure < far.pressure * 1.0e-6);
+
+        const Vec3d v{ 100.0, 0.0, 0.0 };
+        CHECK(DynamicPressure(near.density, v) < DynamicPressure(far.density, v) * 1.0e-6);
+    }
+}
+
+// =============================================================================
+// (L) PUBLIC NUMERICAL FIREWALL - invalid inputs and finite values whose direct
+//     products overflow must never emit NaN/Inf into a simulation accumulator.
+// =============================================================================
+TEST_CASE(Atmosphere_PublicFunctions_ContainInvalidAndExtremeInputs)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    const Vec3d huge{ 1.0e200, -1.0e200, 1.0e200 };
+    const Vec3d corrupt{ inf, 0.0, 0.0 };
+
+    const AtmosphereState invalidAltitude =
+        SampleAtmosphere(AtmosphereModel::EarthUSSA76(), nan);
+    CHECK(std::isfinite(invalidAltitude.temperature));
+    CHECK(std::isfinite(invalidAltitude.pressure));
+    CHECK(std::isfinite(invalidAltitude.density));
+    CHECK(std::isfinite(invalidAltitude.speedOfSound));
+
+    const AtmosphereModel invalidModel =
+        AtmosphereModel::ExponentialBody(-1.0, 0.0, nan);
+    const AtmosphereState invalidSample = SampleAtmosphere(invalidModel, 0.0);
+    CHECK_EQ(invalidSample.density, 0.0);
+    CHECK_EQ(invalidSample.pressure, 0.0);
+    CHECK(std::isfinite(GeometricToGeopotential(-kEarthGeopotentialR)));
+
+    const double qHuge = DynamicPressure(1.225, huge);
+    const double machHuge = MachNumber(huge, 340.0);
+    CHECK(std::isfinite(qHuge));
+    CHECK(qHuge >= 0.0);
+    CHECK(std::isfinite(machHuge));
+    CHECK_EQ(DynamicPressure(-1.0, huge), 0.0);
+    CHECK_EQ(MachNumber(huge, nan), 0.0);
+    CHECK_EQ(DragCoefficientAtMach(-0.3, 1.0), 0.0);
+    CHECK_EQ(AngleOfAttackDragFactor(1.0, -10.0), 1.0);
+    CHECK_EQ(LiftCoefficient(1.0, nan, 0.25), 0.0);
+    CHECK(std::isfinite(AngleOfAttackDragFactor(1.0,
+                                                std::numeric_limits<double>::max())));
+    CHECK(std::isfinite(DragCoefficientAtMach(0.3,
+                                               std::numeric_limits<double>::max())));
+
+    const Vec3d relativeHuge = AirspeedVector(
+        Vec3d{ std::numeric_limits<double>::max(), 0.0, 0.0 },
+        Vec3d{ -std::numeric_limits<double>::max(), 0.0, 0.0 });
+    CHECK(std::isfinite(relativeHuge.x));
+    CHECK(relativeHuge.x > 0.0);
+    CHECK(std::isfinite(MachNumber(huge, std::numeric_limits<double>::denorm_min())));
+
+    const Vec3d dragHuge = DragForce(qHuge, 2.0, 2.0, huge);
+    const Vec3d liftHuge = LiftForce(qHuge, 2.0, 2.0, Vec3d{ 0.0, 3.0, 0.0 });
+    const Vec3d torqueHuge = AeroTorqueAboutCoM(huge, dragHuge);
+    CHECK(std::isfinite(dragHuge.x) && std::isfinite(dragHuge.y) && std::isfinite(dragHuge.z));
+    CHECK(std::isfinite(liftHuge.x) && std::isfinite(liftHuge.y) && std::isfinite(liftHuge.z));
+    CHECK(std::isfinite(torqueHuge.x) && std::isfinite(torqueHuge.y) && std::isfinite(torqueHuge.z));
+    const Vec3d signedTorque = AeroTorqueAboutCoM(
+        Vec3d{ std::numeric_limits<double>::max(), 0.0, 0.0 },
+        Vec3d{ 0.0, -std::numeric_limits<double>::max(), 0.0 });
+    CHECK(std::isfinite(signedTorque.z));
+    CHECK(signedTorque.z < 0.0);
+
+    const Vec3d contained = SemiImplicitDragAirspeed(corrupt, 1.225, 1.0, 1.0, 1.0, 1.0);
+    const Vec3d extremeDrag = SemiImplicitDragAirspeed(
+        huge, std::numeric_limits<double>::max(), 1.0, 1.0, 1.0,
+        std::numeric_limits<double>::max());
+    CHECK_EQ(contained.LengthSq(), 0.0);
+    CHECK(std::isfinite(extremeDrag.x) && std::isfinite(extremeDrag.y) &&
+          std::isfinite(extremeDrag.z));
+    CHECK(std::isfinite(DragTimeConstant(std::numeric_limits<double>::max(),
+                                         1.0, 1.0, 1.0, huge)));
+    CHECK(std::isfinite(BallisticCoefficient(std::numeric_limits<double>::max(),
+                                              1.0, 1.0)));
+    CHECK(std::isfinite(TerminalVelocity(nan, 9.81, 1.225, 1.0, 1.0)));
+    CHECK(std::isfinite(SuttonGravesHeatFlux(1.225, 0.5, huge)));
+    CHECK_EQ(SuttonGravesHeatFlux(1.225, 0.5, corrupt), 0.0);
+}
+
+// =============================================================================
+// (M) INVALID DRAG PARAMETERS ARE NEUTRAL - a negative coefficient or area must
+//     not turn a dissipative update into acceleration or reverse the velocity.
+// =============================================================================
+TEST_CASE(Atmosphere_SemiImplicitDrag_InvalidParametersCannotAddEnergy)
+{
+    const Vec3d v{ 100.0, -20.0, 5.0 };
+    const Vec3d badCd = SemiImplicitDragAirspeed(v, 1.225, -1.0, 2.0, 10.0, 1.0);
+    const Vec3d badArea = SemiImplicitDragAirspeed(v, 1.225, 1.0, -2.0, 10.0, 1.0);
+    const Vec3d badDt = SemiImplicitDragAirspeed(v, 1.225, 1.0, 2.0, 10.0,
+                                                 std::numeric_limits<double>::quiet_NaN());
+    CHECK_EQ(badCd.x, v.x);
+    CHECK_EQ(badCd.y, v.y);
+    CHECK_EQ(badCd.z, v.z);
+    CHECK_EQ(badArea.x, v.x);
+    CHECK_EQ(badArea.y, v.y);
+    CHECK_EQ(badArea.z, v.z);
+    CHECK_EQ(badDt.x, v.x);
+    CHECK_EQ(badDt.y, v.y);
+    CHECK_EQ(badDt.z, v.z);
 }
