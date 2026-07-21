@@ -396,4 +396,17 @@ struct RelativisticClock
     double properTimeDeviation  = 0.0; // Σ (dτ − dt) : the isolated dilation residual (≤ 0)
 };
 
+// -----------------------------------------------------------------------------
+// SpatialFrame - opt-in reference-frame ownership for precision-safe entities.
+// -----------------------------------------------------------------------------
+// ecs deliberately does not include sim/reference_frame.h, so this stores the
+// underlying sim::FrameId as its uint32_t representation. When this component is
+// present, Transform.position, RigidBody.linearVelocity and
+// RigidBody.prevPosition are local to this frame. Entities without it retain the
+// original world-space convention above.
+struct SpatialFrame
+{
+    uint32_t frameId = UINT32_MAX;
+};
+
 } // namespace ecs

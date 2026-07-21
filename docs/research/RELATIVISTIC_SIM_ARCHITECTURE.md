@@ -694,13 +694,16 @@ teleport state analysis a lens called the most thorough of the three:
   RigidBody.forceAccum, RigidBody.torqueAccum,
   RigidBody.prevPosition, RigidBody.prevRotation }
   PLUS RelativisticBody.momentum when that component is present
-  PLUS OrbitState.owner and FrameId
+  PLUS GravitationalBody.owner and SpatialFrame.frameId
 ```
 
-The rigid-body fields are VERIFIED present in `components.h:149-181`; the authoritative
-relativistic momentum is present in `RelativisticBody`. The pure FTL module uses `WorldPos` and
-double vectors, so the future engine call site must explicitly adapt ECS local `Vec3d` +
-`FrameId` into `WorldPos` and widen the ECS float angular/torque fields. Step by step:
+The rigid-body fields are VERIFIED present in `components.h`; the authoritative relativistic
+momentum is present in `RelativisticBody`. `SpatialFrame` makes the local-coordinate convention
+opt-in: entities carrying it store `Transform.position`, `RigidBody.linearVelocity`, and
+`RigidBody.prevPosition` relative to that frame, while legacy entities without it remain
+world-space. `TryTeleportEntity` is the GPU-free ECS adapter: it resolves source local state to
+global `WorldPos`/velocity, calls the pure teleport kernel, expresses the result in the
+destination frame, and stages every component before committing any write. Step by step:
 
 1. **Runs INSIDE the RULE-6 fixed-step `UpdateSystems` path** (VERIFIED `app.cpp:1047-1048`),
    NEVER the variable-rate camera/render path — else the transit lands at a wall-clock-
@@ -730,6 +733,12 @@ Before any field is changed, validate canonical/addressable coordinates, finite 
 and a finite non-zero mouth quaternion. Normalize finite non-unit mouth rotations once at the
 boundary. Any rejected operation returns the complete pre-jump state unchanged; it must not flush
 the wrench or rewrite interpolation history on a partial failure.
+
+`TryTeleportEntity` deliberately does not own the renderer or timer. Success returns explicit
+`resetRenderHistory` and `drainFixedAccumulator` obligations to the host call site; both are false
+on rejection. The app/input integration remains a separate lane so this adapter stays device-free
+and testable. On acceptance an optional `GravitationalBody` is promoted to `NBodyActive`; any
+`OrbitState` data remains intact for a later deterministic demotion back to rails.
 
 ### 7.4 Determinism across the jump
 
