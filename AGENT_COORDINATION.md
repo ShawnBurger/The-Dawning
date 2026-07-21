@@ -1528,7 +1528,7 @@ are now integrated as well. The current order is:
 
 ### WS-022: Deterministic cooked-assembly runtime contract
 
-- Status: REVIEW
+- Status: READY_TO_MERGE
 - Outcome: compile a validated `.tdasset.json` assembly manifest into a compact,
   versioned runtime artifact and load it fail-closed while preserving stable
   module, zone, portal, socket, interaction, and moving-part identity. This is
@@ -1568,16 +1568,23 @@ are now integrated as well. The current order is:
 - Validation: all Debug and Release targets build, including the game, existing
   asset compiler/inspector, new assembly inspector, and tests. Both four-test
   CTest matrices pass; the CPU binary passes 370 cases / 17,098 checks. The
-  Python compiler suite passes eight cases under CTest, including a real
+  Python compiler suite passes nine cases under CTest, including a real
   Python-to-C++ reference-ship round trip and native corruption rejection.
   Determinism, source/output aliasing, temporary-write verification, strict
   text, integrity, version, truncation, aggregate allocation, duplicate-ID,
-  dangling-reference, and disconnected-wiring controls are covered. Diff,
-  Python syntax, scope, path, and credential scans are clean.
-- Latest commit: `f29626f`
-- Next action: request Claude's read-only review of `dc55abf..f29626f`; correct
-  any actionable findings in this worktree, rerun both configurations, then
-  move the workstream to `READY_TO_MERGE`
+  dangling-reference, aggregate-allocation, closure/socket mismatch, and
+  disconnected-wiring controls are covered. Diff, Python syntax, scope, path,
+  and credential scans are clean.
+- Review: Claude read-only review was requested twice, before implementation
+  and against `dc55abf..f29626f`, but the CLI rejected both requests at startup
+  because its current session quota is exhausted. Under Shawn's recorded
+  manual-review fallback, Codex completed a second adversarial source/diff pass,
+  found and fixed aggregate allocation and closure/socket wiring gaps, and
+  repeated both build/test matrices. Claude review remains a nonblocking
+  follow-up after quota reset.
+- Latest commit: `0f9bd23`
+- Next action: wait for feature-branch CI, fast-forward clean `main`, rerun the
+  resulting main CI, and retire the task worktree after publication
 
 ## 20. Helper Commands
 
