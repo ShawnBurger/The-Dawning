@@ -91,6 +91,12 @@ uint64_t ResolveSoiWithHysteresis(const WorldPos& where,
 // body's global state. The returned OrbitState carries primaryBodyId ==
 // newPrimaryBodyId and epoch == now; the round-trip fidelity of its elements is
 // exactly that of the shipped Demote/Promote pair.
+// PRECONDITION: the primary-relative state must be a NON-DEGENERATE conic — the
+// relative angular momentum r×v nonzero and r > 0 — i.e. the shipped
+// StateToElements domain (elliptic/hyperbolic). A bit-exact radial or comoving
+// state (r×v == 0) has an undefined orbital plane and yields a NaN OrbitState; a
+// real SOI crossing (r == soiRadius > 0 with a generic, non-radial relative
+// velocity) never produces one, so the orchestrator need not guard it.
 ecs::OrbitState Repatch(const WorldPos& bodyPos, const Vec3d& bodyVel,
                         const WorldPos& primaryPos, const Vec3d& primaryVel,
                         double primaryMu, uint64_t newPrimaryBodyId, double now);
