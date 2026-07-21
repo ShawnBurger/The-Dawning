@@ -45,6 +45,7 @@ set(CORE_HEADERS
 )
 
 set(ASSET_SOURCES
+    src/asset/assembly_resource_resolver.cpp
     src/asset/cooked_assembly.cpp
     src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
@@ -52,6 +53,7 @@ set(ASSET_SOURCES
 )
 
 set(ASSET_HEADERS
+    src/asset/assembly_resource_resolver.h
     src/asset/cooked_assembly.h
     src/asset/cooked_model.h
     src/asset/model_data.h
@@ -196,6 +198,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_assembly_resource_resolver.cpp
     tests/test_cooked_assembly.cpp
     tests/test_asset_compiler.cpp
     tests/test_gltf_importer.cpp
