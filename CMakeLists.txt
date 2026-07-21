@@ -173,6 +173,7 @@ set(SIM_SOURCES
     src/sim/soi.cpp
     src/sim/lambert.cpp
     src/sim/maneuver.cpp
+    src/sim/relative_motion.cpp
     src/sim/simulation_system.cpp
     src/sim/snapshot_system.cpp
 )
@@ -197,6 +198,7 @@ set(SIM_HEADERS
     src/sim/soi.h
     src/sim/lambert.h
     src/sim/maneuver.h
+    src/sim/relative_motion.h
     src/sim/simulation_system.h
     src/sim/snapshot_system.h
 )
@@ -273,6 +275,7 @@ set(TEST_SOURCES
     tests/test_soi.cpp
     tests/test_lambert.cpp
     tests/test_maneuver.cpp
+    tests/test_relative_motion.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -677,6 +680,10 @@ add_executable(TheDawningTests
     # intercept/rendezvous burns. Pure math.
     src/sim/maneuver.cpp
     src/sim/maneuver.h
+    # Clohessy-Wiltshire / Hill close-proximity relative motion: the docking /
+    # station-keeping regime, exact closed-form STM. Pure math.
+    src/sim/relative_motion.cpp
+    src/sim/relative_motion.h
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
