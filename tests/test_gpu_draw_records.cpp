@@ -62,7 +62,9 @@ TEST_CASE(GpuDrawRecords_SizesMatchShaderStructs)
     CHECK_EQ(sizeof(render::ObjectData), size_t(112));
     CHECK_EQ(sizeof(render::MaterialData), size_t(80));
     CHECK_EQ(sizeof(render::CBPerPass), size_t(64));
-    CHECK_EQ(sizeof(render::DrawProbeRecord), size_t(16));
+    CHECK_EQ(sizeof(render::DrawProbeRecord), size_t(48));
+    CHECK_EQ(offsetof(render::DrawProbeRecord, shadowBlendPixels), size_t(16));
+    CHECK_EQ(offsetof(render::DrawProbeRecord, shadowBlendMismatchPixels), size_t(40));
 
     // Every StructuredBuffer element size must be a multiple of 16, which is
     // what the pad members in MaterialData exist for.

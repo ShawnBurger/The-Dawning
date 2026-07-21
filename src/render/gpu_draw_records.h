@@ -162,7 +162,7 @@ static_assert(offsetof(MaterialData, recordId) == 72, "");
 static_assert(offsetof(MaterialData, materialPad0) == 76, "");
 
 // =============================================================================
-// DrawProbeRecord — the merged GPU witness, 16 bytes per object record
+// DrawProbeRecord - the merged GPU witness, 48 bytes per object record
 // =============================================================================
 // ONE UAV, one readback, one per-draw cost. Two verification schemes were built
 // for this feature independently and both landed in the tree; this record is
@@ -208,9 +208,25 @@ struct DrawProbeRecord
     uint32_t objectMarker;
     uint32_t materialHash;
     uint32_t materialMarker;
+
+    // Pixel-stage witness for the cascade cross-fade. Values are accumulated
+    // only for pixels inside a fade band. Q8 sums quantize [0,1] to [0,255]
+    // before atomics, keeping one record below uint32 overflow at 1920x1080.
+    uint32_t shadowBlendPixels;
+    uint32_t shadowBlendPairMask;
+    uint32_t shadowBlendExpectedQ8;
+    uint32_t shadowBlendOutputQ8;
+    uint32_t shadowBlendPrimaryQ8;
+    uint32_t shadowBlendSignalQ8;
+    uint32_t shadowBlendMismatchPixels;
+    uint32_t shadowBlendPad;
 };
-static_assert(sizeof(DrawProbeRecord) == 16,
+static_assert(sizeof(DrawProbeRecord) == 48,
               "DrawProbeRecord must match the RWByteAddressBuffer layout in the raster shaders");
+static_assert(offsetof(DrawProbeRecord, shadowBlendPixels) == 16,
+              "DrawProbeRecord blend witness must begin at byte 16");
+static_assert(offsetof(DrawProbeRecord, shadowBlendMismatchPixels) == 40,
+              "DrawProbeRecord mismatch count must sit at byte 40");
 
 uint32_t HashObjectData(const ObjectData& record);
 uint32_t HashMaterialData(const MaterialData& record);

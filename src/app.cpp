@@ -1999,10 +1999,18 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             core::Log::Error("GPU draw-record probe readback failed");
             return false;
         }
+        const bool blendValid = validation.shadowBlendRecords > 0 &&
+                                validation.shadowBlendPixels > 0 &&
+                                (validation.shadowBlendPairMask & 1u) != 0 &&
+                                validation.shadowBlendSignalQ8 > 0 &&
+                                validation.shadowBlendMismatchPixels == 0 &&
+                                validation.shadowBlendExpectedQ8 ==
+                                    validation.shadowBlendOutputQ8;
         const bool valid = validation.ObjectRecordsChecked() > 0 &&
                            validation.materialRecordsChecked > 0 &&
                            validation.ObjectMismatches() == 0 &&
-                           validation.materialMismatches == 0;
+                           validation.materialMismatches == 0 &&
+                           blendValid;
         // Emitted per PASS, with the pass in the key. The harness stores markers
         // in a hashtable keyed by name, so a shared key would collapse the two
         // passes to whichever logged last - green while the other pass was
@@ -2027,8 +2035,23 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             validation.materialDistinctMarkers,
             validation.materialMismatches,
             validation.materialRecordsUnshaded);
+        core::Log::Infof(
+            "[SMOKE] shadow_blend_probe=%s shadow_blend_records=%u "
+            "shadow_blend_pair_mask=%u shadow_blend_pixels=%llu "
+            "shadow_blend_expected_q8=%llu shadow_blend_output_q8=%llu "
+            "shadow_blend_primary_q8=%llu shadow_blend_signal_q8=%llu "
+            "shadow_blend_mismatch_pixels=%llu",
+            blendValid ? "ok" : "failed",
+            validation.shadowBlendRecords,
+            validation.shadowBlendPairMask,
+            static_cast<unsigned long long>(validation.shadowBlendPixels),
+            static_cast<unsigned long long>(validation.shadowBlendExpectedQ8),
+            static_cast<unsigned long long>(validation.shadowBlendOutputQ8),
+            static_cast<unsigned long long>(validation.shadowBlendPrimaryQ8),
+            static_cast<unsigned long long>(validation.shadowBlendSignalQ8),
+            static_cast<unsigned long long>(validation.shadowBlendMismatchPixels));
         if (!valid)
-            core::Log::Error("GPU consumed per-draw records that differ from the CPU upload contract");
+            core::Log::Error("GPU draw-record or cascade-blend consumption probe failed");
     }
 
     if (probeShadow && m_verifyShadowThisFrame)

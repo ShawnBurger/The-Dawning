@@ -109,7 +109,11 @@ The selector is written as three literal-indexed `if` statements, NOT as an [unr
     if (viewDist < cascadeSplitRadius.y) { cascadeVP = lightViewProj[1]; texelWorld = cascadeTexelWorld.y; slice = 1.0f; }
     if (viewDist < cascadeSplitRadius.x) { cascadeVP = lightViewProj[0]; texelWorld = cascadeTexelWorld.x; slice = 0.0f; }
 
-Every cbuffer index is a literal; every float4 access is a static swizzle. Selecting the MATRIX into a local `float4x4` (resolved to movc chains) rather than carrying an index into the PCF block means exactly 9 `SampleCmpLevelZero` instructions are emitted, not 36 — this is the specific trap that `[unroll] for(i) if (cascade==i) { 9 taps }` falls into, which FXC will very plausibly flatten to 4x the cost with no warning.
+Every cbuffer index is a literal and every float4 access is a static swizzle.
+Each explicit branch calls the 9-tap helper once outside a fade band and twice
+inside one, so ordinary pixels retain 9 comparison samples and transition pixels
+use 18. This avoids the `[unroll] for(i) if (cascade==i) { 9 taps }` trap, which
+can flatten all four kernels into a 36-tap cost for every pixel.
 
 The CPU twin `core::SelectShadowCascade(float radialDistance)` in shadow_cascades.cpp is written with the identical descending-`<` structure so the unit tests constrain the shader's arithmetic rather than a paraphrase of it.
 
@@ -313,7 +317,10 @@ Implicit-gradient sample under divergent flow — AVOIDED: every tap is `SampleC
 
 Texture2DArray under SM 5.1 — `Texture2DArray<float> shadowMap : register(t0, space1);` sampled as `SampleCmpLevelZero(shadowSampler, float3(uv, sliceAsFloat), z)`. This is the SM 5.1-compatible cascade indexing form. No SM 6.6, no ResourceDescriptorHeap. The declaration change is one line; the sampler declaration is untouched.
 
-Instruction count: exactly 9 SampleCmpLevelZero are emitted, not 36, because the MATRIX is selected before the kernel rather than the kernel being duplicated per cascade. The trap this avoids is `[unroll] for(i) if (cascade==i) { 9 taps }`, which FXC will very plausibly flatten into 36 taps for every pixel — a 4x pixel-shader shadow cost with no warning.
+Instruction cost after Step 9: one 9-tap helper call for ordinary pixels and two
+for pixels in the 15% transition bands. Literal branches keep the worst executed
+path at 18 comparisons rather than flattening four independent kernels into 36
+comparisons for every pixel.
 
 THE FULL FUNCTION, replacing basic_ps.hlsl:78-137:
 
@@ -393,7 +400,14 @@ STEP 2 OF THE PLAN IS TO COMPILE THIS STANDALONE BEFORE ANY C++ IS WRITTEN:
 - STEP 6 — Render all four slices; shader still selects cascade 0. Split the pass: BeginShadowPass(device, cameraPosition) does UpdateShadowCascades ONCE, the PSR->DEPTH_WRITE ALL_SUBRESOURCES barrier still guarded by !m_shadowIsDepthTarget, viewport+scissor (identical every cascade, so set once), SetGraphicsRootSignature + SetPipelineState + IASetPrimitiveTopology, m_activeCascade = 0. New BeginShadowCascade(device, c) sets m_activeCascade, binds dsvHeapStart + c*m_shadowDsvDescSize via OMSetRenderTargets, and UNCONDITIONALLY ClearDepthStencilView — D3D12 does not zero-initialise a committed ALLOW_DEPTH_STENCIL resource, so a slice whose clear was skipped can hold arbitrary values below 1.0 and report written=yes while never having been rendered into. EndShadowPass unchanged. ONE Begin/End pair per frame with ALL_SUBRESOURCES barriers, so the whole-resource m_shadowIsDepthTarget bool stays coherent; per-slice barriers or an early-out mid-loop would desync it and produce a validation error far from its cause. DrawMeshShadow: one character, m_lightViewProj[m_activeCascade]. app.cpp:1104-1109 becomes the four-iteration loop, still entirely before BeginScenePass and before the viewport/scissor restore at :1116-1129. Generalise RecordShadowMapReadback and ReadShadowMapCoverage per slice, grow and RESIZE-ON-CHANGE the readback buffer. Emit and assert every per-cascade smoke marker HERE, including the fraction_0 > fraction_3 ordering relation. GREEN; the harness now has teeth before the selector exists.
 - STEP 7 — Enable radial selection in the shader. Replace the hardcoded lightViewProj[0]/slice 0 with the three-if selector, and delete the hardcoded shadowExtent=24.0f / shadowMapSize=2048.0f at basic_ps.hlsl:85-86 in favour of cascadeTexelWorld and the SHADOW_MAP_SIZE define. This is the first step with a visible change: shadow reach goes 24 -> ~448 units. GREEN. Verify shadow_cascade_fraction_0 is still ~1.0 and the near field is unchanged.
 - STEP 8 — Texel snap. BuildShadowCascadeMatrix gains the const core::Vec3d& cameraPosition parameter and the residual-only floor() quantisation; BeginShadowPass already threads it from app.cpp's m_camera.Position(). SetDirectionalLight stops calling the matrix builder (it has no camera position) and merely stores; CreateShadowResources seeds with UpdateShadowCascades(core::Vec3d{}) so the first BeginFrame has valid matrices. REWRITE, do not delete, the comment at renderer.cpp:1437-1443 and renderer.h:186-188 that says 'no camera position enters this calculation, and none should': the new text must say the camera position enters ONLY in double and ONLY to quantise, and that narrowing anything but the residual is the bug it guards against. Add a one-line note to CLAUDE.md RULE 1 pointing at this as the sanctioned exception. GREEN; distant shadow edges stop crawling.
-- STEP 9 — OPTIONAL, recommended for a larger world, useless for the demo. Radial partition-of-unity blend consuming cascadeFadeLo, which steps 5-8 have already been uploading. Keep the single exit and literal indices: four explicit blocks calling a `float SampleCascade(float4x4 vp, float texelWorld, float slice, float3 positionWS, float3 N, float slope)` helper (itself single-exit), accumulating `sum`/`wsum` pre-initialised before all flow control, and returning `sum + (1.0f - saturate(wsum))` so missing weight reads as LIT and the last cascade fades out instead of ending on a line. fadeIn[c] must be a BYTE-IDENTICAL copy of fadeOut[c-1] so the same smoothstep argument pair yields (1-S)+S = 1 exactly. Staged last precisely so that if FXC surprises here, steps 1-8 are already landed and working. BE HONEST IN THE COMMIT: the demo's 10x10 ground plane and objects within ~4.5 units sit entirely inside cascade 0's 22.86-unit split radius, so the demo scene cannot exhibit the seam this step removes and cannot verify the fix.
+- STEP 9 - IMPLEMENTED 2026-07-20. The radial partition-of-unity blend consumes
+  `cascadeFadeLo` through four literal-indexed shader blocks. The first three
+  bands cross-fade adjacent slices; the outer band fades to lit coverage. The
+  current 200x200 ground plane and distance pillars span three transitions. A
+  pixel-stage GPU witness measured 73,708 fade-band pixels with pair mask 7 and
+  nonzero adjacent-sample signal; forcing the returned value back to the primary
+  sample produced 2,598 mismatch pixels and failed smoke while the older probe
+  fields remained green.
 
 ## verificationPlan
 - TESTABILITY PREREQUISITE, not a test. The cascade math lives in src/core/shadow_cascades.{h,cpp}, GPU-free, compiled into BOTH the app and TheDawningTests, so the unit tests call the SHIPPED function. This is not cosmetic. tests/test_math.cpp:667 and :703 read as shadow-matrix tests but rebuild LookAt*OrthoLH inline with their own hardcoded 24.0f/120.0f — they cover core::Mat4x4, not Renderer, and would keep passing if UpdateLightMatrix were deleted outright. The shipped light-matrix code has ZERO coverage today. A fourth mirror would pass while cascades were broken, which is worse than no test. Leave those two cases alone (they still describe cascade 0 correctly and are cheap); test F10 below is the real thing.
