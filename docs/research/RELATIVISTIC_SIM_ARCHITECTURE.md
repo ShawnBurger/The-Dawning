@@ -948,6 +948,7 @@ or RNG into the step breaks the replay hash.
 | FTL state corruption | FTL | atomic teleport over the full retained set, accumulator drain, `accumFrameIndex=0`, `prevPose=postPose`, `seedFrameCounter` preserved |
 | NaN/non-finite `dt` or factor | all | house guard `!(dt>0)\|\|!isfinite(dt)` → no-op (VERIFIED `rigid_body.cpp:118`); non-finite factor → defined no-op |
 | Aerodynamic heating `ρ·\|v\|³` overflow | atmosphere | floor `ρ`, use a scaled finite norm and log-domain finite saturation, reject non-finite `v`; heating never feeds the integrator |
+| Collision subdivision runaway / swept tunneling | close encounters | global power-of-two subdivision is hard-capped at level 16; larger demand returns a level-17 saturation sentinel and sets `hitDepthCap`. Invalid divisors/response parameters are a no-op. Swept endpoint crossing uses a central fallback impulse rather than accepting a post-crossing "separating" state. |
 
 Note: the path-trace history NaN/Inf guard self-heals a corrupt jump in one frame but fails
 **silently** — robustness tests must check the accumulator/positions directly, never wait for a
@@ -1081,6 +1082,35 @@ tractable across a galaxy.
   bodies this is ~10^4 pairwise force evals per substep, negligible. A
   Barnes-Hut/tree upgrade is only needed if significant-body count ever reaches
   thousands, which it will not for a hand-authored system; noted, not built.
+
+### Production close-encounter policy
+
+`sim/collision.{h,cpp}` makes the close-encounter route concrete without changing
+the conservative `StepNBody` leaf. It chooses one global power-of-two subdivision
+level for the active set, runs the unmodified integrator at each micro-step, and
+resolves swept sphere contacts at every boundary. True surface `radius` is stored
+separately from Plummer `softening`; force regularization never becomes collision
+geometry by accident.
+
+The work budget is explicit. Level 16 (65,536 leaves) is the absolute public cap;
+unrepresentable or larger finite demand returns the level-17 sentinel and the
+step reports `hitDepthCap`. A caller may request a lower cap, including a negative
+value normalized to level zero. Non-finite/non-positive subdivision denominators,
+invalid contact scales, response coefficients outside `[0,1]`, duplicate stable
+IDs, non-positive softening, invalid particle state, or non-positive solver passes
+reject the operation as a no-op. Merge reduction is staged and rejects aggregate
+overflow atomically. This keeps hostile authoring data from turning a fixed
+simulation step into undefined integer conversion, partial topology changes, or
+unbounded work.
+
+Shallow approaching contacts use a central mass-fraction impulse. A fully swept
+outside-to-outside crossing uses the opposite endpoint line-of-centres direction,
+so it cannot be dismissed as already separating and the fallback impulse remains
+central. Deep overlap or effectively zero restitution merges the connected contact
+component in ascending stable-ID order, conserving `Σ μv` to floating-point
+tolerance and combining radius by volume. ECS destruction, survivor rigid-body
+spin, relativistic momentum reconciliation, and the production active-system
+callsite remain a separate integration lane.
 
 ### What this does NOT change
 

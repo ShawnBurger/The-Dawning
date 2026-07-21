@@ -497,9 +497,12 @@ sim); **flag it now** so no one assumes today's float sim is lockstep-ready.
   centred), plus a decoupled mode toggle. Allocate the desired wrench through
   installed nozzles so saturation and damage reduce authority. Testable: pure
   damping law (§9.3), bounded allocation, and coupled/decoupled ECS behavior.
-- **Stage 4 — Collision.** Write `src/sim/collision.{h,cpp}`: bounding-sphere
-  broad+narrow, impulse response, projectile ray-sphere. Testable: elastic
-  collision closed form + momentum conservation + ray-sphere boundary (§9.6).
+- **Stage 4 — Collision.** `src/sim/collision.{h,cpp}` now provides the N-body
+  close-encounter policy: bounded global subdivision, swept sphere contact,
+  central impulse, and deterministic accretion merge. Its CPU contract is tested
+  for anti-tunneling, momentum/energy bounds, determinism, hostile configuration,
+  and depth saturation. ECS destruction/reconciliation and detailed ship/interior
+  colliders remain follow-on work; projectile ray-sphere is also still pending.
 - **Stage 5 — Gravity / orbital (next milestone, deferred).** External-accel
   gravity → point-mass central body → leapfrog n-body → on-rails Kepler + SOI.
   Testable: the orbital ground-truth suite (§9.4).

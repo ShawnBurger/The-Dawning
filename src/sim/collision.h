@@ -2,8 +2,9 @@
 // =============================================================================
 // sim/collision.h - N-body close-encounter / collision policy
 // =============================================================================
-// SIM STAGE 5, per docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md section 6 and
-// the AGENT_COORDINATION priority "collision/close-encounter policy before
+// SIM STAGE 5, per the "Production close-encounter policy" contract in
+// docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md and the AGENT_COORDINATION
+// priority "collision/close-encounter policy before
 // production N-body activation". CPU-only, GPU-free. Includes ONLY nbody.h (and
 // through it core/types.h), so it links into BOTH TheDawningV3 and
 // TheDawningTests and the unit tests drive the SHIPPED arithmetic.
@@ -40,6 +41,13 @@
 namespace sim
 {
 
+// Absolute work bounds for public configuration. RequiredSubdivisionLevel returns
+// kMaxCollisionSubdivisionLevel + 1 as a saturation sentinel when the mathematical
+// demand is larger or cannot be represented safely; StepNBodyCollisional then
+// applies at most the hard cap and reports hitDepthCap.
+inline constexpr int kMaxCollisionSubdivisionLevel = 16;
+inline constexpr int kMaxCollisionSolverIterations = 64;
+
 // -----------------------------------------------------------------------------
 // Tunables. Defaults are chosen so the shipped path is correctness-first: e=0
 // (perfectly inelastic => accretion, the standard outcome for gravitating bodies).
@@ -54,8 +62,8 @@ struct CloseEncounterConfig
     double restitution     = 0.0;  // global e in [0,1]; 0 => perfectly inelastic (merge)
     double stickRestitution = 1e-3;// e <= this => MERGE instead of BOUNCE (no co-moving restick)
     double deepMergeFrac   = 0.5;  // overlap > frac*min(radius) => MERGE regardless of e
-    int    solverIterations = 1;   // FIXED bounce solver passes (determinism + fixed cost)
-    int    maxLevel        = 16;   // subdivision cap (2^L leaves); exceeding it sets hitDepthCap
+    int    solverIterations = 1;   // FIXED bounce passes; clamped to the public hard cap
+    int    maxLevel        = 16;   // requested cap; clamped to [0, hard cap]
 };
 
 // One discrete collision outcome at a micro-step boundary.
@@ -66,7 +74,7 @@ struct CollisionEvent
     std::vector<uint64_t> absorbedIds;       // MERGE: absorbed ids, ASCENDING.
                                              // BOUNCE: the two participant ids, ASCENDING.
     bool                  merged      = false;
-    double                penetration = 0.0; // contact - sep at resolution (>= 0)
+    double                penetration = 0.0; // max(0, contact - endpoint sep)
 };
 
 // Sentinel survivorId marking a BOUNCE event (velocity-only, no body removed). Sorts
@@ -83,13 +91,18 @@ struct CloseEncounterReport
 
 // -----------------------------------------------------------------------------
 // Public API - free functions, pure, dt-as-parameter, deterministic bodyId order,
-// house guard (dt<=0 / non-finite / empty => no-op).
+// house guard (invalid dt/config/body state or empty input => no-op). Positive
+// subdivision denominators, positive contact scale, restitution/stick in [0,1],
+// unique stable body ids, positive finite softening, and non-negative finite
+// particle geometry are required. Negative maxLevel is a supported request for
+// level zero and still produces a truthful depth-cap flag.
 // -----------------------------------------------------------------------------
 
-// Desired (UNCLAMPED) power-of-two subdivision level for this block. 0 => no
-// eligible pair needs refinement, so StepNBodyCollisional runs one bare
-// StepNBody(dt), bit-identical to the unmodified integrator. Pure: max/ceil/log2
-// over pairs, no FP summation, so the level is order-independent.
+// Desired power-of-two subdivision level for this block. 0 => no eligible pair
+// needs refinement, so StepNBodyCollisional runs one bare StepNBody(dt),
+// bit-identical to the unmodified integrator. Demands above the public work bound
+// return kMaxCollisionSubdivisionLevel + 1 rather than performing an unsafe
+// floating-point-to-integer conversion. Pure and order-independent.
 int RequiredSubdivisionLevel(const std::vector<NBodyParticle>& bodies,
                              double dt, const CloseEncounterConfig& cfg);
 
