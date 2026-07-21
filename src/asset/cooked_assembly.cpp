@@ -672,7 +672,9 @@ bool ValidateAssembly(const CookedAssembly& assembly, std::string& error)
             !portal.sealable || !portal.navLink ||
             assembly.sockets[portal.socketA].type != AssemblySocketType::Portal ||
             assembly.sockets[portal.socketB].type != AssemblySocketType::Portal ||
-            assembly.interactions[portal.closureInteraction].portalIndex != index)
+            assembly.interactions[portal.closureInteraction].portalIndex != index ||
+            (assembly.interactions[portal.closureInteraction].socketIndex != portal.socketA &&
+             assembly.interactions[portal.closureInteraction].socketIndex != portal.socketB))
         {
             return fail("portal data or reciprocal closure is invalid");
         }

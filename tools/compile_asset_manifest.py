@@ -150,8 +150,16 @@ def _validate_runtime_wiring(document: dict[str, Any]) -> None:
         require_safe_text(part["visual_source"], f"moving part '{part['id']}' visual_source")
 
     sockets = {socket["id"]: socket for socket in document["sockets"]}
+    interactions = {
+        interaction["id"]: interaction for interaction in document["interactions"]
+    }
     used_portal_sockets: set[str] = set()
     for portal in document["portals"]:
+        closure_socket = interactions[portal["closure_interaction"]]["socket"]
+        if closure_socket not in {portal["socket_a"], portal["socket_b"]}:
+            raise AssemblyCompileError(
+                f"portal '{portal['id']}' closure must use one of its endpoint sockets"
+            )
         for key in ("socket_a", "socket_b"):
             socket_id = portal[key]
             if socket_id in used_portal_sockets:

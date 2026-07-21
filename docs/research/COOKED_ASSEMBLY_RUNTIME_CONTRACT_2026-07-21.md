@@ -117,7 +117,8 @@ The loader applies configured limits before allocation and returns either a
 - duplicate IDs, dangling indices, or incomplete reciprocal references;
 - interactions or moving parts owned by the wrong module;
 - moving interactions without portal sockets, open/closed states, or parts;
-- reused portal sockets or sockets assigned to the wrong zone side;
+- reused portal sockets, closure/socket mismatches, or sockets assigned to the
+  wrong zone side;
 - invalid transforms, axes, distances, scales, or LOD chains;
 - missing exterior/interior modules or unzoned interior modules;
 - non-sealable or non-navigable portals;

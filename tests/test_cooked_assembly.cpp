@@ -115,6 +115,7 @@ struct FixtureOptions
     bool danglingPortalSocket = false;
     bool trailingPayloadByte = false;
     bool unsafeControlCharacter = false;
+    bool closureSocketMismatch = false;
 };
 
 std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
@@ -139,7 +140,7 @@ std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
     WriteModule(payload, "cockpit", 2, options.unsafeControlCharacter);
     WriteModule(payload, options.duplicateModuleId ? "cockpit" : "hull", 1);
 
-    payload.U32(2); // sockets
+    payload.U32(3); // sockets
     payload.String("cockpit_entry");
     payload.U32(0);
     payload.U8(1);
@@ -155,6 +156,14 @@ std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
     payload.U16(0);
     payload.Vec3(0.0, 0.0, -1.0);
     payload.Vec3(0.0, 0.0, -1.0);
+    payload.Vec3(0.0, 1.0, 0.0);
+    payload.String("service_hatch");
+    payload.U32(0);
+    payload.U8(1);
+    payload.U8(0);
+    payload.U16(0);
+    payload.Vec3(1.0, 0.0, 0.0);
+    payload.Vec3(1.0, 0.0, 0.0);
     payload.Vec3(0.0, 1.0, 0.0);
 
     payload.U32(1); // zones
@@ -183,7 +192,7 @@ std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
     payload.U8(0);
     payload.U16(0);
     payload.U32(0);
-    payload.U32(0);
+    payload.U32(options.closureSocketMismatch ? 2u : 0u);
     payload.U32(2);
     payload.String("closed");
     payload.String("open");
@@ -247,7 +256,7 @@ TEST_CASE(CookedAssembly_RepresentativeGraphLoadsWithResolvedIdentity)
     CHECK_EQ(assembly.assetId, "ship.test.fixture");
     CHECK_EQ(assembly.schemaVersion, 1u);
     CHECK_EQ(assembly.modules.size(), 2u);
-    CHECK_EQ(assembly.sockets.size(), 2u);
+    CHECK_EQ(assembly.sockets.size(), 3u);
     CHECK_EQ(assembly.zones.size(), 1u);
     CHECK_EQ(assembly.portals.size(), 1u);
     CHECK_EQ(assembly.interactions.size(), 1u);
@@ -335,4 +344,9 @@ TEST_CASE(CookedAssembly_RehashedMalformedGraphsStillFailSemanticValidation)
         asset::LoadCookedAssemblyMemory(BuildFixture({ .unsafeControlCharacter = true }));
     CHECK_EQ(unsafeText.status, asset::CookedAssemblyStatus::InvalidData);
     CHECK(unsafeText.assembly == nullptr);
+
+    const asset::CookedAssemblyResult wrongClosureSocket =
+        asset::LoadCookedAssemblyMemory(BuildFixture({ .closureSocketMismatch = true }));
+    CHECK_EQ(wrongClosureSocket.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(wrongClosureSocket.assembly == nullptr);
 }

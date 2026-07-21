@@ -97,6 +97,15 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
         ):
             COMPILER.compile_document(invalid)
 
+    def test_portal_closure_must_use_an_endpoint_socket(self) -> None:
+        invalid = copy.deepcopy(self.reference)
+        invalid["interactions"][0]["socket"] = "airlock_inner"
+        with self.assertRaisesRegex(
+            COMPILER.AssemblyCompileError,
+            "closure must use one of its endpoint sockets",
+        ):
+            COMPILER.compile_document(invalid)
+
     def test_compile_file_publishes_complete_output_without_temp_residue(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
