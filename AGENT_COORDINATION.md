@@ -1721,15 +1721,16 @@ are now integrated as well. The current order is:
 
 ### WS-025: Transactional runtime assembly instantiation
 
-- Status: ACTIVE
+- Status: READY_TO_MERGE
 - Outcome: convert one immutable resolved assembly and its exact WS-024 catalog
   lease into a fully preflighted scene-spawn plan, then commit the root, module,
   and moving-part entities as one rollback-safe transaction. The returned
   instance retains cooked provenance, stable index mappings, owner-system
   bindings, and the catalog lease for its complete runtime lifetime.
 - Primary: Codex
-- Reviewer: Claude read-only scene/asset review after the feature commit, or the
-  documented manual-review fallback while the Claude usage limit remains active
+- Reviewer: Claude read-only review requested for `e9ae45f..5b0971d`; blocked by
+  the Claude account weekly usage limit. Codex completed the documented manual
+  scene/asset transaction audit under the agreed fallback.
 - Branch: `codex/transactional-assembly-instantiation`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-transactional-assembly-instantiation`
@@ -1744,17 +1745,18 @@ are now integrated as well. The current order is:
 - Shared-file locks: Codex holds only additive WS-025 source/test registration
   blocks in `CMakeLists.txt`; all runtime implementation is isolated in new files
 - Interface contract: preparation accepts one non-null immutable
-  `ResolvedAssemblyResources`, the concrete snapshot that supplied its exact
-  identities, a runtime resource adapter, a finite root transform, and explicit
-  limits. It resolves every captured identity back to a nonzero owner token,
+  `CookedAssembly`, one concrete snapshot, a runtime resource adapter, a finite
+  root transform, and explicit limits. It invokes WS-023 against that exact
+  snapshot, resolves every captured identity back to a nonzero owner token,
   asks the appropriate owner adapter to validate/prepare each visual, collision,
   navigation, and walkable binding, computes deterministic world transforms,
   and publishes an immutable plan only after every item succeeds. Commit creates
   entities in cooked stable-index order and returns an instance only after all
   required components and parent links exist; any exception, capacity failure,
-  or stale plan destroys every entity created by that attempt. Destruction is
-  explicit, reverse ordered, idempotent, and releases the catalog lease only
-  after owned entities are gone.
+  dead target, or stale plan destroys every entity created by that attempt.
+  Destruction verifies the original target identity, is explicit, reverse
+  ordered, and idempotent, and releases the catalog lease only after owned
+  entities are gone.
 - Dependencies: merged WS-022 cooked assembly, WS-023 resource resolution, and
   WS-024 leased concrete catalog
 - Acceptance gates: exact lease/identity/token validation; deterministic module
@@ -1767,9 +1769,12 @@ are now integrated as well. The current order is:
   indices, invalid transforms, invalid visual handles, adapter unknown status or
   exception, configured limits, stale identities, and repeated destroy cannot
   publish a partial plan or leak a partial entity graph
-- Latest commit: pending
-- Next action: create the isolated branch/worktree, freeze the prepare/commit API,
-  implement adversarial tests, and request non-editing review before integration
+- Validation: Debug and Release all-target builds pass; Debug and Release CPU
+  suites each pass 401 cases and 17,528 checks; Debug and Release CTest each pass
+  4/4; `git diff --cached --check` passed before the feature commit
+- Latest commit: `5b0971d`
+- Next action: push the feature branch, fast-forward `main`, repeat the complete
+  integration matrix, pass GitHub CI, and retire the local worktree/branch
 
 ## 20. Helper Commands
 
