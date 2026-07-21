@@ -40,12 +40,6 @@ Vec3d Pos(ecs::Registry& r, ecs::Entity e)
     return r.Get<ecs::Transform>(e).position;
 }
 
-double AngleBetween(const Vec3d& a, const Vec3d& b)
-{
-    const double d = a.Dot(b) / (a.Length() * b.Length());
-    return std::acos((std::max)(-1.0, (std::min)(1.0, d)));
-}
-
 constexpr double kAU = 1.495978707e11;
 constexpr double kPi = 3.14159265358979323846;
 
@@ -76,9 +70,24 @@ TEST_CASE(SceneSeed_StarSystemInstantiatesAndOrbitsUnderFullStep)
     CHECK_APPROX_EPS(Pos(registry, planet).Length(), kAU, kAU * 1.0e-6);
     CHECK((Pos(registry, moon) - Pos(registry, planet)).Length() < 4.0e8);
     const Vec3d planetStart = Pos(registry, planet);
+    const double muSun = 1.32712440018e20;
+
+    // The SEEDED velocities (captured before step 1 overwrites the rail bodies)
+    // are the circular orbital velocities — the velocity half of the seeding
+    // contract, which is otherwise dead before its first read.
+    const Vec3d planetVel0 = registry.Get<ecs::RigidBody>(planet).linearVelocity;
+    const Vec3d moonVel0   = registry.Get<ecs::RigidBody>(moon).linearVelocity;
+    CHECK_APPROX_EPS(planetVel0.Length(), std::sqrt(muSun / kAU),
+                     std::sqrt(muSun / kAU) * 1.0e-6);
+    CHECK(std::fabs(planetStart.Dot(planetVel0)) /
+              (planetStart.Length() * planetVel0.Length()) < 1.0e-9); // v ⟂ r
+    // The moon's seeded velocity carries its PRIMARY'S velocity (the offset): its
+    // velocity relative to the planet is the moon's circular speed about the planet.
+    const Vec3d moonRelVel = moonVel0 - planetVel0;
+    CHECK_APPROX_EPS(moonRelVel.Length(), std::sqrt(3.986004418e14 / 3.844e8),
+                     std::sqrt(3.986004418e14 / 3.844e8) * 1.0e-6);
 
     // Drive the FULL orchestrator to a quarter of the inner planet's period.
-    const double muSun = 1.32712440018e20;
     const double period = 2.0 * kPi * std::sqrt(kAU * kAU * kAU / muSun);
     const int steps = 40;
     const double dt = (0.25 * period) / steps;
@@ -95,11 +104,21 @@ TEST_CASE(SceneSeed_StarSystemInstantiatesAndOrbitsUnderFullStep)
         config.coordinateTime += dt;
     }
 
-    // The planet swept a QUARTER orbit: a quarter of the period is a 90° arc for a
-    // circular orbit. This is the running sim applying Kepler's law, not a builder
-    // field read back — the load-bearing "it actually moves correctly" assertion.
+    // The planet swept a quarter orbit in the CORRECT DIRECTION and at the correct
+    // RATE. Predict its position INDEPENDENTLY of the propagator: rotate the initial
+    // position by θ = n·t about the orbit normal (r0×v0 fixes the prograde sense),
+    // n = sqrt(mu/a³). This pins sign and rate — an unsigned angle would accept a
+    // retrograde (−90°) or 3×-rate (270°) sweep, which have the same separation.
     const Vec3d planetNow = Pos(registry, planet);
-    CHECK_APPROX_EPS(AngleBetween(planetStart, planetNow), 0.5 * kPi, 1.0e-3);
+    const double n = std::sqrt(muSun / (kAU * kAU * kAU));
+    const double theta = n * config.coordinateTime; // = π/2 after a quarter period
+    const Vec3d omega = planetStart.Cross(planetVel0).Normalized();
+    const Vec3d prograde = planetStart * std::cos(theta) +
+                           omega.Cross(planetStart) * std::sin(theta);
+    const Vec3d retrograde = planetStart * std::cos(theta) -
+                             omega.Cross(planetStart) * std::sin(theta);
+    CHECK((planetNow - prograde).Length() < kAU * 1.0e-6); // correct direction+rate
+    CHECK((planetNow - retrograde).Length() > 0.1 * kAU);  // NOT the wrong winding
     CHECK_APPROX_EPS(planetNow.Length(), kAU, kAU * 1.0e-6); // still on its orbit
     CHECK((planetNow - planetStart).Length() > 0.5 * kAU);   // it genuinely moved
 
