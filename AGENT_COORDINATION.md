@@ -2021,7 +2021,7 @@ are now integrated as well. The current order is:
 
 ### WS-029: Stateful interior blockers and on-foot controller
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: connect authored interior interaction state to deterministic moving
   collision blockers, then publish the first fixed-step on-foot capsule
   controller that consumes the Stage 5B custom collision queries. The slice must
@@ -2063,9 +2063,34 @@ are now integrated as well. The current order is:
   excessive time step, jump while airborne, closed-door tunneling, opening-door
   premature traversal, depenetration failure, and iteration exhaustion cannot
   silently mutate the live player pose or blocker world
-- Next action: freeze the Stage 5C blocker-state and fixed-step controller
-  contracts from the current authored topology, runtime lifecycle, and input
-  semantics before implementation
+- Integrated commits: `b627781` (claim), `32f694d` (implementation), and
+  `09406c3` (adversarial-review hardening), fast-forwarded to `main`
+- Delivered: immutable revisioned combined collision snapshots; stable-ID
+  moving closure panels and exact-open portal guards; transactional host
+  publication and rollback; one shared Stage 5A/5C moving-part motion law with
+  explicit world-versus-assembly-local seeds; a pure fixed-step on-foot capsule
+  controller with view-relative acceleration, braking, sprint, air control,
+  gravity, jump edge, grounding, continuous sweep/slide/step response, topology
+  ownership, and atomic failure; and exact executable evidence
+  (`closed=blocked open=traversable blockers=2`)
+- Review: the Codex adversarial audit found two confirmed defects before
+  integration. A short ascending jump could be snapped back to ground by the
+  pre-step probe, and independently reconstructing moving-part transforms in
+  Stage 5C risked drifting from Stage 5A or accidentally consuming a root-
+  composed world pose. The hardening commit disables upward ground snap, shares
+  one validated motion function while retaining assembly-local collision,
+  bounds pathological locomotion iterations/player scales, tightens rollback
+  ownership, and adds root-offset, intrusion, partitioning, ceiling, malformed-
+  endpoint, arithmetic, and resource-limit controls.
+- Verification: all Debug and Release targets built; CTest passed 5/5 in both
+  configurations; the integrated CPU executable passed 459 cases and 18,313
+  checks; the three `.tdcollision` packages and `reference_ship.tdassembly`
+  reproduced byte-for-byte; Release raster and full-DXR smoke passed; Debug
+  stable DXR passed with D3D12 GPU validation; and a 1920x1080 stable-DXR capture
+  passed pixel statistics and manual nonblank/framing inspection.
+- Next action: claim Stage 5D for an explicit pilot-seat possession transition,
+  player spawn socket, and ship-root transform boundary around this controller.
+  Keep crouch, EVA, pressure, navmesh, and general rigid bodies in later lanes.
 
 ## 20. Helper Commands
 
