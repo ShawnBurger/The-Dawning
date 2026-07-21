@@ -376,7 +376,10 @@ type. This mirrors exactly how `Velocity + Transform` works today.
    wrench via `Σ dir·F·throttle` and `Σ leverArm × force` (Ship deep-dive PART 2),
    then bridge body force to world force and add both to the accumulators. The
    same throttle state feeds physics, exhaust visuals, and future damage systems.
-3. Add external accelerations (gravity §4, later).
+3. `AccumulateForceIntegratedGravity` gathers massive sources in stable body-ID
+   order, expresses them in each target's `SpatialFrame`, and stages softened
+   gravity as world force. Only `OrbitOwner::ForceIntegrated` bodies are targets;
+   N-body and rail owners remain untouched.
 4. `SystemIntegrateRigidBodies(dt)` — semi-implicit Euler (§2), write
    `Transform.position` / `Transform.rotation`, zero the accumulators.
 5. `SystemCollision(dt)` — broad+narrow, apply impulses to velocities and
@@ -384,6 +387,11 @@ type. This mirrors exactly how `Velocity + Transform` works today.
 
 Existing `SystemVelocity` / `SystemRotation` stay for kinematic movers
 (spinners, debris) and are untouched.
+
+`StepFlightPhysics` preserves legacy bodies without a `GravitationalBody`, but a
+gravitational entity advances there only under `ForceIntegrated`. This is the
+production one-owner guard: passive `NBodyActive` and `OnRails` poses cannot be
+silently advanced a second time by the rigid-body ECS walk.
 
 **Interpolation for rendering (optional, recommended once frame-rate ≠ 60):**
 the accumulator leaves a residual `alpha = accumulator / fixedDt` (the Physics

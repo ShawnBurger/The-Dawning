@@ -200,7 +200,7 @@ TEST_CASE(FtlSystem_RotatedDistantTransition_ConvertsFramesAndCommitsRetainedSta
            expectedMomentum).Length() < 1e-9);
     CHECK_EQ(registry.TryGet<ecs::RelativisticBody>(entity)->restMass, 42.0);
     CHECK(registry.TryGet<ecs::GravitationalBody>(entity)->owner ==
-          ecs::OrbitOwner::NBodyActive);
+          ecs::OrbitOwner::ForceIntegrated);
     CHECK_EQ(registry.TryGet<ecs::GravitationalBody>(entity)->mu, 7.0);
     CheckOrbitExact(*registry.TryGet<ecs::OrbitState>(entity), orbit);
 
@@ -338,4 +338,21 @@ TEST_CASE(FtlSystem_InvalidTransformAndUnsafeDestination_AreAtomicNoOps)
           relativisticBefore.momentum);
     CHECK(registry.TryGet<ecs::GravitationalBody>(entity)->owner ==
           gravitationalBefore.owner);
+
+    registry.TryGet<ecs::GravitationalBody>(entity)->owner =
+        static_cast<ecs::OrbitOwner>(99);
+    const RequiredSnapshot invalidOwnerBefore = SnapshotRequired(registry, entity);
+    const ecs::RelativisticBody invalidOwnerRelativisticBefore =
+        *registry.TryGet<ecs::RelativisticBody>(entity);
+    const FtlTransitionResult invalidOwnerResult = TryTeleportEntity(
+        registry, entity, frames, destinationFrame,
+        MouthTransform::Wormhole(sourceOrigin, destinationOrigin));
+    CHECK(!invalidOwnerResult.accepted);
+    CHECK(!invalidOwnerResult.resetRenderHistory);
+    CHECK(!invalidOwnerResult.drainFixedAccumulator);
+    CheckRequiredExact(registry, entity, invalidOwnerBefore);
+    CHECK(registry.TryGet<ecs::RelativisticBody>(entity)->momentum ==
+          invalidOwnerRelativisticBefore.momentum);
+    CHECK(registry.TryGet<ecs::GravitationalBody>(entity)->owner ==
+          static_cast<ecs::OrbitOwner>(99));
 }

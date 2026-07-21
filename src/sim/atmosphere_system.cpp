@@ -79,6 +79,13 @@ bool IsValidAero(const ecs::AerodynamicBody& aero)
            (aero.liftSlope == 0.0 || aero.liftAxis.LengthSq() > 1.0e-12f);
 }
 
+bool IsKnownOwner(ecs::OrbitOwner owner)
+{
+    return owner == ecs::OrbitOwner::NBodyActive ||
+           owner == ecs::OrbitOwner::OnRails ||
+           owner == ecs::OrbitOwner::ForceIntegrated;
+}
+
 bool TryNormalize(const core::Quatf& value, core::Quatf& out)
 {
     if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
@@ -193,8 +200,11 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
     ecs::RigidBody* rigidBody = registry.TryGet<ecs::RigidBody>(entity);
     const ecs::AerodynamicBody* aero =
         registry.TryGet<ecs::AerodynamicBody>(entity);
+    ecs::GravitationalBody* gravitational =
+        registry.TryGet<ecs::GravitationalBody>(entity);
     if (!transform || !spatialFrame || !rigidBody || !aero ||
-        !(dt > 0.0) || !std::isfinite(dt))
+        !(dt > 0.0) || !std::isfinite(dt) ||
+        (gravitational && !IsKnownOwner(gravitational->owner)))
         return result;
 
     const FrameId frameId = static_cast<FrameId>(spatialFrame->frameId);
@@ -331,9 +341,17 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
                   bodyAeroForce, bodyTorque))
         return AtmosphereStepResult{};
 
-    const Vec3d nextForceAccum = rigidBody->forceAccum + liftForce;
+    const bool enteringForceIntegration = gravitational &&
+        gravitational->owner != ecs::OrbitOwner::ForceIntegrated;
+    const Vec3d baseForceAccum = enteringForceIntegration
+        ? Vec3d{}
+        : rigidBody->forceAccum;
+    const Vec3d baseTorqueAccum = enteringForceIntegration
+        ? Vec3d{}
+        : Vec3d::FromFloat(rigidBody->torqueAccum);
+    const Vec3d nextForceAccum = baseForceAccum + liftForce;
     const Vec3d nextTorqueAccum =
-        Vec3d::FromFloat(rigidBody->torqueAccum) + bodyTorque;
+        baseTorqueAccum + bodyTorque;
     core::Vec3f narrowedTorque;
     if (!IsFinite(nextForceAccum) ||
         !TryNarrow(nextTorqueAccum, narrowedTorque))
@@ -344,13 +362,11 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
     nextRigidBody.forceAccum = nextForceAccum;
     nextRigidBody.torqueAccum = narrowedTorque;
 
-    ecs::GravitationalBody* gravitational =
-        registry.TryGet<ecs::GravitationalBody>(entity);
     ecs::GravitationalBody nextGravitational;
     if (gravitational)
     {
         nextGravitational = *gravitational;
-        nextGravitational.owner = ecs::OrbitOwner::NBodyActive;
+        nextGravitational.owner = ecs::OrbitOwner::ForceIntegrated;
     }
 
     *rigidBody = nextRigidBody;

@@ -167,6 +167,8 @@ TEST_CASE(AtmosphereSystem_MovingFrameDrag_MatchesContractiveKernelExactly)
     const Vec3d initialAirspeed{ 100.0, 0.0, 0.0 };
     const ecs::Entity entity = MakeBody(
         registry, frame, Vec3d{ 0.0, 1000.0, 0.0 }, initialAirspeed, aero);
+    registry.TryGet<ecs::GravitationalBody>(entity)->owner =
+        ecs::OrbitOwner::ForceIntegrated;
     const ecs::RigidBody before = *registry.TryGet<ecs::RigidBody>(entity);
     AtmosphereEnvironment environment = MakeEnvironment(center, frameVelocity);
 
@@ -195,7 +197,7 @@ TEST_CASE(AtmosphereSystem_MovingFrameDrag_MatchesContractiveKernelExactly)
     CheckVec3fExact(registry.TryGet<ecs::RigidBody>(entity)->torqueAccum,
                     before.torqueAccum);
     CHECK(registry.TryGet<ecs::GravitationalBody>(entity)->owner ==
-          ecs::OrbitOwner::NBodyActive);
+          ecs::OrbitOwner::ForceIntegrated);
 }
 
 TEST_CASE(AtmosphereSystem_CorotatingAir_HasZeroAirspeedAndNoWrench)
@@ -224,9 +226,12 @@ TEST_CASE(AtmosphereSystem_CorotatingAir_HasZeroAirspeedAndNoWrench)
     CHECK_EQ(result.dynamicPressure, 0.0);
     CHECK_EQ(result.mach, 0.0);
     CHECK_EQ(result.heatFlux, 0.0);
-    CheckRigidBodyExact(*registry.TryGet<ecs::RigidBody>(entity), before);
+    ecs::RigidBody expected = before;
+    expected.forceAccum = Vec3d{};
+    expected.torqueAccum = Vec3f{};
+    CheckRigidBodyExact(*registry.TryGet<ecs::RigidBody>(entity), expected);
     CHECK(registry.TryGet<ecs::GravitationalBody>(entity)->owner ==
-          ecs::OrbitOwner::NBodyActive);
+          ecs::OrbitOwner::ForceIntegrated);
 }
 
 TEST_CASE(AtmosphereSystem_CeilingIsAcceptedExactNoOpAndKeepsRails)

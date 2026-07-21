@@ -36,7 +36,7 @@ struct AtmosphereStepResult
 
 // Apply one fixed atmospheric substep to an entity with Transform + SpatialFrame
 // + RigidBody + AerodynamicBody. Optional GravitationalBody ownership is promoted
-// to NBodyActive only when the sampled density is positive. Invalid input is a
+// to ForceIntegrated only when the sampled density is positive. Invalid input is a
 // component-preserving rejection; vacuum and ceiling samples are accepted no-ops.
 AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
                                              ecs::Entity entity,

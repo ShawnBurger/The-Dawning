@@ -56,12 +56,14 @@ its watched-failure verification:
    `√(1−2GM/(r c²))` share ONE `ε`, floored at `max(body radius, r_s+ε0)`; the deep-dive's
    `if(dist<1) continue` is explicitly rejected. *Watched:* the softened force stays finite as
    `r → 0`, with the discontinuous-zeroing form as the anti-test.
-4. **Exactly one owner per body per step** (§5.1). OnRails XOR Forced, debug-asserted; on-rails
-   owns every passive orbit (analytic, cannot drift) and receives NO primary gravity; thrust forces
-   an on-rails→force state-vector transition; the shipped `IntegrateRigidBody` is reused
-   **unchanged** (no KDK on its linear half). Also enforced: an entity carries `Vec3f Velocity` XOR
-   `RigidBody`, never both. *Watched:* a body given both an on-rails write and its primary's gravity
-   diverges, and the one-owner guard fires.
+4. **Exactly one owner per body per step** (§5.1). `NBodyActive`, `OnRails`, or
+   `ForceIntegrated`, never more than one. Rails receive NO separate primary
+   gravity; thrust or atmosphere forces a transition to the force-integrated
+   rigid-body mover, which receives gravity through its accumulator. The shipped
+   `IntegrateRigidBody` is reused **unchanged** (no KDK on its linear half). Also
+   enforced: an entity carries `Vec3f Velocity` XOR `RigidBody`, never both.
+   *Watched:* a body given both an orbital write and the rigid-body step diverges,
+   and the one-owner guard fires.
 5. **Robust Kepler solver** (§4.3, §4.5). Seed `E0 = M + e·sinM` (Danby/Markley), not `E=M`; capped
    Newton with a bisection fallback; universal variables near `e=1` (slingshot/escape produce
    near-parabolic and hyperbolic state). *Watched:* Kepler **closure** over one period + **dt-
@@ -737,7 +739,8 @@ the wrench or rewrite interpolation history on a partial failure.
 `TryTeleportEntity` deliberately does not own the renderer or timer. Success returns explicit
 `resetRenderHistory` and `drainFixedAccumulator` obligations to the host call site; both are false
 on rejection. The app/input integration remains a separate lane so this adapter stays device-free
-and testable. On acceptance an optional `GravitationalBody` is promoted to `NBodyActive`; any
+and testable. On acceptance an optional `GravitationalBody` is promoted to
+`ForceIntegrated`; any
 `OrbitState` data remains intact for a later deterministic demotion back to rails.
 
 ### 7.4 Determinism across the jump
@@ -1055,12 +1058,15 @@ tractable across a galaxy.
 
 ### What this changes from the patched-conics design
 
-- The "on-rails XOR force-integrated, exactly one owner per body per step"
-  invariant (§5) is REPLACED by a level-of-detail state: a body is either
-  N-BODY-ACTIVE or ON-RAILS, still exactly one per step, still debug-asserted, but
-  the default flips to N-body in the active system. The double-count negative
-  control still applies (an on-rails body must receive no separate primary-gravity
-  force).
+- The old two-state ownership sketch is REPLACED by three explicit, mutually
+  exclusive movers. `NBodyActive` owns passive conservative bodies in the active
+  system; `OnRails` owns analytic distant bodies; `ForceIntegrated` owns ships or
+  other rigid bodies under thrust, drag, impulses, or scripted forces. The latter
+  receives gravity through `AccumulateForceIntegratedGravity` and then advances
+  exactly once through `StepFlightPhysics`. That function skips either orbital
+  owner, while atmosphere entry and rigid-body FTL arrival promote to
+  `ForceIntegrated`. The double-count negative control therefore applies across
+  all three paths, not only rails versus N-body.
 - Drift: N-body symplectic integration DOES drift (bounded, energy-oscillating),
   unlike analytic on-rails which cannot. This is accepted for the accuracy it buys,
   per CoDE. The verification changes accordingly and this is load-bearing: do NOT
