@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>   // optional generated-asset load
+#include <filesystem>   // cooked runtime-asset path
 #include <iterator>     // std::size, for the pillar distance table
 #include <cstdlib>
 #include <cstring>
@@ -444,13 +444,10 @@ bool App::InitializeScene()
     cubeEmissiveTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), cubeEmissiveTexture);
 
-    // Optionally load a generated glTF asset into the scene. The corridor GLB is
-    // gitignored (it is ~9 MB of generated binary), so it is present on the
-    // machine that generated it and absent on a clean clone or CI - exactly like
-    // the texture assets, and handled the same way: load it when it exists, skip
-    // silently when it does not. This exercises the whole import->GPU->entity
-    // bridge with a real asset locally without making the build depend on a file
-    // that is not in the repository.
+    // Production content loads the deterministic engine-owned format. The raw
+    // Meshy GLB is an ignored cooker input and is never parsed by the runtime.
+    // The cooked asset is shipped through Git LFS and copied with assets/**, so
+    // a clean clone exercises the same content path as this development tree.
     //
     // Its upload is recorded onto the SAME command list as the meshes above and
     // flushed by the Close/Execute/Wait immediately below, so loadedModel - which
@@ -459,20 +456,15 @@ bool App::InitializeScene()
     scene::LoadedModel loadedModel;
     {
         const std::filesystem::path modelPath =
-            "assets/generated/corridor_section_05445d3a804f4d42/model.glb";
-        if (std::filesystem::exists(modelPath))
+            "assets/runtime/corridor_section.tdmodel";
+        loadedModel = scene::LoadCookedModelIntoScene(
+            m_scene, m_device, m_renderer, modelPath,
+            ecs::Transform{ { -4.5, 0.85, 3.0 }, core::Quatf::Identity(), { 1, 1, 1 } });
+        if (!loadedModel.ok)
         {
-            loadedModel = scene::LoadModelIntoScene(
-                m_scene, m_device, m_renderer, modelPath,
-                ecs::Transform{ { -4.5, 0.85, 3.0 }, core::Quatf::Identity(), { 1, 1, 1 } });
-            if (!loadedModel.ok)
-                core::Log::Errorf("Generated asset present but failed to load: %s",
-                                  loadedModel.error.c_str());
-        }
-        else
-        {
-            core::Log::Infof("No generated asset at %s; skipping (clean-clone path)",
-                             modelPath.string().c_str());
+            core::Log::Errorf("Required runtime asset failed to load: %s",
+                              loadedModel.error.c_str());
+            return false;
         }
     }
 

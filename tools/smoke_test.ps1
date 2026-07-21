@@ -143,6 +143,16 @@ Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 # wrong" - so assert the slot, not just that shadows exist.
 Assert-Marker "shadow_map" "ok"
 Assert-Marker "shadow_map_slot" "1"
+
+# Production content must arrive through the cooked format. These exact counts
+# prevent a tiny placeholder from satisfying the mere-presence marker, while
+# model_source=cooked fails if app.cpp silently falls back to source glTF.
+Assert-Marker "model_loaded" "ok"
+Assert-Marker "model_source" "cooked"
+Assert-Marker "model_primitives" "1"
+Assert-Marker "model_vertices" "15562"
+Assert-Marker "model_indices" "57579"
+Assert-Marker "model_images" "3"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never

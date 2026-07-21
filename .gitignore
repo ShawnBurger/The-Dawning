@@ -59,6 +59,7 @@ secrets/
 assets/generated/**/*.glb
 assets/generated/**/*.fbx
 assets/generated/**/*.png
+assets/generated/**/*.tdmodel
 
 # Workflow scratch worktrees and agent session state
 .claude/
