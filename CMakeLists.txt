@@ -43,12 +43,14 @@ set(CORE_HEADERS
 )
 
 set(ASSET_SOURCES
+    src/asset/cooked_assembly.cpp
     src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
     src/asset/source_snapshot.cpp
 )
 
 set(ASSET_HEADERS
+    src/asset/cooked_assembly.h
     src/asset/cooked_model.h
     src/asset/model_data.h
     src/asset/gltf_importer.h
@@ -190,6 +192,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_cooked_assembly.cpp
     tests/test_asset_compiler.cpp
     tests/test_gltf_importer.cpp
     tests/test_shadow_cascades.cpp
@@ -254,14 +257,25 @@ add_executable(TheDawningAssetCompiler
     ${ASSET_HEADERS}
 )
 
+add_executable(TheDawningAssemblyInspector
+    tools/assembly_inspector.cpp
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
+)
+
 target_include_directories(TheDawningAssetInspector PRIVATE src)
 target_include_directories(TheDawningAssetCompiler PRIVATE src)
+target_include_directories(TheDawningAssemblyInspector PRIVATE src)
 
 set_target_properties(TheDawningAssetInspector PROPERTIES
     VS_GLOBAL_VcpkgApplocalDeps false
 )
 
 set_target_properties(TheDawningAssetCompiler PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
+)
+
+set_target_properties(TheDawningAssemblyInspector PROPERTIES
     VS_GLOBAL_VcpkgApplocalDeps false
 )
 
@@ -592,6 +606,15 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_meshy_client.py
     )
     set_tests_properties(meshy_client_contract PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    add_test(
+        NAME cooked_assembly_contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cooked_assembly.py
+                --inspector $<TARGET_FILE:TheDawningAssemblyInspector>
+    )
+    set_tests_properties(cooked_assembly_contract PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 else()
