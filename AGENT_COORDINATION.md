@@ -1665,7 +1665,7 @@ are now integrated as well. The current order is:
 
 ### WS-024: Leased runtime assembly resource catalog
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: provide the first concrete `AssemblyResourceCatalog` implementation
   and an immutable lease/snapshot that keeps resolver identities and owning-
   system tokens stable across concurrent registration, replacement, removal,
@@ -1713,10 +1713,11 @@ are now integrated as well. The current order is:
   corrupt a prior snapshot
 - Validation: Debug and Release all-target builds pass; Debug and Release CTest
   each pass 4/4; CPU suite passes 394 cases and 17,374 checks; `git diff
-  --cached --check` passed before the feature commit
-- Latest commit: `d726cd6`
-- Next action: push the feature branch, fast-forward `main`, run integration CI,
-  record the result, and retire the local worktree/branch
+  --cached --check` passed before the feature commit; GitHub CI run
+  `29844035947` passed on `main` in Windows/MSVC Debug and Release
+- Latest commit: `adc398b` on `main` (`d726cd6` implementation)
+- Next action: retire the clean WS-024 worktree and local task branch after the
+  closeout record reaches `origin/main`
 
 ## 20. Helper Commands
 
