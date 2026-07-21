@@ -1,6 +1,7 @@
 #include "model_loader.h"
 
 #include "resource_manager.h"
+#include "../asset/cooked_model.h"
 #include "../asset/gltf_importer.h"
 #include "../asset/model_data.h"
 #include "../core/log.h"
@@ -90,29 +91,15 @@ ecs::Material ToEngineMaterial(const asset::ImportedModel& model,
     return out;
 }
 
-} // namespace
-
-LoadedModel LoadModelIntoScene(Scene& scene,
-                               render::D3D12Device& device,
-                               render::Renderer& renderer,
-                               const std::filesystem::path& path,
-                               const ecs::Transform& baseTransform)
+LoadedModel UploadImportedModel(Scene& scene,
+                                render::D3D12Device& device,
+                                render::Renderer& renderer,
+                                const asset::ImportedModel& model,
+                                const std::string& sourceLabel,
+                                const char* sourceKind,
+                                const ecs::Transform& baseTransform)
 {
     LoadedModel loaded;
-
-    const asset::GltfImportResult imported = asset::ImportGltfFile(path);
-    if (!imported.Succeeded())
-    {
-        loaded.error = imported.error.empty() ? "glTF import failed" : imported.error;
-        core::Log::Errorf("Model load failed for %s: %s",
-                          path.string().c_str(), loaded.error.c_str());
-        return loaded;
-    }
-    for (const std::string& warning : imported.warnings)
-        core::Log::Infof("Model load warning (%s): %s",
-                         path.string().c_str(), warning.c_str());
-
-    const asset::ImportedModel& model = imported.model;
     ResourceManager& resources = scene.GetResources();
 
     ID3D12Device* d3dDevice = device.Device();
@@ -195,7 +182,7 @@ LoadedModel LoadModelIntoScene(Scene& scene,
         {
             loaded.error = "GPU mesh creation failed for a primitive";
             core::Log::Errorf("Model load: CreateMesh32 failed for %s primitive %zu",
-                              path.string().c_str(), p);
+                              sourceLabel.c_str(), p);
             return loaded;
         }
 
@@ -226,19 +213,73 @@ LoadedModel LoadModelIntoScene(Scene& scene,
     if (loaded.entities.empty())
     {
         loaded.error = "model contained no renderable primitives";
-        core::Log::Errorf("Model load: %s produced no primitives", path.string().c_str());
+        core::Log::Errorf("Model load: %s produced no primitives", sourceLabel.c_str());
         return loaded;
     }
 
     loaded.ok = true;
-    // Structured marker so the smoke harness can assert a generated asset actually
-    // reached the GPU, not merely that the importer parsed it. Counts, not prose.
-    core::Log::Infof("[SMOKE] model_loaded=ok primitives=%zu vertices=%llu indices=%llu images=%u",
+    // The source kind distinguishes the production cooked path from a raw glTF
+    // development load; counts make a tiny substitute asset fail the same gate.
+    core::Log::Infof("[SMOKE] model_loaded=ok model_source=%s model_primitives=%zu model_vertices=%llu model_indices=%llu model_images=%u",
+                     sourceKind,
                      loaded.entities.size(),
                      static_cast<unsigned long long>(totalVertices),
                      static_cast<unsigned long long>(totalIndices),
                      decodedImages);
     return loaded;
+}
+
+} // namespace
+
+LoadedModel LoadModelIntoScene(Scene& scene,
+                               render::D3D12Device& device,
+                               render::Renderer& renderer,
+                               const std::filesystem::path& path,
+                               const ecs::Transform& baseTransform)
+{
+    const asset::GltfImportResult imported = asset::ImportGltfFile(path);
+    if (!imported.Succeeded())
+    {
+        LoadedModel loaded;
+        loaded.error = imported.error.empty() ? "glTF import failed" : imported.error;
+        core::Log::Errorf("Model load failed for %s: %s",
+                          path.string().c_str(), loaded.error.c_str());
+        return loaded;
+    }
+    for (const std::string& warning : imported.warnings)
+        core::Log::Infof("Model load warning (%s): %s",
+                         path.string().c_str(), warning.c_str());
+
+    return UploadImportedModel(scene, device, renderer, imported.model,
+                               path.string(), "gltf", baseTransform);
+}
+
+LoadedModel LoadCookedModelIntoScene(Scene& scene,
+                                     render::D3D12Device& device,
+                                     render::Renderer& renderer,
+                                     const std::filesystem::path& path,
+                                     const ecs::Transform& baseTransform)
+{
+    const asset::CookedModelResult cooked = asset::LoadCookedModelFile(path);
+    if (!cooked.Succeeded())
+    {
+        LoadedModel loaded;
+        loaded.error = cooked.error.empty()
+            ? asset::CookedModelStatusName(cooked.status)
+            : cooked.error;
+        core::Log::Errorf("Cooked model load failed for %s [%s]: %s",
+                          path.string().c_str(),
+                          asset::CookedModelStatusName(cooked.status),
+                          loaded.error.c_str());
+        return loaded;
+    }
+
+    core::Log::Infof("Cooked model verified: %s source_sha256=%s dependencies=%zu",
+                     path.string().c_str(),
+                     cooked.metadata.sourceSha256.Hex().c_str(),
+                     cooked.metadata.dependencies.size());
+    return UploadImportedModel(scene, device, renderer, cooked.model,
+                               path.string(), "cooked", baseTransform);
 }
 
 } // namespace scene

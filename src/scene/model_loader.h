@@ -9,11 +9,9 @@
 // ecs::Material, and one entity is spawned per primitive. It is the point where
 // a generated asset stops being data and starts being something on screen.
 //
-// SCOPE OF THIS SLICE: geometry and scalar material factors only. Embedded
-// images are NOT decoded or uploaded yet, so materials use their baseColor /
-// roughness / metallic / emissive factors with no texture maps. That is a
-// deliberate first slice: it proves the geometry path end to end (the hard,
-// valuable part) without the image-decode-from-memory work, which follows.
+// Source glTF remains available for tools and asset iteration. Production
+// content loads the versioned engine-owned .tdmodel format and then enters the
+// exact same upload path, including embedded PBR images.
 
 #include "scene.h"
 #include "../ecs/components.h"
@@ -58,5 +56,13 @@ LoadedModel LoadModelIntoScene(Scene& scene,
                                render::Renderer& renderer,
                                const std::filesystem::path& path,
                                const ecs::Transform& baseTransform = {});
+
+// Load an offline-cooked .tdmodel without parsing source glTF/JSON at runtime,
+// then feed its ImportedModel payload through the same GPU/material bridge.
+LoadedModel LoadCookedModelIntoScene(Scene& scene,
+                                     render::D3D12Device& device,
+                                     render::Renderer& renderer,
+                                     const std::filesystem::path& path,
+                                     const ecs::Transform& baseTransform = {});
 
 } // namespace scene

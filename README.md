@@ -10,6 +10,8 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
+- Deterministic `.tdmodel` runtime loading with a real PBR corridor asset shipped
+  through Git LFS; raw glTF/GLB remains an offline import/cooking format.
 - Layer 4 material work is partially landed: albedo/normal textures,
   Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
   linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
@@ -22,11 +24,13 @@ Do not merge old snapshots directly into this source tree.
 From the repository root:
 
 ```bat
+git lfs pull
 SETUP_AND_BUILD.bat
 ```
 
 The script first tries `cmake` from `PATH`, then common Visual Studio bundled
-CMake locations.
+CMake locations. `git lfs pull` materializes the required cooked runtime asset;
+an LFS pointer is intentionally rejected by the model loader.
 
 Manual equivalent:
 

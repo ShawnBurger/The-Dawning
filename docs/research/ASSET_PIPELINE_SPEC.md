@@ -258,16 +258,19 @@ Texture bytes are currently preserved in their source PNG/JPEG/KTX/DDS form,
 which the existing engine loaders understand. GPU block compression and mipmap
 generation are intentionally not claimed by this slice; they belong in a later
 texture-cooking revision and must bump the relevant section version when added.
-The landed model bridge already uploads `ImportedModel` geometry imported from
-GLTF to D3D12. This stage deliberately does not change renderer-owned code, so a
-direct `.tdmodel` loader into that same GPU bridge remains the next runtime asset
-step.
+The runtime now loads `.tdmodel` directly, verifies its layout and integrity,
+and feeds the recovered `ImportedModel` through the same D3D12 geometry, PBR
+image, material, and entity bridge as source glTF. Raw GLB remains available for
+offline tools and development inspection but is not parsed by the executable.
+The production corridor `.tdmodel` ships through Git LFS; its raw Meshy source
+remains in the ignored content-addressed generation cache.
 
 Production measurements on 2026-07-20:
 
 - corridor section: 15,562 vertices, 19,193 triangles, 9,533,104 cooked bytes
 - corridor wall prototype: 100,644 vertices, 71,843 triangles, 34,929,120 cooked bytes
-- repeated corridor compilation: byte-identical SHA-256 output
+- repeated corridor compilation: byte-identical SHA-256
+  `ff03a907e3c09e64bf4d56434e879955abcf0810a9206cdaff69a17088ec6375`
 
 CPU tests cover known SHA-256 vectors, deterministic canonical serialization,
 complete data round trip, whole-file corruption, truncation, bad magic,
@@ -278,6 +281,11 @@ imports, dependency output aliases, and concurrent source changes.
 Both production Meshy GLBs compile and reload successfully without D3D12. A
 two-process publication stress test produced a valid byte-identical artifact
 with no orphan temporary files.
+
+Runtime smoke requires `model_source=cooked` and the corridor's exact primitive,
+vertex, index, and decoded-image counts in raster, stable DXR, and full DXR. A
+missing or corrupt shipped artifact stops scene initialization, so the clean-clone
+content path cannot silently fall back to procedural geometry or an ignored GLB.
 
 **Stage 4 - Content directory and manifest.** Data-driven scene definition so
 adding an asset does not mean editing `app.cpp`. This is the "data-driven systems"
