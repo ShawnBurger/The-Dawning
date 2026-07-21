@@ -229,22 +229,25 @@ view before the scene pass, and samples it with a 3x3 grid of hardware
 comparison taps - 9 taps, each already 2x2 filtered by the comparison sampler,
 so the effective kernel is 4x4 texels.
 
-The light matrix is built in CAMERA-RELATIVE space, like every other matrix the
-raster path uses (see RULES #1 in `CLAUDE.md`). The camera is therefore at the
-origin of that space and the light frustum is centred on it, so the map follows
-the viewer for free. No camera position enters the calculation, and none should.
+The light matrices are built in CAMERA-RELATIVE space, like every other matrix
+the raster path uses (see RULES #1 in `CLAUDE.md`). The camera is therefore at
+the origin of that space and every footprint follows the viewer. Absolute camera
+position enters only in double precision to compute a sub-texel residual that
+anchors the shadow lattice to the world; no absolute position is narrowed.
 
 Two separate biases fight shadow acne, because they address different errors:
 slope-scaled rasteriser depth bias acts along the light direction, while a
 normal offset in the pixel shader pushes the sampling point across the surface.
 Neither alone keeps the ground plane clean at grazing angles.
 
-It is a SINGLE cascade covering 24 world units around the camera. The comparison
-sampler uses a white (farthest) border, so anything outside the frustum reads as
-fully lit rather than fully shadowed - the demo scene is larger than the
-frustum, and the alternative is a hard black square around the shadowed region.
-That is the right failure mode, but it is still a failure mode: cascades are
-what this needs to cover a real world.
+Four 2048x2048 slices share one `Texture2DArray`, with half-extents 24, 65, 175,
+and 470 world units. Radial selection is rotation-invariant, and the world-fixed
+texel snap prevents translation shimmer. The outer 15% of each footprint uses a
+smoothstep partition-of-unity cross-fade: the first three bands blend adjacent
+cascade samples, while the last fades continuously to lit coverage. Ordinary
+pixels keep the existing 9-tap PCF cost; only transition pixels sample twice.
+The comparison sampler uses a white border, so out-of-footprint taps remain lit
+rather than creating a hard black square.
 
 Shadowing multiplies DIRECT light only. Ambient and emission are untouched -
 ambient stands in for everything the single directional light does not carry, so

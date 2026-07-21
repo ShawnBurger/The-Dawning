@@ -85,8 +85,8 @@ inline constexpr float kShadowCascadeExtent[kShadowCascadeCount] =
 inline constexpr float kShadowCascadeMargin = 1.05f;
 
 // Fraction of a cascade's split radius at which its outer blend band begins.
-// Uploaded from the start so the constant-buffer byte layout never churns;
-// consumed only if the optional cross-cascade blend is ever enabled.
+// The raster shader cross-fades adjacent cascades over this band; the outermost
+// band fades to lit coverage so shadow reach ends continuously.
 inline constexpr float kShadowCascadeFadeFraction = 0.85f;
 
 // Outer radius at which cascade c stops being selected, in world units.
@@ -110,12 +110,27 @@ float ShadowCascadeDepthRange(uint32_t cascade);
 // Inner edge of cascade c's outer blend band.
 float ShadowCascadeFadeLo(uint32_t cascade);
 
+// Partition-of-unity weights used by the raster cascade cross-fade. At most two
+// shadow-map slices contribute: primaryWeight + secondaryWeight + litWeight is
+// exactly one within float tolerance. The final cascade uses litWeight as its
+// second endpoint, avoiding a hard shadow cutoff at maximum reach.
+struct ShadowCascadeBlend
+{
+    uint32_t primaryCascade = 0;
+    uint32_t secondaryCascade = 0;
+    float primaryWeight = 1.0f;
+    float secondaryWeight = 0.0f;
+    float litWeight = 0.0f;
+};
+
+ShadowCascadeBlend ComputeShadowCascadeBlend(float radialDistance);
+
 // CPU twin of the shader's cascade selector. Written with the IDENTICAL
 // descending-`<` structure as the three `if` statements in basic_ps.hlsl, so the
 // unit tests constrain the shader's arithmetic rather than a paraphrase of it.
-// Beyond the last split this still returns the last cascade; the sampler's
-// OPAQUE_WHITE border then reads as lit, with no second spherical cutoff to
-// disagree with the square footprint boundary.
+// Beyond the last split this still returns the last cascade. The blend contract
+// above is the authority for whether the shader samples that slice or has
+// already faded fully to lit coverage.
 uint32_t SelectShadowCascade(float radialDistance);
 
 // Build cascade c's camera-relative light view-projection matrix.

@@ -80,6 +80,19 @@ struct DrawProbeValidation
     // material evidence.
     uint32_t materialRecordsUnshaded = 0;
 
+    // Cascade cross-fade witness, written by the same basic_ps invocation that
+    // returns the shadow factor. A nonzero signal proves adjacent samples
+    // differed; zero mismatches proves the returned Q8 value matched their
+    // smoothstep blend rather than the old hard-selected primary sample.
+    uint32_t shadowBlendRecords = 0;
+    uint32_t shadowBlendPairMask = 0;
+    uint64_t shadowBlendPixels = 0;
+    uint64_t shadowBlendExpectedQ8 = 0;
+    uint64_t shadowBlendOutputQ8 = 0;
+    uint64_t shadowBlendPrimaryQ8 = 0;
+    uint64_t shadowBlendSignalQ8 = 0;
+    uint64_t shadowBlendMismatchPixels = 0;
+
     uint32_t ObjectRecordsChecked() const { return shadowRecordsChecked + mainRecordsChecked; }
     uint32_t ObjectMismatches() const { return shadowMismatches + mainMismatches; }
 };
@@ -130,10 +143,9 @@ struct CBPerFrame
     // 24.0f/2048.0f pair that used to live in basic_ps.hlsl with nothing
     // enforcing that it matched the C++ side.
     float cascadeTexelWorld[core::kShadowCascadeCount];
-    // 400..415 - inner edge of each cascade's outer blend band. RESERVED: it is
-    // uploaded every frame but nothing consumes it yet. It exists from the start
-    // so enabling the optional cross-cascade blend later cannot churn the byte
-    // layout, which is the one thing sky_ps.hlsl cannot tolerate.
+    // 400..415 - inner edge of each cascade's outer blend band. The pixel shader
+    // consumes these values for adjacent-slice cross-fades and the outer fade to
+    // lit coverage.
     float cascadeFadeLo[core::kShadowCascadeCount];
 
     // 416..559 - L2 spherical-harmonic diffuse irradiance for the environment

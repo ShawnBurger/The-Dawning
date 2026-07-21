@@ -66,7 +66,7 @@ cbuffer CBPerFrame : register(b1)
     float4x4 lightViewProj[SHADOW_CASCADE_COUNT] : packoffset(c7);   // 112..367
     float4   cascadeSplitRadius : packoffset(c23);                   // 368..383
     float4   cascadeTexelWorld  : packoffset(c24);                   // 384..399
-    float4   cascadeFadeLo      : packoffset(c25);                   // 400..415 (reserved)
+    float4   cascadeFadeLo      : packoffset(c25);                   // 400..415
     // ---- image-based lighting (IBL_DESIGN.md 6.1) --------------------------
     // 416/16 = 26, 560/16 = 35. iblSH spans c26..c34 because HLSL gives every
     // array element its own register - the same fact the C++ side pins with
@@ -191,42 +191,13 @@ SamplerState        envSampler : register(s2);
 // because depth bias acts along the light direction while the sampling error is
 // across the surface. The two together are what keeps flat ground clean without
 // the shadows visibly detaching from their casters.
-float ComputeShadow(float3 positionWS, float3 N, float NdotL)
+float SampleShadowCascade(float4x4 cascadeVP,
+                          float texelWorld,
+                          float slice,
+                          float3 positionWS,
+                          float3 N,
+                          float NdotL)
 {
-    // Radial view distance. positionWS is camera-relative (RULE 1), so the
-    // camera IS the origin of this space and length() is the exact radial
-    // distance. Deliberately NOT distance(positionWS, eyePos): eyePos is
-    // hardwired to zero on the C++ side, so that form is correct only by
-    // accident and would break silently the moment a real camera position were
-    // written there. Also not input.positionCS.w, which the rasteriser has
-    // already reciprocated by the time a pixel shader sees it.
-    const float viewDist = length(positionWS);
-
-    // Select the tightest cascade containing this point, defaulting to the
-    // outermost. Written as three literal-indexed `if` statements rather than an
-    // [unroll] loop for two reasons: every cbuffer access stays a literal index
-    // and every table access a static swizzle (no dynamic subscript for FXC to
-    // reject), and selecting the MATRIX before the PCF kernel rather than
-    // duplicating the kernel per cascade keeps this at exactly 9
-    // SampleCmpLevelZero instructions. `[unroll] for(i) if (cascade==i) { 9 taps }`
-    // flattens to 36 with no warning. VERIFIED: fxc /Fc reports 9 sample_c_lz.
-    //
-    // Descending order with strict `<` and plain assignment (never `break`)
-    // means the tightest containing cascade wins, and the single exit FXC's
-    // X4000 analysis requires is preserved. core::SelectShadowCascade has the
-    // identical structure so the unit tests constrain this arithmetic.
-    float4x4 cascadeVP  = lightViewProj[SHADOW_CASCADE_COUNT - 1];
-    float    texelWorld = cascadeTexelWorld.w;
-    float    slice      = 3.0f;
-    if (viewDist < cascadeSplitRadius.z) { cascadeVP = lightViewProj[2]; texelWorld = cascadeTexelWorld.z; slice = 2.0f; }
-    if (viewDist < cascadeSplitRadius.y) { cascadeVP = lightViewProj[1]; texelWorld = cascadeTexelWorld.y; slice = 1.0f; }
-    if (viewDist < cascadeSplitRadius.x) { cascadeVP = lightViewProj[0]; texelWorld = cascadeTexelWorld.x; slice = 0.0f; }
-
-    // Beyond the last split this keeps cascade 3 and the border sampler returns
-    // lit. No early-out on viewDist: that would add a second, SPHERICAL cutoff
-    // alongside the square footprint boundary, and the two disagreeing is
-    // exactly the ring artifact that reads as a bug.
-
     const float slope  = saturate(1.0f - NdotL);
     const float offset = texelWorld * (1.0f + 3.0f * slope);
     float3 offsetPos   = positionWS + N * offset;
@@ -281,6 +252,106 @@ float ComputeShadow(float3 positionWS, float3 N, float NdotL)
             result = sum / 9.0f;
         }
     }
+
+    return result;
+}
+
+// Radial partition-of-unity blend. Ordinary pixels pay for one 3x3 PCF sample;
+// only the outer 15% of a cascade pays for the adjacent sample. Literal matrix
+// and float4 swizzles keep FXC away from dynamic cbuffer indexing, while the
+// strict split comparisons remain identical to core::SelectShadowCascade.
+float ComputeShadow(float3 positionWS, float3 N, float NdotL)
+{
+    // positionWS is camera-relative (RULE 1), so the camera is the origin and
+    // length is the exact radial distance. input.positionCS.w is not suitable:
+    // rasterization has already reciprocated it before the pixel stage.
+    const float viewDist = length(positionWS);
+
+    float primary = 1.0f;
+    float expected = 1.0f;
+    float result = 1.0f;
+    uint pairBit = 0u;
+    bool blended = false;
+
+    if (viewDist < cascadeSplitRadius.x)
+    {
+        primary = SampleShadowCascade(lightViewProj[0], cascadeTexelWorld.x, 0.0f,
+                                      positionWS, N, NdotL);
+        expected = primary;
+        if (viewDist >= cascadeFadeLo.x)
+        {
+            const float secondary =
+                SampleShadowCascade(lightViewProj[1], cascadeTexelWorld.y, 1.0f,
+                                    positionWS, N, NdotL);
+            const float weight = smoothstep(cascadeFadeLo.x,
+                                            cascadeSplitRadius.x, viewDist);
+            expected = lerp(primary, secondary, weight);
+            pairBit = 1u;
+            blended = true;
+        }
+        result = expected;
+    }
+    else if (viewDist < cascadeSplitRadius.y)
+    {
+        primary = SampleShadowCascade(lightViewProj[1], cascadeTexelWorld.y, 1.0f,
+                                      positionWS, N, NdotL);
+        expected = primary;
+        if (viewDist >= cascadeFadeLo.y)
+        {
+            const float secondary =
+                SampleShadowCascade(lightViewProj[2], cascadeTexelWorld.z, 2.0f,
+                                    positionWS, N, NdotL);
+            const float weight = smoothstep(cascadeFadeLo.y,
+                                            cascadeSplitRadius.y, viewDist);
+            expected = lerp(primary, secondary, weight);
+            pairBit = 2u;
+            blended = true;
+        }
+        result = expected;
+    }
+    else if (viewDist < cascadeSplitRadius.z)
+    {
+        primary = SampleShadowCascade(lightViewProj[2], cascadeTexelWorld.z, 2.0f,
+                                      positionWS, N, NdotL);
+        expected = primary;
+        if (viewDist >= cascadeFadeLo.z)
+        {
+            const float secondary =
+                SampleShadowCascade(lightViewProj[3], cascadeTexelWorld.w, 3.0f,
+                                    positionWS, N, NdotL);
+            const float weight = smoothstep(cascadeFadeLo.z,
+                                            cascadeSplitRadius.z, viewDist);
+            expected = lerp(primary, secondary, weight);
+            pairBit = 4u;
+            blended = true;
+        }
+        result = expected;
+    }
+    else if (viewDist < cascadeSplitRadius.w)
+    {
+        primary = SampleShadowCascade(lightViewProj[3], cascadeTexelWorld.w, 3.0f,
+                                      positionWS, N, NdotL);
+        expected = primary;
+        if (viewDist >= cascadeFadeLo.w)
+        {
+            const float weight = smoothstep(cascadeFadeLo.w,
+                                            cascadeSplitRadius.w, viewDist);
+            expected = lerp(primary, 1.0f, weight);
+            pairBit = 8u;
+            blended = true;
+        }
+        result = expected;
+    }
+
+#if DAWNING_DRAW_PROBE
+    // This records the value actually returned beside the independently named
+    // expected blend and hard-selected primary. A mutation that restores
+    // `result = primary` therefore increments mismatch pixels whenever the
+    // adjacent samples provide a real signal.
+    if (drawProbeEnabled != 0 && blended)
+        DawningWriteShadowBlendProbe(drawRecordProbe, objectIndex, pairBit,
+                                     expected, result, primary);
+#endif
 
     return result;
 }

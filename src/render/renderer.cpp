@@ -2982,11 +2982,58 @@ bool Renderer::ReadDrawProbe(DrawProbeValidation& validation)
         if (isShadow)
         {
             // The shadow pass has no pixel shader, so nothing may have written
-            // the material half of its slots. A nonzero here means some draw
-            // addressed the probe outside its own pass's range.
+            // the material or blend words of its slots. A nonzero here means
+            // some draw addressed the probe outside its own pass's range.
             if (actual[i].materialHash != 0 || actual[i].materialMarker != 0)
                 ++validation.materialMismatches;
+            if (actual[i].shadowBlendPixels != 0 ||
+                actual[i].shadowBlendPairMask != 0 ||
+                actual[i].shadowBlendExpectedQ8 != 0 ||
+                actual[i].shadowBlendOutputQ8 != 0 ||
+                actual[i].shadowBlendPrimaryQ8 != 0 ||
+                actual[i].shadowBlendSignalQ8 != 0 ||
+                actual[i].shadowBlendMismatchPixels != 0 ||
+                actual[i].shadowBlendPad != 0)
+            {
+                ++validation.shadowBlendMismatchPixels;
+            }
             continue;
+        }
+
+        if (actual[i].shadowBlendPixels == 0)
+        {
+            if (actual[i].shadowBlendPairMask != 0 ||
+                actual[i].shadowBlendExpectedQ8 != 0 ||
+                actual[i].shadowBlendOutputQ8 != 0 ||
+                actual[i].shadowBlendPrimaryQ8 != 0 ||
+                actual[i].shadowBlendSignalQ8 != 0 ||
+                actual[i].shadowBlendMismatchPixels != 0 ||
+                actual[i].shadowBlendPad != 0)
+            {
+                ++validation.shadowBlendMismatchPixels;
+            }
+        }
+        else
+        {
+            ++validation.shadowBlendRecords;
+            validation.shadowBlendPairMask |= actual[i].shadowBlendPairMask;
+            validation.shadowBlendPixels += actual[i].shadowBlendPixels;
+            validation.shadowBlendExpectedQ8 += actual[i].shadowBlendExpectedQ8;
+            validation.shadowBlendOutputQ8 += actual[i].shadowBlendOutputQ8;
+            validation.shadowBlendPrimaryQ8 += actual[i].shadowBlendPrimaryQ8;
+            validation.shadowBlendSignalQ8 += actual[i].shadowBlendSignalQ8;
+            validation.shadowBlendMismatchPixels +=
+                actual[i].shadowBlendMismatchPixels;
+
+            constexpr uint32_t validPairMask =
+                (1u << core::kShadowCascadeCount) - 1u;
+            if (actual[i].shadowBlendPairMask == 0 ||
+                (actual[i].shadowBlendPairMask & ~validPairMask) != 0 ||
+                actual[i].shadowBlendExpectedQ8 != actual[i].shadowBlendOutputQ8 ||
+                actual[i].shadowBlendPad != 0)
+            {
+                ++validation.shadowBlendMismatchPixels;
+            }
         }
 
         const uint32_t materialIndex = i - m_drawProbeShadowRecords;
