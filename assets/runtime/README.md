@@ -20,6 +20,17 @@ The source GLB stays in the content-addressed generated cache and is ignored by
 Git. Runtime and smoke tests consume only the cooked artifact; neither invokes
 Meshy or reads `MESHY_API_KEY`.
 
+`reference_ship.tdcontent` is the first Stage 4 runtime-content manifest. It
+maps every typed locator in `reference_ship.tdassembly` to an owner record. Its
+visual records deliberately reuse the corridor prototype while final exterior,
+airlock, cockpit, LOD, and moving-part art is still unbuilt. Collision,
+navigation, and walkable records are contract-only preflight witnesses; they do
+not claim that physics bodies, pathfinding, or walkable gameplay are live.
+
+The executable reads the generic `.tdcontent` manifest and therefore needs no
+asset-specific C++ change when a binding moves to a new cooked model. Runtime
+paths are relative to this directory and may not escape it.
+
 From a configured checkout containing that cached source, reproduce the runtime
 artifact with:
 

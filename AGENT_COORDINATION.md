@@ -1839,10 +1839,9 @@ are now integrated as well. The current order is:
   invalid primitive selection, stale/wrong owner token, catalog conflict,
   adapter rejection, GPU/resource registration failure, entity commit failure,
   and repeated shutdown cannot expose a partial assembly or outlive its owner
-- Latest commit: claim pending
-- Next action: complete the CPU manifest/owner contract and tests first, then
-  refactor the generic cooked-model upload bridge, wire the host to `App`, run
-  the full verification matrix, and hand the committed range to Claude
+- Latest commit: `0f41d6d` (claim); implementation commit pending
+- Next action: publish the verified implementation commit, request Claude's
+  read-only overlap/correctness review, then integrate and record closeout
 
 ## 20. Helper Commands
 

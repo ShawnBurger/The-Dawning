@@ -29,6 +29,11 @@ snapshot topology as future authored worlds. A live smoke witness builds,
 validates, applies, and rebuilds a simulation snapshot without disturbing render
 or gameplay components.
 
+WS-021 through WS-026 also complete the first production assembly path. A
+reviewed source manifest cooks to an immutable assembly, its locators resolve
+through a leased catalog, WS-025 stages an all-or-nothing ECS graph, and the
+WS-026 runtime host publishes that graph only after cooked model uploads retire.
+
 ## Production Call Graph
 
 Current host path:
@@ -71,7 +76,7 @@ the final velocity for the coordinate-time step.
 | Save codec | Existing | `snapshot_system` | N/A | Scene build/apply API | Atomic CPU tests + live smoke round trip |
 | Raster rendering | Existing | Scene traversal | N/A | Connected | Raster smoke |
 | DXR rendering | Existing | Scene/path tracer | N/A | Connected | Stable/full smoke |
-| Asset cooking/loading | Existing | Model loader | N/A | Connected | CPU tests + smoke markers |
+| Asset cooking/loading | Cooked model + assembly + `.tdcontent` | `AssemblyRuntimeHost` | WS-025 transaction | Connected | CPU contracts + runtime prepare/commit smoke markers |
 
 ## Correctness Findings And Corrections
 
@@ -211,6 +216,20 @@ generational policy, and both production loaders propagate registration failure.
 The imported-model bridge now rolls back every entity, mesh, texture, descriptor,
 and resource registered earlier in the same failed load.
 
+### 13. Production assembly content stopped at an offline graph
+
+The reviewed `.tdasset.json` contract could be compiled, loaded, leased, and
+transactionally prepared, but the executable still spawned one cooked model
+directly from `App`. That bypass left authored modules, moving parts, collision,
+navigation, and walkable identities disconnected from the production scene.
+
+Correction: the versioned `.tdcontent` manifest maps every authored typed
+locator to one cooked model primitive or immutable contract owner. The runtime
+host confines paths, verifies exact coverage, deduplicates model loads, seals
+owner/catalog identity, prepares through WS-025, and commits only after startup
+GPU uploads retire. Shutdown destroys entities before their model resources.
+Smoke now requires the exact 21-binding preparation and six-entity commit.
+
 ## Determinism And Atomicity Boundaries
 
 - Duplicate FTL, atmosphere, or clock bindings for one entity reject before the
@@ -237,9 +256,10 @@ snapshot transaction, not scattered reverse mutations.
 - CTest registers `TheDawningTests`; CI now builds and tests both Debug and
   Release rather than Debug alone.
 - Debug and Release app, tests, asset compiler, and asset inspector build.
-- Debug and Release CPU suites pass 362 cases and 17,033 checks.
+- Debug and Release CPU suites pass 411 cases and 17,608 checks.
 - Debug raster, stable DXR, and full-quality DXR smoke pass.
 - Release raster, stable DXR, and full-quality DXR smoke pass.
+- Debug stable DXR also passes with D3D12 GPU validation enabled.
 - Captures are 1920x1080, 99.9-100% nonblack, with structured renderer, shadow,
   IBL, descriptor lifetime, and draw-record probes passing.
 
@@ -255,6 +275,10 @@ snapshot transaction, not scattered reverse mutations.
    define when the active integration frame diverges from the master clock frame.
 4. Build gameplay-facing FTL command authoring only after destination frame and
    world-stream ownership rules are fixed.
+5. Replace the Stage 4 corridor-based assembly witness with the Stage 5 modular
+   production ship kit, then publish real collision, navigation, pressure,
+   interaction, moving-part, and runtime LOD systems against the existing typed
+   identities.
 
 ## Residual Risks
 

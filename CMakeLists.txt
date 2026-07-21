@@ -50,6 +50,7 @@ set(ASSET_SOURCES
     src/asset/cooked_assembly.cpp
     src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
+    src/asset/runtime_content_manifest.cpp
     src/asset/source_snapshot.cpp
 )
 
@@ -60,6 +61,7 @@ set(ASSET_HEADERS
     src/asset/cooked_model.h
     src/asset/model_data.h
     src/asset/gltf_importer.h
+    src/asset/runtime_content_manifest.h
     src/asset/source_snapshot.h
 )
 
@@ -180,6 +182,8 @@ set(SIM_HEADERS
 
 set(SCENE_SOURCES
     src/scene/assembly_instantiator.cpp
+    src/scene/assembly_runtime_host.cpp
+    src/scene/assembly_runtime_resources.cpp
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
     src/scene/model_loader.cpp
@@ -187,6 +191,8 @@ set(SCENE_SOURCES
 
 set(SCENE_HEADERS
     src/scene/assembly_instantiator.h
+    src/scene/assembly_runtime_host.h
+    src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
     src/scene/resource_manager.h
@@ -203,11 +209,13 @@ set(TEST_SOURCES
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
     tests/test_assembly_instantiator.cpp
+    tests/test_assembly_runtime_resources.cpp
     tests/test_assembly_resource_catalog.cpp
     tests/test_assembly_resource_resolver.cpp
     tests/test_cooked_assembly.cpp
     tests/test_asset_compiler.cpp
     tests/test_gltf_importer.cpp
+    tests/test_runtime_content_manifest.cpp
     tests/test_shadow_cascades.cpp
     tests/test_gpu_draw_records.cpp
     tests/test_rt_texture_lod.cpp
@@ -476,6 +484,8 @@ add_executable(TheDawningTests
     # Registry target and fault-injected test target both remain GPU-free.
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_instantiator.h
+    src/scene/assembly_runtime_resources.cpp
+    src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
     # GPU-facing per-draw record layouts and their sizing arithmetic. Safe here

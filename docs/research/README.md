@@ -23,6 +23,9 @@ design work. For the user-facing baseline, also read the root `README.md` and
 
 - **`RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`** — current production call graph,
   wiring matrix, corrections, validation evidence, and residual risks.
+- **`RUNTIME_CONTENT_ASSEMBLY_CONTRACT_2026-07-21.md`** - current Stage 4
+  manifest grammar, admission rules, immutable ownership, GPU-retirement
+  boundary, transactional publication, and explicit limitations.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
   **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
   and change reviews; useful provenance, not timeless status.

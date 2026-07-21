@@ -15,6 +15,9 @@ Do not merge old snapshots directly into this source tree.
 - Canonical simulation snapshots with validated, atomic ECS application.
 - Deterministic `.tdmodel` runtime loading with a real PBR corridor asset shipped
   through Git LFS; raw glTF/GLB remains an offline import/cooking format.
+- Versioned `.tdcontent` deployment manifests that bind exact cooked assembly
+  locators to immutable model/contract owners and publish the complete ECS graph
+  transactionally after GPU upload retirement.
 - Layer 4 material work is partially landed: albedo/normal textures,
   Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
   linear HDR scene target, bloom, and a separate tone-map resolve pass exist;

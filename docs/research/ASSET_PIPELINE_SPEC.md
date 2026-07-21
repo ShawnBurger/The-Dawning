@@ -293,10 +293,19 @@ vertex, index, and decoded-image counts in raster, stable DXR, and full DXR. A
 missing or corrupt shipped artifact stops scene initialization, so the clean-clone
 content path cannot silently fall back to procedural geometry or an ignored GLB.
 
-**Stage 4 - Content directory and manifest.** Data-driven scene definition so
-adding an asset does not mean editing `app.cpp`. This is the "data-driven systems"
-principle the master spec lists and the point at which the demo scene stops being
-hardcoded.
+**Stage 4 - Content directory and manifest (implemented by WS-026).** The
+versioned `.tdcontent` manifest selects one cooked assembly, maps every authored
+typed locator to a cooked model primitive or an immutable contract owner, and
+supplies the root transform. Runtime paths are confined to the manifest
+directory, coverage is exact, models are deduplicated, and the owner/catalog
+tables seal before WS-025 transactional preparation. The app commits only after
+the startup upload batch retires and tears the graph down before its model
+resources. See `RUNTIME_CONTENT_ASSEMBLY_CONTRACT_2026-07-21.md`.
+
+The shipped reference manifest is deliberately a lifecycle witness that reuses
+the corridor prototype. Stage 4 does not claim final ship art, physics collision
+publication, navmesh/pathfinding, pressure, interaction state, moving-part
+animation, or runtime LOD selection.
 
 **Stage 5 - Interior kit and the first walkable space.** The vertical slice the
 master spec asks for, built from modular parts rather than one generated mesh.

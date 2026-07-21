@@ -157,6 +157,22 @@ Assert-Marker "model_primitives" "1"
 Assert-Marker "model_vertices" "15562"
 Assert-Marker "model_indices" "57579"
 Assert-Marker "model_images" "3"
+
+# The shipped scene must be assembled from its runtime-content manifest, not
+# from App-owned entity construction. The prepare marker proves that all 21
+# typed assembly locators resolved through one immutable cooked-model owner;
+# the commit marker proves the WS-025 transaction reached the live registry
+# only after startup upload retirement. Exact topology counts keep a partial
+# or placeholder assembly from satisfying the lifecycle check.
+Assert-Marker "runtime_content_prepared" "ok"
+Assert-Marker "scene" "ship.reference.runtime"
+Assert-Marker "bindings" "21"
+Assert-Marker "models" "1"
+Assert-Marker "runtime_assembly_committed" "ok"
+Assert-Marker "asset" "ship.reference.fighter"
+Assert-Marker "modules" "3"
+Assert-Marker "moving_parts" "2"
+Assert-Marker "entities" "6"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never

@@ -8,6 +8,7 @@
 #include "render/path_tracer.h"
 #include "render/renderer.h"
 #include "scene/scene.h"
+#include "scene/assembly_runtime_host.h"
 
 #include <array>
 #include <cstdint>
@@ -74,6 +75,7 @@ private:
     render::DebugOverlay m_debugOverlay;
     render::Camera m_camera;
     scene::Scene m_scene;
+    scene::AssemblyRuntimeHost m_runtimeAssembly;
     core::Timer m_timer;
 
     bool m_windowReady = false;

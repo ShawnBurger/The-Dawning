@@ -444,28 +444,20 @@ bool App::InitializeScene()
     cubeEmissiveTexture.descriptor =
         m_renderer.RegisterTexture(m_device.Device(), cubeEmissiveTexture);
 
-    // Production content loads the deterministic engine-owned format. The raw
-    // Meshy GLB is an ignored cooker input and is never parsed by the runtime.
-    // The cooked asset is shipped through Git LFS and copied with assets/**, so
-    // a clean clone exercises the same content path as this development tree.
-    //
-    // Its upload is recorded onto the SAME command list as the meshes above and
-    // flushed by the Close/Execute/Wait immediately below, so loadedModel - which
-    // owns the upload buffers - must outlive that wait. It does: it is a local of
-    // this function, which returns well after both GPU waits.
-    scene::LoadedModel loadedModel;
+    // One generic data manifest now owns the cooked assembly and all typed
+    // resource bindings. It records model uploads onto this same open command
+    // list but publishes no ECS entities until the upload batch retires below.
+    const scene::AssemblyRuntimeHostResult runtimePrepared =
+        m_runtimeAssembly.BeginLoad(
+            m_scene, m_device, m_renderer,
+            "assets/runtime/reference_ship.tdcontent");
+    if (!runtimePrepared.Succeeded())
     {
-        const std::filesystem::path modelPath =
-            "assets/runtime/corridor_section.tdmodel";
-        loadedModel = scene::LoadCookedModelIntoScene(
-            m_scene, m_device, m_renderer, modelPath,
-            ecs::Transform{ { -4.5, 0.85, 3.0 }, core::Quatf::Identity(), { 1, 1, 1 } });
-        if (!loadedModel.ok)
-        {
-            core::Log::Errorf("Required runtime asset failed to load: %s",
-                              loadedModel.error.c_str());
-            return false;
-        }
+        core::Log::Errorf("Required runtime content failed to prepare [%s]: %s",
+                          scene::AssemblyRuntimeHostStatusName(
+                              runtimePrepared.status),
+                          runtimePrepared.error.c_str());
+        return false;
     }
 
     const HRESULT closeHr = m_device.CmdList()->Close();
@@ -478,6 +470,17 @@ bool App::InitializeScene()
     m_device.CmdQueue()->ExecuteCommandLists(1, uploadLists);
     if (!m_device.WaitForGpu())
         return false;
+
+    const scene::AssemblyRuntimeHostResult runtimeCommitted =
+        m_runtimeAssembly.CommitAfterUploadRetirement(m_scene);
+    if (!runtimeCommitted.Succeeded())
+    {
+        core::Log::Errorf("Required runtime content failed to commit [%s]: %s",
+                          scene::AssemblyRuntimeHostStatusName(
+                              runtimeCommitted.status),
+                          runtimeCommitted.error.c_str());
+        return false;
+    }
 
     auto& resources = m_scene.GetResources();
     const auto cube = resources.AddMesh(std::move(cubeMesh), "Cube");
@@ -2278,6 +2281,8 @@ void App::Shutdown()
         core::Log::Error("GPU did not become idle before application resource shutdown");
     if (m_sceneReady)
     {
+        if (!m_runtimeAssembly.Shutdown(m_scene, m_device, m_renderer))
+            core::Log::Error("Runtime assembly teardown failed");
         m_scene.Shutdown(m_device, m_renderer);
         m_sceneReady = false;
         if (m_options.smoke)

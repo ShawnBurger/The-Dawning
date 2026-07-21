@@ -131,10 +131,12 @@ catalog before it can be admitted to the cooker.
 
 ## Integration Boundary
 
-The next workstream may map each immutable table entry to runtime handles, but
-must retain the cooked indices as stable provenance. Entity creation should be
-transactional: construct resources and components in temporary ownership,
-validate every referenced mesh/collision/nav resource, then publish the complete
-assembly or publish nothing. Portals, pressure, navigation, interaction state,
-moving rigid parts, local lighting, and streaming must remain separate systems
-joined by the cooked identities rather than hidden loader side effects.
+WS-026 now maps each immutable table entry to leased runtime handles through the
+versioned `.tdcontent` contract described in
+`RUNTIME_CONTENT_ASSEMBLY_CONTRACT_2026-07-21.md`. WS-025 preparation and commit
+publish the entity graph transactionally only after model uploads retire.
+
+Portals, pressure, navigation, interaction state, moving rigid parts, local
+lighting, and streaming remain separate systems joined by the cooked identities
+rather than hidden loader side effects. Their catalog records are preflight
+contracts in Stage 4, not claims that those gameplay systems are already live.

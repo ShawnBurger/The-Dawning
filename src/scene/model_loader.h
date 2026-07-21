@@ -14,6 +14,7 @@
 // exact same upload path, including embedded PBR images.
 
 #include "scene.h"
+#include "../asset/cooked_model.h"
 #include "../ecs/components.h"
 #include "../render/d3d12_device.h"
 
@@ -27,6 +28,31 @@ namespace render { class Renderer; }
 namespace scene
 {
 
+struct LoadedModelPrimitive
+{
+    uint32_t sourcePrimitiveIndex = 0;
+    MeshHandle mesh;
+    ecs::Material material;
+    std::string name;
+};
+
+struct LoadedModelResources
+{
+    std::vector<LoadedModelPrimitive> primitives;
+    std::vector<TextureHandle> textures;
+
+    // Upload buffers back CPU->GPU copies recorded on the caller's open command
+    // list. They may be released only after that command list has retired.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> uploadBuffers;
+
+    uint64_t vertexCount = 0;
+    uint64_t indexCount = 0;
+    uint32_t decodedImageCount = 0;
+    asset::Sha256Digest sourceSha256;
+    bool ok = false;
+    std::string error;
+};
+
 struct LoadedModel
 {
     // Entities spawned, one per imported primitive. Empty on failure.
@@ -37,11 +63,27 @@ struct LoadedModel
     // and waits, so these MUST outlive that wait. The caller keeps this struct
     // alive until after its WaitForGpu, exactly as InitializeScene already does
     // for the procedural demo meshes.
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> uploadBuffers;
+    LoadedModelResources resources;
 
     bool ok = false;
     std::string error;
 };
+
+// Load and register one model's GPU resources without creating ECS entities.
+// The caller owns the returned handles and must either transfer them to a
+// longer-lived runtime owner or release them explicitly with
+// ReleaseLoadedModelResources before Scene shutdown.
+LoadedModelResources LoadCookedModelResources(
+    Scene& scene,
+    render::D3D12Device& device,
+    render::Renderer& renderer,
+    const std::filesystem::path& path);
+
+void ReleaseLoadedModelResources(
+    LoadedModelResources& resources,
+    Scene& scene,
+    render::D3D12Device& device,
+    render::Renderer& renderer) noexcept;
 
 // Load a glTF/GLB from disk, record its geometry uploads onto device's CURRENTLY
 // OPEN command list, register the meshes with the scene's ResourceManager, and

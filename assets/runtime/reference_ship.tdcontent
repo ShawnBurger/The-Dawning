@@ -1,0 +1,32 @@
+# Data-driven Stage 4 runtime witness for the reference ship assembly.
+# Every visual currently resolves to the shipped corridor-section prototype.
+# This proves runtime ownership and assembly composition; it is not final ship art.
+tdcontent 1
+scene "ship.reference.runtime"
+assembly "reference_ship.tdassembly"
+root -4.5 0.85 3.0 0 0 0 1 1 1
+
+visual "source://reference/hull.glb" "corridor_section.tdmodel" 0
+visual "visual://hull_lod0" "corridor_section.tdmodel" 0
+visual "visual://hull_lod1" "corridor_section.tdmodel" 0
+visual "visual://hull_lod2" "corridor_section.tdmodel" 0
+collision "collision://hull"
+
+visual "source://reference/airlock.glb" "corridor_section.tdmodel" 0
+visual "visual://airlock_lod0" "corridor_section.tdmodel" 0
+visual "visual://airlock_lod1" "corridor_section.tdmodel" 0
+visual "visual://airlock_lod2" "corridor_section.tdmodel" 0
+visual "visual://airlock/outer_hatch_panel" "corridor_section.tdmodel" 0
+visual "visual://airlock/inner_door_panel" "corridor_section.tdmodel" 0
+collision "collision://airlock"
+navigation "nav://airlock"
+walkable "walk://airlock_floor"
+
+visual "source://reference/cockpit.glb" "corridor_section.tdmodel" 0
+visual "visual://cockpit_lod0" "corridor_section.tdmodel" 0
+visual "visual://cockpit_lod1" "corridor_section.tdmodel" 0
+visual "visual://cockpit_lod2" "corridor_section.tdmodel" 0
+collision "collision://cockpit"
+navigation "nav://cockpit"
+walkable "walk://cockpit_floor"
+end
