@@ -802,27 +802,45 @@ on `main`. The current order is:
 
 ### WS-006: Shadow/rendering improvement
 
-- Status: PLANNED
-- Outcome: deliver one measured rendering improvement without reopening already
-  solved shadow, IBL, or resource-lifetime work
+- Status: ACTIVE
+- Outcome: remove hard cascaded-shadow transitions by consuming the already
+  shipped fade bands, cross-fading adjacent shadow samples at the first three
+  boundaries and fading the outer cascade to lit coverage
 - Primary: Codex
 - Reviewer: Claude
-- Branch: scope after WS-005 integration gates and publication complete
-- Worktree: dedicated Codex task worktree
-- Base commit: then-current `main`
-- Owned paths: the declared `src/render/**`, `shaders/**`, and render tests for the
-  selected improvement
-- Excluded paths: simulation and asset-import internals unless the interface is
-  separately locked
-- Shared-file locks: smoke harness and app wiring are integration-only
-- Interface contract: inspect current merged implementation and historical Claude
-  branches before selecting the gap; no duplicate cascade or shadow-map system
-- Dependencies: WS-005 merged and published; a concrete measured visual defect
-- Acceptance gates: Debug/Release builds, raster/stable/full smoke, GPU validation
-  where lifecycle changes, and a consumption-site probe or visual capture
-- Negative controls: deliberately disabled or broken behavior must fail the gate
-- Latest commit: none
-- Next action: choose the first scoped rendering defect after the asset lane
+- Branch: `codex/shadow-cascade-blend`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-shadow-cascade-blend`
+- Base commit: `d5d3bd2`
+- Owned paths: `src/core/shadow_cascades.*`, `tests/test_shadow_cascades.cpp`,
+  `shaders/basic_ps.hlsl`, the draw-probe layout/reduction in
+  `shaders/gpu_draw_records.hlsli` and `src/render/gpu_draw_records.h`, the
+  focused probe plumbing in `src/render/renderer.*` and `src/app.cpp`,
+  `tools/smoke_test.ps1`, the Shadows section of `README.md`, and focused shadow
+  design documentation
+- Excluded paths: DXR/path-tracing behavior, simulation, gameplay, asset import,
+  resource lifetime, root-signature layout, and unrelated renderer refactors
+- Shared-file locks: `src/app.cpp`, `src/render/renderer.*`,
+  `tools/smoke_test.ps1`, and the Shadows section of `README.md` locked to WS-006;
+  `CMakeLists.txt` remains integration-only and is not expected to change
+- Interface contract: preserve the existing four matrices, one
+  `Texture2DArray`, radial split table, world-anchored snap, 3x3 PCF kernel, and
+  constant-buffer layout; ordinary pixels sample one cascade, fade-band pixels
+  sample two, and no new descriptor or root parameter is introduced
+- Dependencies: merged WS-005 content path; existing `cascadeFadeLo` values and
+  reserved cbuffer bytes; the real ground/pillar scene spans multiple cascades
+- Acceptance gates: exact CPU partition-of-unity and boundary tests,
+  Debug/Release builds and CPU suites, raster/stable/full smoke in both
+  configurations, a GPU pixel-stage probe proving the emitted result equals the
+  adjacent-cascade blend rather than the old hard selection, and before/after
+  visual captures
+- Negative controls: hard-selecting the primary sample while leaving the probe
+  armed must fail the GPU result check; breaking adjacent weights must fail the
+  CPU partition tests; a scene with no observed fade-band pixels must fail smoke
+- Latest commit: none; baseline raster capture recorded from `d5d3bd2`
+- Next action: create the task worktree, land the CPU blend contract first, then
+  implement the shader and extend the existing draw-probe record without changing
+  the root signature
 
 ## 20. Helper Commands
 
