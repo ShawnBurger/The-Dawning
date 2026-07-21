@@ -1777,6 +1777,73 @@ are now integrated as well. The current order is:
 - Next action: retire the clean WS-025 worktree and local task branch after this
   closeout record reaches `origin/main`
 
+### WS-026: Data-driven production assembly runtime
+
+- Status: ACTIVE
+- Outcome: load one shipped runtime-content manifest, its cooked assembly, and
+  its cooked visual resources without asset-specific C++ scene construction;
+  register every authored visual/collision/navigation/walkable locator in the
+  leased catalog; prepare and commit the assembly through WS-025 into the live
+  ECS registry; and retain one explicit runtime owner that can tear the entity
+  graph and resource bindings down in the correct order. This is the bounded
+  Stage 4 bridge from cooked content to a visible runtime assembly, not a claim
+  that the reference geometry is final production art or that Stage 5 interior
+  gameplay already exists.
+- Primary: Codex
+- Reviewer: Claude, read-only after a stable commit; manual review fallback if
+  the Claude service is unavailable or rate-limited
+- Branch: `codex/production-assembly-runtime`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-production-assembly-runtime`
+- Base commit: `45697d8`
+- Owned paths: new runtime-content manifest/parser and assembly-host modules
+  under `src/asset/**` and `src/scene/**`; focused new tests; the shipped
+  reference runtime-content and cooked-assembly artifacts; the generic cooked-
+  model resource-upload surface in `src/scene/model_loader.{h,cpp}`; additive
+  documentation; and the smallest required source/test/asset-copy/startup and
+  shutdown hooks in `CMakeLists.txt` and `src/app.{h,cpp}`
+- Excluded paths: frozen WS-022 through WS-025 semantics except for a separately
+  justified defect fix; `src/ecs/**`; `src/sim/**`; `src/gameplay/**`;
+  `src/render/**`; shaders; Meshy network submission; procedural demo removal;
+  collision bodies/broad phase; navmesh publication/pathfinding; pressure and
+  atmosphere volumes; portal/interaction state machines; moving-part animation;
+  runtime LOD selection; streaming/hot reload; save/load; and final ship art
+- Shared-file locks: WS-026 holds only its additive `CMakeLists.txt` blocks and
+  the generic `src/app.{h,cpp}` runtime-content startup/shutdown call sites; all
+  other high-collision files remain available
+- Interface contract: a strict, versioned, size-limited data manifest maps one
+  relative cooked assembly path and each typed virtual locator to either a
+  cooked visual resource plus primitive selection or an explicit contract-only
+  owner record. Paths remain confined beneath the manifest content root. The
+  host loads and validates all CPU artifacts first, records GPU uploads without
+  executing the caller's command list, registers exact catalog identities with
+  nonzero typed owner tokens and lifetime anchors, acquires one immutable
+  snapshot, invokes WS-025 preparation, and commits only after the upload batch
+  retires successfully. Failure at any stage publishes no assembly instance and
+  rolls back every resource/entity created by the attempt. Contract-only
+  collision/navigation/walkable records satisfy owner preflight but deliberately
+  create no hidden subsystem state. Shutdown destroys the assembly before
+  releasing its catalog/resource owners and before Scene/Renderer/Device
+  shutdown.
+- Dependencies: merged WS-022 cooked assembly, WS-023 resolver, WS-024 leased
+  catalog, WS-025 transaction, cooked-model GPU bridge, and shipped
+  `assets/runtime/corridor_section.tdmodel`
+- Acceptance gates: clean-clone content manifest and cooked assembly load;
+  deterministic locator registration; one visual module entity per authored
+  module plus moving-part entities; exact stable-index mapping; live mesh and
+  material handles; catalog lease retained by the instance; explicit idempotent
+  teardown; Debug/Release all-target builds and CPU suites; raster, stable-DXR,
+  and full-DXR smoke with runtime-content markers and a nonblack visual witness
+- Negative controls: malformed/oversized manifest, duplicate or missing typed
+  locator, absolute/traversing path, missing/corrupt cooked assembly/model,
+  invalid primitive selection, stale/wrong owner token, catalog conflict,
+  adapter rejection, GPU/resource registration failure, entity commit failure,
+  and repeated shutdown cannot expose a partial assembly or outlive its owner
+- Latest commit: claim pending
+- Next action: complete the CPU manifest/owner contract and tests first, then
+  refactor the generic cooked-model upload bridge, wire the host to `App`, run
+  the full verification matrix, and hand the committed range to Claude
+
 ## 20. Helper Commands
 
 Create a task worktree:
