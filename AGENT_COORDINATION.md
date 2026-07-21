@@ -1721,7 +1721,7 @@ are now integrated as well. The current order is:
 
 ### WS-025: Transactional runtime assembly instantiation
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: convert one immutable resolved assembly and its exact WS-024 catalog
   lease into a fully preflighted scene-spawn plan, then commit the root, module,
   and moving-part entities as one rollback-safe transaction. The returned
@@ -1771,10 +1771,11 @@ are now integrated as well. The current order is:
   publish a partial plan or leak a partial entity graph
 - Validation: Debug and Release all-target builds pass; Debug and Release CPU
   suites each pass 401 cases and 17,528 checks; Debug and Release CTest each pass
-  4/4; `git diff --cached --check` passed before the feature commit
-- Latest commit: `5b0971d`
-- Next action: push the feature branch, fast-forward `main`, repeat the complete
-  integration matrix, pass GitHub CI, and retire the local worktree/branch
+  4/4; `git diff --cached --check` passed before the feature commit; GitHub CI
+  run `29846710642` passed on `main` in Windows/MSVC Debug and Release
+- Latest commit: `4d2c24e` on `main` (`5b0971d` implementation)
+- Next action: retire the clean WS-025 worktree and local task branch after this
+  closeout record reaches `origin/main`
 
 ## 20. Helper Commands
 
