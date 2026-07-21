@@ -2094,7 +2094,7 @@ are now integrated as well. The current order is:
 
 ### WS-030: Pilot-seat possession and ship-root player boundary
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: add an explicit, deterministic transition between the existing
   playable ship and the Stage 5C on-foot controller. The authored pilot seat
   owns entry, an authored spawn socket owns exit placement, and all on-foot
@@ -2151,10 +2151,39 @@ are now integrated as well. The current order is:
   state vocabulary, out-of-range use, obstructed/depenetrating spawn, stale
   topology/revision, invalid command/time step, destroyed ship/assembly entity,
   and failed seat mutation cannot partially transfer control or leak old input
-- Next action: implement and adversarially audit WS-030, then claim the separate
-  assembly-root presentation propagation lane needed to replace the prototype
-  cube with the production ship hierarchy; do not hide that larger hierarchy
-  problem inside possession.
+- Integrated commits: claim `e71eaff`, local-up camera claim expansion
+  `fea7f4b`, implementation `cddb4b7`, and adversarial hardening `c419825`;
+  fast-forwarded to `main` after rebasing over Stage 8 Lambert planning.
+- Delivered: explicit uninitialized/ship/on-foot possession states; exact
+  pilot-seat and exit-spawn topology; pure staged exit/entry transactions;
+  overlap, range, facing, topology, revision, and root validation; exclusive
+  ship/on-foot input routing; fixed-step on-foot App handoff; live-root camera
+  and interaction-query composition; rolled-root `Camera::InitBasis`; a
+  query-only nearest-interaction seam; deterministic spawn-socket cooking; and
+  exact smoke witnesses for exit, movement, re-entry, seat state, and root
+  composition.
+- Adversarial review: corrected a smoke cascade-fixture regression, relative
+  root-scale tolerance, nearest-target priority, startup mutation ordering,
+  module Euler reduction precision, accidental on-foot dependency on ship
+  control components, stale flight-command replay, destroyed-root partial
+  transfer, duplicated smoke transaction logic, missing App fixed-step proof,
+  and overflow controls around local/socket/query arithmetic.
+- Verification: Debug and Release all-target builds passed; Debug and Release
+  CTest passed 5/5; the integrated Release CPU suite passed 481 tests and
+  18,572 checks; Release raster, stable-DXR, and full-DXR smoke passed; Debug
+  stable DXR passed with D3D12 GPU validation; the cooked reference assembly
+  rebuilt byte-for-byte at SHA-256
+  `E4C3CD8EAD76D8D7120E34AE4D2846FDBFF44E62D5EF9FB8B9A430F5B56FD86F`;
+  and a 1920x1080 stable-DXR capture passed pixel statistics plus manual
+  nonblank, framing, and overlap inspection.
+- Known boundary: production module and moving-part render entities still hold
+  authored-world transforms while the live player ship root moves, so the
+  prototype central cube remains the authoritative moving presentation witness.
+- Next action: claim Stage 5E as a separate assembly-root presentation lane.
+  Give the production assembly one authoritative live root, compose immutable
+  local child transforms through it, connect rigid body, thrusters, collision,
+  interior, and rendered identity, and remove the cube only after raster/DXR
+  visual gates prove the hierarchy follows the ship coherently.
 
 ## 20. Helper Commands
 
