@@ -150,6 +150,113 @@ TEST_CASE(Cascades_TexelSizeIsStrictlyIncreasingAndBounded)
 }
 
 // -----------------------------------------------------------------------------
+// The fade table must leave a non-empty single-boundary band. If one band starts
+// before the previous split, a pixel can belong to two transitions at once and
+// the shader's two-sample contract no longer forms a partition of unity.
+// -----------------------------------------------------------------------------
+TEST_CASE(Cascades_FadeBandsAreOrderedAndDisjoint)
+{
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+    {
+        const float fadeLo = core::ShadowCascadeFadeLo(c);
+        const float split = core::ShadowCascadeSplitRadius(c);
+        CHECK(fadeLo >= 0.0f);
+        CHECK(fadeLo < split);
+        if (c > 0)
+            CHECK(fadeLo > core::ShadowCascadeSplitRadius(c - 1u));
+    }
+}
+
+TEST_CASE(Cascades_BlendWeightsPartitionUnityAcrossEveryBoundary)
+{
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+    {
+        const float fadeLo = core::ShadowCascadeFadeLo(c);
+        const float split = core::ShadowCascadeSplitRadius(c);
+
+        for (int step = 0; step <= 64; ++step)
+        {
+            const float t = static_cast<float>(step) / 64.0f;
+            const float radius = fadeLo + (split - fadeLo) * t;
+            const core::ShadowCascadeBlend blend =
+                core::ComputeShadowCascadeBlend(radius);
+
+            CHECK(blend.primaryWeight >= 0.0f);
+            CHECK(blend.secondaryWeight >= 0.0f);
+            CHECK(blend.litWeight >= 0.0f);
+            CHECK_APPROX_EPS(blend.primaryWeight + blend.secondaryWeight +
+                                 blend.litWeight,
+                             1.0f, 1e-6f);
+
+            if (step < 64)
+            {
+                CHECK_EQ(blend.primaryCascade, c);
+                if (c + 1u < core::kShadowCascadeCount)
+                {
+                    CHECK_EQ(blend.secondaryCascade, c + 1u);
+                    CHECK_APPROX(blend.litWeight, 0.0f);
+                }
+                else
+                {
+                    CHECK_EQ(blend.secondaryCascade, c);
+                    CHECK_APPROX(blend.secondaryWeight, 0.0f);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE(Cascades_BlendEndpointsAreContinuous)
+{
+    for (uint32_t c = 0; c < core::kShadowCascadeCount; ++c)
+    {
+        const float fadeLo = core::ShadowCascadeFadeLo(c);
+        const float split = core::ShadowCascadeSplitRadius(c);
+        const float middle = fadeLo + (split - fadeLo) * 0.5f;
+
+        const core::ShadowCascadeBlend atStart =
+            core::ComputeShadowCascadeBlend(fadeLo);
+        CHECK_EQ(atStart.primaryCascade, c);
+        CHECK_APPROX(atStart.primaryWeight, 1.0f);
+        CHECK_APPROX(atStart.secondaryWeight, 0.0f);
+        CHECK_APPROX(atStart.litWeight, 0.0f);
+
+        const core::ShadowCascadeBlend atMiddle =
+            core::ComputeShadowCascadeBlend(middle);
+        CHECK_APPROX_EPS(atMiddle.primaryWeight, 0.5f, 1e-6f);
+        if (c + 1u < core::kShadowCascadeCount)
+            CHECK_APPROX_EPS(atMiddle.secondaryWeight, 0.5f, 1e-6f);
+        else
+            CHECK_APPROX_EPS(atMiddle.litWeight, 0.5f, 1e-6f);
+
+        const core::ShadowCascadeBlend atSplit =
+            core::ComputeShadowCascadeBlend(split);
+        if (c + 1u < core::kShadowCascadeCount)
+        {
+            CHECK_EQ(atSplit.primaryCascade, c + 1u);
+            CHECK_APPROX(atSplit.primaryWeight, 1.0f);
+            CHECK_APPROX(atSplit.secondaryWeight, 0.0f);
+            CHECK_APPROX(atSplit.litWeight, 0.0f);
+        }
+        else
+        {
+            CHECK_APPROX(atSplit.primaryWeight, 0.0f);
+            CHECK_APPROX(atSplit.secondaryWeight, 0.0f);
+            CHECK_APPROX(atSplit.litWeight, 1.0f);
+        }
+    }
+
+    const core::ShadowCascadeBlend negative = core::ComputeShadowCascadeBlend(-1.0f);
+    CHECK_EQ(negative.primaryCascade, 0u);
+    CHECK_APPROX(negative.primaryWeight, 1.0f);
+
+    const core::ShadowCascadeBlend beyond = core::ComputeShadowCascadeBlend(1.0e9f);
+    CHECK_APPROX(beyond.primaryWeight, 0.0f);
+    CHECK_APPROX(beyond.secondaryWeight, 0.0f);
+    CHECK_APPROX(beyond.litWeight, 1.0f);
+}
+
+// -----------------------------------------------------------------------------
 // F3 - cascade selection stuck at 0.
 // The probe is built in LIGHT space, so |lightSpaceX| exceeds cascade 0's extent
 // BY CONSTRUCTION, independent of camera or light orientation.

@@ -576,14 +576,15 @@ assumption. Shared application wiring remains an integration task.
 ## 19. Current Priority and Workstreams
 
 The first parallel split is complete: Claude's active-system N-body core and
-Codex's playable-ship vertical slice are both on `main`. The current order is:
+relativity foundation plus Codex's playable-ship and cooked-content slices are
+on `main`. The current order is:
 
-1. Codex closes the remaining glTF/content-pipeline gap in WS-005; do not run a
-   second Codex implementation lane at the same time.
-2. Claude registers the next relativistic/time-dilation workstream before editing
-   `claude/sim-relativity`, with Codex assigned as reviewer.
-3. Codex takes the next scoped shadow/rendering improvement after WS-005 reaches
-   review.
+1. Codex scopes and implements one measured shadow/rendering improvement in
+   WS-006; do not run a second Codex implementation lane at the same time.
+2. Claude registers the atmosphere implementation workstream before editing the
+   clean `claude/sim-atmosphere` worktree, with Codex assigned as reviewer.
+3. Codex completes the deferred numerical review of merged WS-008 before Claude
+   builds another dependent simulation stage.
 4. Route coupled flight assist through real actuator limits so both flight modes
    expose physical thruster state.
 5. Add collision/close-encounter policy before production N-body activation.
@@ -685,6 +686,38 @@ Codex's playable-ship vertical slice are both on `main`. The current order is:
 - Next action: retire the clean N-body worktree after audit; register a new
   workstream before implementation begins on `claude/sim-relativity`
 
+### WS-008: Relativistic dynamics and time dilation
+
+- Status: MERGED
+- Outcome: add momentum-space relativistic dynamics, proper-time accumulation,
+  and deterministic numerical/analytic coverage without changing gameplay or
+  renderer ownership
+- Primary: Claude
+- Reviewer: Codex
+- Branch: `claude/sim-relativity`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\rel`
+- Base commit: `277aec3`
+- Owned paths: `src/sim/relativity.h`, `src/sim/relativity.cpp`,
+  `tests/test_relativity.cpp`, and the required component additions
+- Excluded paths: renderer, asset pipeline, player input, camera, and scene
+  wiring
+- Shared-file locks: released; `CMakeLists.txt` and `src/ecs/components.h` were
+  integrated with the feature
+- Interface contract: expose pure CPU momentum/proper-time operations; do not
+  mutate player, camera, render, or active-system ownership outside explicit
+  callers
+- Dependencies: merged N-body and reference-frame foundations
+- Acceptance gates: analytic velocity/momentum identities, finite-domain and
+  speed-limit guards, deterministic replay, timestep convergence, and
+  Debug/Release CPU suites
+- Negative controls: superluminal velocity, invalid mass, and non-finite state
+  must be rejected rather than contaminating simulation state
+- Latest commit: `6b32caa` on the task branch, merged to `main` by `aafdcad`
+- Review note: the feature reached `main` before Codex completed the independent
+  numerical/ownership review; that review remains explicit integration debt.
+- Next action: Codex reviews `6b32caa` and records findings before a dependent
+  simulation stage is integrated
+
 ### WS-004: Playable-ship vertical slice
 
 - Status: MERGED
@@ -723,8 +756,9 @@ Codex's playable-ship vertical slice are both on `main`. The current order is:
 
 ### WS-005: glTF/content-pipeline closure
 
-- Status: ACTIVE
-- Outcome: close the Stage 4 gap by loading deterministic `.tdmodel` content
+- Status: MERGED
+- Outcome: close the remaining cooked-runtime gap in Stage 3 by loading
+  deterministic `.tdmodel` content
   through the existing GPU/material bridge and shipping one real corridor asset
   in Git LFS so a clean clone exercises the cooked runtime path
 - Primary: Codex
@@ -750,34 +784,63 @@ Codex's playable-ship vertical slice are both on `main`. The current order is:
   suites, and required real-model markers in raster, stable-DXR, and full-DXR smoke
 - Negative controls: removing or corrupting the shipped `.tdmodel` must fail the
   runtime/smoke gate; a clean clone must not use ignored generated GLBs or API keys
-- Latest commit: none; inventory completed against `main` and historical asset
-  branches
-- Next action: publish the cooked corridor through LFS, factor raw/cooked loading
-  onto one GPU bridge, and make smoke require the cooked-model marker
+- Latest commit: `397de24` on the task branch, merged to `main` by `adec8eb`
+- Review note: automated Claude review was deferred under Shawn's explicit
+  instruction after the local review command repeatedly failed to return; this
+  is review debt rather than reviewer approval.
+- Acceptance result: the staged LFS pointer references SHA-256
+  `ff03a907e3c09e64bf4d56434e879955abcf0810a9206cdaff69a17088ec6375`
+  at 9,533,104 bytes and `git lfs fsck` passes. A branch-native recook was
+  byte-identical. The feature branch passes 239 CPU cases and 9,488 checks in
+  both configurations. Combined `main`, including merged relativity, passes 254
+  cases and 13,614 checks plus raster, stable-DXR, and full-DXR smoke in Debug
+  and Release with exact cooked primitive, vertex, index, and decoded-image
+  markers. Removing the copied runtime artifact exits with code 1 and a
+  required-asset error rather than falling back.
+- Next action: run the combined-main matrix, publish the integration, then retire
+  the clean task worktree after confirming reachability from `origin/main`
 
 ### WS-006: Shadow/rendering improvement
 
-- Status: PLANNED
-- Outcome: deliver one measured rendering improvement without reopening already
-  solved shadow, IBL, or resource-lifetime work
+- Status: ACTIVE
+- Outcome: remove hard cascaded-shadow transitions by consuming the already
+  shipped fade bands, cross-fading adjacent shadow samples at the first three
+  boundaries and fading the outer cascade to lit coverage
 - Primary: Codex
 - Reviewer: Claude
-- Branch: scoped after WS-005 reaches `REVIEW`
-- Worktree: dedicated Codex task worktree
-- Base commit: then-current `main`
-- Owned paths: the declared `src/render/**`, `shaders/**`, and render tests for the
-  selected improvement
-- Excluded paths: simulation and asset-import internals unless the interface is
-  separately locked
-- Shared-file locks: smoke harness and app wiring are integration-only
-- Interface contract: inspect current merged implementation and historical Claude
-  branches before selecting the gap; no duplicate cascade or shadow-map system
-- Dependencies: WS-005 no longer `ACTIVE`; a concrete measured visual defect
-- Acceptance gates: Debug/Release builds, raster/stable/full smoke, GPU validation
-  where lifecycle changes, and a consumption-site probe or visual capture
-- Negative controls: deliberately disabled or broken behavior must fail the gate
-- Latest commit: none
-- Next action: choose the first scoped rendering defect after the asset lane
+- Branch: `codex/shadow-cascade-blend`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-shadow-cascade-blend`
+- Base commit: `d5d3bd2`
+- Owned paths: `src/core/shadow_cascades.*`, `tests/test_shadow_cascades.cpp`,
+  `shaders/basic_ps.hlsl`, the draw-probe layout/reduction in
+  `shaders/gpu_draw_records.hlsli` and `src/render/gpu_draw_records.h`, the
+  focused probe plumbing in `src/render/renderer.*` and `src/app.cpp`,
+  `tools/smoke_test.ps1`, the Shadows section of `README.md`, and focused shadow
+  design documentation
+- Excluded paths: DXR/path-tracing behavior, simulation, gameplay, asset import,
+  resource lifetime, root-signature layout, and unrelated renderer refactors
+- Shared-file locks: `src/app.cpp`, `src/render/renderer.*`,
+  `tools/smoke_test.ps1`, and the Shadows section of `README.md` locked to WS-006;
+  `CMakeLists.txt` remains integration-only and is not expected to change
+- Interface contract: preserve the existing four matrices, one
+  `Texture2DArray`, radial split table, world-anchored snap, 3x3 PCF kernel, and
+  constant-buffer layout; ordinary pixels sample one cascade, fade-band pixels
+  sample two, and no new descriptor or root parameter is introduced
+- Dependencies: merged WS-005 content path; existing `cascadeFadeLo` values and
+  reserved cbuffer bytes; the real ground/pillar scene spans multiple cascades
+- Acceptance gates: exact CPU partition-of-unity and boundary tests,
+  Debug/Release builds and CPU suites, raster/stable/full smoke in both
+  configurations, a GPU pixel-stage probe proving the emitted result equals the
+  adjacent-cascade blend rather than the old hard selection, and before/after
+  visual captures
+- Negative controls: hard-selecting the primary sample while leaving the probe
+  armed must fail the GPU result check; breaking adjacent weights must fail the
+  CPU partition tests; a scene with no observed fade-band pixels must fail smoke
+- Latest commit: none; baseline raster capture recorded from `d5d3bd2`
+- Next action: create the task worktree, land the CPU blend contract first, then
+  implement the shader and extend the existing draw-probe record without changing
+  the root signature
 
 ## 20. Helper Commands
 

@@ -111,8 +111,9 @@ uint DawningHashMaterialData(MaterialData record)
     return DawningHashWord(hash, record.materialPad);
 }
 
-// One 16-byte slot per OBJECT record: { objectHash, objectMarker, materialHash,
-// materialMarker }. Both passes address it by the object index, and the two
+// One 48-byte slot per OBJECT record. The first 16 bytes are object/material
+// hashes and markers; bytes 16..47 carry the cascade-blend witness. Both passes
+// address it by the object index, and the two
 // passes take disjoint ranges of the object buffer, so the shadow pass's slots
 // and the main pass's slots never collide.
 //
@@ -121,7 +122,7 @@ uint DawningHashMaterialData(MaterialData record)
 // deterministic without needing to nominate one "first" vertex or pixel. When
 // indexing breaks, invocations disagree and the OR produces a value that is
 // neither operand - still a mismatch, which is all the reader needs.
-#define DAWNING_PROBE_STRIDE 16u
+#define DAWNING_PROBE_STRIDE 48u
 
 void DawningWriteObjectProbe(RWByteAddressBuffer probe, uint objectIndex, ObjectData obj)
 {
@@ -139,6 +140,35 @@ void DawningWriteMaterialProbe(RWByteAddressBuffer probe, uint objectIndex, Mate
     uint ignored;
     probe.InterlockedOr(slot + 8u, DawningHashMaterialData(mat), ignored);
     probe.InterlockedOr(slot + 12u, mat.recordId + 1u, ignored);
+}
+
+uint DawningQuantizeShadow(float value)
+{
+    return (uint)round(saturate(value) * 255.0f);
+}
+
+void DawningWriteShadowBlendProbe(RWByteAddressBuffer probe,
+                                  uint objectIndex,
+                                  uint pairBit,
+                                  float expected,
+                                  float output,
+                                  float primary)
+{
+    const uint slot = objectIndex * DAWNING_PROBE_STRIDE;
+    const uint expectedQ8 = DawningQuantizeShadow(expected);
+    const uint outputQ8 = DawningQuantizeShadow(output);
+    const uint primaryQ8 = DawningQuantizeShadow(primary);
+    uint ignored;
+    probe.InterlockedAdd(slot + 16u, 1u, ignored);
+    probe.InterlockedOr(slot + 20u, pairBit, ignored);
+    probe.InterlockedAdd(slot + 24u, expectedQ8, ignored);
+    probe.InterlockedAdd(slot + 28u, outputQ8, ignored);
+    probe.InterlockedAdd(slot + 32u, primaryQ8, ignored);
+    probe.InterlockedAdd(slot + 36u,
+                         (expectedQ8 > primaryQ8) ? (expectedQ8 - primaryQ8)
+                                                  : (primaryQ8 - expectedQ8),
+                         ignored);
+    probe.InterlockedAdd(slot + 40u, (expectedQ8 == outputQ8) ? 0u : 1u, ignored);
 }
 
 #endif

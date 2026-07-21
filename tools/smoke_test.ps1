@@ -143,6 +143,16 @@ Assert-Marker "descriptors_pending_after_renderer_shutdown" "0"
 # wrong" - so assert the slot, not just that shadows exist.
 Assert-Marker "shadow_map" "ok"
 Assert-Marker "shadow_map_slot" "1"
+
+# Production content must arrive through the cooked format. These exact counts
+# prevent a tiny placeholder from satisfying the mere-presence marker, while
+# model_source=cooked fails if app.cpp silently falls back to source glTF.
+Assert-Marker "model_loaded" "ok"
+Assert-Marker "model_source" "cooked"
+Assert-Marker "model_primitives" "1"
+Assert-Marker "model_vertices" "15562"
+Assert-Marker "model_indices" "57579"
+Assert-Marker "model_images" "3"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never
@@ -1080,6 +1090,42 @@ Write-Host ("Draw probe: shadow $probeShadow/$probeShadowDistinct distinct, " +
             "main $probeMain/$probeMainDistinct distinct, " +
             "material $probeMaterial/$probeMatDistinct distinct " +
             "($probeMatUnshaded unshaded)")
+
+# The same pixel-stage probe permutation witnesses the cascade cross-fade at
+# the value returned by ComputeShadow. A branch-executed flag is insufficient:
+# expected/output are quantized per pixel, and the shader counts mismatches
+# before atomically reducing them. signal_q8 must also be nonzero, proving the
+# adjacent samples differed somewhere and a hard-selection negative control has
+# observable work to break.
+Assert-Marker "shadow_blend_probe" "ok"
+foreach ($k in @("shadow_blend_records", "shadow_blend_pair_mask",
+                 "shadow_blend_pixels", "shadow_blend_expected_q8",
+                 "shadow_blend_output_q8", "shadow_blend_primary_q8",
+                 "shadow_blend_signal_q8", "shadow_blend_mismatch_pixels")) {
+    if (-not $markers.ContainsKey($k)) { throw "Smoke test did not emit the '$k' marker." }
+}
+$blendRecords  = [uint32]$markers["shadow_blend_records"]
+$blendPairMask = [uint32]$markers["shadow_blend_pair_mask"]
+$blendPixels   = [uint64]$markers["shadow_blend_pixels"]
+$blendExpected = [uint64]$markers["shadow_blend_expected_q8"]
+$blendOutput   = [uint64]$markers["shadow_blend_output_q8"]
+$blendSignal   = [uint64]$markers["shadow_blend_signal_q8"]
+$blendMismatch = [uint64]$markers["shadow_blend_mismatch_pixels"]
+if ($blendRecords -eq 0 -or $blendPixels -eq 0) {
+    throw "No raster pixels exercised a shadow cascade fade band."
+}
+if (($blendPairMask -band 1) -eq 0) {
+    throw "The scene did not exercise the cascade 0-to-1 transition."
+}
+if ($blendSignal -eq 0) {
+    throw "Cascade blend samples never differed; the hard-selection negative control is vacuous."
+}
+if ($blendMismatch -ne 0 -or $blendExpected -ne $blendOutput) {
+    throw ("Cascade blend output differs from the expected adjacent-sample blend: " +
+           "mismatchPixels=$blendMismatch expectedQ8=$blendExpected outputQ8=$blendOutput")
+}
+Write-Host ("Shadow blend probe: $blendPixels pixels across $blendRecords records, " +
+            "pair-mask=$blendPairMask signal-q8=$blendSignal")
 
 # ---- VACUITY GUARDS, restored -----------------------------------------
 #

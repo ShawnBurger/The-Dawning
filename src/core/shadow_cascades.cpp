@@ -4,6 +4,7 @@
 
 #include "shadow_cascades.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace core
@@ -18,6 +19,12 @@ namespace
 uint32_t ClampCascade(uint32_t cascade)
 {
     return (cascade < kShadowCascadeCount) ? cascade : (kShadowCascadeCount - 1u);
+}
+
+float Smoothstep01(float value)
+{
+    const float t = (std::max)(0.0f, (std::min)(value, 1.0f));
+    return t * t * (3.0f - 2.0f * t);
 }
 
 } // namespace
@@ -45,6 +52,46 @@ float ShadowCascadeDepthRange(uint32_t cascade)
 float ShadowCascadeFadeLo(uint32_t cascade)
 {
     return ShadowCascadeSplitRadius(cascade) * kShadowCascadeFadeFraction;
+}
+
+ShadowCascadeBlend ComputeShadowCascadeBlend(float radialDistance)
+{
+    ShadowCascadeBlend blend;
+
+    if (!std::isfinite(radialDistance))
+    {
+        if (radialDistance > 0.0f)
+        {
+            blend.primaryCascade = kShadowCascadeCount - 1u;
+            blend.secondaryCascade = blend.primaryCascade;
+            blend.primaryWeight = 0.0f;
+            blend.litWeight = 1.0f;
+        }
+        return blend;
+    }
+
+    radialDistance = (std::max)(radialDistance, 0.0f);
+    const uint32_t cascade = SelectShadowCascade(radialDistance);
+    blend.primaryCascade = cascade;
+    blend.secondaryCascade = cascade;
+
+    const float fadeLo = ShadowCascadeFadeLo(cascade);
+    const float split = ShadowCascadeSplitRadius(cascade);
+    if (radialDistance < fadeLo)
+        return blend;
+
+    const float fade = Smoothstep01((radialDistance - fadeLo) / (split - fadeLo));
+    blend.primaryWeight = 1.0f - fade;
+    if (cascade + 1u < kShadowCascadeCount)
+    {
+        blend.secondaryCascade = cascade + 1u;
+        blend.secondaryWeight = fade;
+    }
+    else
+    {
+        blend.litWeight = fade;
+    }
+    return blend;
 }
 
 uint32_t SelectShadowCascade(float radialDistance)
