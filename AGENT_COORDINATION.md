@@ -1861,6 +1861,65 @@ are now integrated as well. The current order is:
   first real walkable/interactable interior subsystem against these typed
   assembly identities
 
+### WS-027: Deterministic interactive-interior runtime
+
+- Status: ACTIVE
+- Outcome: execute the interaction, portal, socket, and moving-part topology
+  already present in the cooked production assembly. The runtime owns stable
+  interaction state indices and normalized motion progress, accepts bounded
+  player activation commands, advances door/hatch motion deterministically,
+  updates committed moving-part entity transforms from authored pivots/axes/
+  travel, and exposes portal passability plus save-ready snapshot state. This is
+  Stage 5A's first genuinely interactive interior boundary; it does not claim
+  walkable collision, navmesh execution, pressure simulation, final art, or
+  cockpit possession.
+- Primary: Codex
+- Reviewer: Claude, read-only after a stable commit; manual review fallback if
+  the Claude service remains unavailable or rate-limited
+- Branch: `codex/interactive-interior-runtime`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-interactive-interior-runtime`
+- Base commit: `3835f90`
+- Owned paths: new GPU-free interaction runtime and focused tests under
+  `src/scene/**` and `tests/**`; additive host accessors/integration in
+  `assembly_runtime_host.{h,cpp}`; the smallest required input/update/smoke
+  hooks in `src/app.{h,cpp}` and `tools/smoke_test.ps1`; additive CMake and
+  documentation changes
+- Excluded paths: cooked assembly/manifest/resolver/catalog/instantiator format
+  semantics; `src/ecs/**`; `src/sim/**`; `src/render/**`; shaders; collision
+  cooking/queries; capsule locomotion; navmesh/pathfinding; pressure/atmosphere;
+  boarding and seat possession; UI prompts; persistence file envelopes;
+  network replication; Meshy generation; and final production geometry
+- Shared-file locks: WS-027 holds only its additive CMake blocks, the Stage 5A
+  host member/accessors, and focused App input/update/smoke sites. No renderer,
+  simulation, ECS-component, or asset-format file is shared.
+- Interface contract: initialization consumes one validated immutable
+  `CookedAssembly`, its prepared transforms, and committed moving-part entity
+  handles. It publishes nothing on failure. Activation is by exact stable index
+  or nearest forward-facing socket within a bounded radius. Moving closures use
+  authored `closed/opening/open/closing/locked` states, reversible transitions,
+  deterministic rates, and portal passability only at fully open state. Linear
+  and rotational motion are reconstructed from immutable closed transforms each
+  step, never incrementally accumulated. Snapshots validate topology, state
+  indices, finite progress, and reciprocal portal/part ownership before an
+  atomic apply. Teardown clears runtime state before assembly entities die.
+- Dependencies: merged WS-022 through WS-026 cooked topology, prepared module/
+  moving-part transforms, committed `AssemblyInstance`, registry entity handles,
+  and shared local movement/input conventions
+- Acceptance gates: GPU-free transition, reversal, locked-state, nearest-query,
+  portal-passability, linear/rotational transform, deterministic partitioning,
+  snapshot round-trip/atomic rejection, and repeated shutdown tests; exact
+  runtime smoke markers proving an authored hatch reaches open and its portal
+  becomes traversable; Debug/Release all-target builds and CPU suites; raster,
+  stable-DXR, and full-DXR smoke without resource or descriptor regressions
+- Negative controls: invalid topology/entity set, duplicate IDs, wrong state
+  vocabulary, non-finite/negative time or rates, out-of-range activation,
+  stale entity, malformed snapshot, wrong topology digest, and closed/locked/
+  partially open closures cannot become traversable or partially mutate state
+- Latest commit: claim pending
+- Next action: implement and exhaustively test the GPU-free state machine first,
+  then connect moving entities, host lifetime, input, and smoke proof
+
 ## 20. Helper Commands
 
 Create a task worktree:
