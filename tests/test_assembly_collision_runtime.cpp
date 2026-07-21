@@ -116,6 +116,25 @@ TEST_CASE(InteriorCapsuleSweep_IsContinuousAndUsesRoundedCornerDistance)
     CHECK(rounded.fraction > 0.30);
 }
 
+TEST_CASE(InteriorCapsuleSweep_TangentAwayAndStableTiesAreDeterministic)
+{
+    const auto world = World({
+        Box(9, { 1.0, -2.0, -1.0 }, { 1.2, 2.0, 1.0 }),
+        Box(2, { 1.0, -2.0, -1.0 }, { 1.2, 2.0, 1.0 })
+    });
+    scene::InteriorCapsule capsule = StandingCapsule({ 0.65, 0.0, 0.0 });
+    capsule.radius = 0.35;
+    const auto away = world->SweepCapsule(capsule, { -1.0, 0.0, 0.0 });
+    CHECK(away.Succeeded());
+    CHECK(!away.hit);
+
+    capsule.center.x = 0.0;
+    const auto toward = world->SweepCapsule(capsule, { 2.0, 0.0, 0.0 });
+    CHECK(toward.Succeeded());
+    CHECK(toward.hit);
+    CHECK_EQ(toward.stableId, 2u);
+}
+
 TEST_CASE(InteriorCapsuleOverlap_ReportsStableDepenetrationNormalAndDepth)
 {
     const auto world = World({ Box(4, { -1.0, -1.0, -1.0 }, { 1.0, 1.0, 1.0 }) });
@@ -134,6 +153,21 @@ TEST_CASE(InteriorCapsuleOverlap_ReportsStableDepenetrationNormalAndDepth)
     CHECK(motion.Succeeded());
     CHECK(motion.depenetrated);
     CHECK(motion.center.x > 1.35);
+}
+
+TEST_CASE(InteriorLocomotion_BoundedRecoveryReportsUnresolvedPenetration)
+{
+    const auto world = World({
+        Box(1, { -1.0, -2.0, -1.0 }, { 0.2, 2.0, 1.0 }),
+        Box(2, { -0.2, -2.0, -1.0 }, { 1.0, 2.0, 1.0 })
+    });
+    scene::InteriorLocomotionConfig config;
+    config.maximumDepenetrationIterations = 1;
+    const auto motion = world->MoveCapsule(
+        StandingCapsule({ 0.0, 0.0, 0.0 }), { 0.0, 0.0, 0.0 }, config);
+    CHECK_EQ(motion.status,
+             scene::InteriorCollisionStatus::PenetrationUnresolved);
+    CHECK(!motion.Succeeded());
 }
 
 TEST_CASE(InteriorLocomotion_SlidesAlongWallsWithoutTunneling)
@@ -245,6 +279,12 @@ TEST_CASE(AssemblyCollisionWorld_RequiresConcretePackagesAndPublishesLocalAabbs)
     CHECK_EQ(scene::BuildAssemblyCollisionWorld(
                  assembly, packages, zeroLimit).status,
              scene::InteriorCollisionStatus::ResourceLimitExceeded);
+
+    asset::CookedAssembly invalidAssembly = assembly;
+    invalidAssembly.modules[0].transform.scale[0] = 0.0;
+    CHECK_EQ(scene::BuildAssemblyCollisionWorld(
+                 invalidAssembly, packages).status,
+             scene::InteriorCollisionStatus::InvalidArgument);
 }
 
 TEST_CASE(InteriorCollisionStatusNamesRemainStable)

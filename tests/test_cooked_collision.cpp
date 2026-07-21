@@ -114,8 +114,28 @@ TEST_CASE(CookedCollision_HeaderIntegrityAndLimitsFailClosed)
     CHECK_EQ(asset::LoadCookedCollisionMemory(bytes).status,
              asset::CookedCollisionStatus::IntegrityMismatch);
 
+    bytes = BuildFixture();
+    bytes[12] = std::byte{ 71 };
+    CHECK_EQ(asset::LoadCookedCollisionMemory(bytes).status,
+             asset::CookedCollisionStatus::InvalidLayout);
+
+    bytes = BuildFixture();
+    bytes[64] = std::byte{ 1 };
+    CHECK_EQ(asset::LoadCookedCollisionMemory(bytes).status,
+             asset::CookedCollisionStatus::InvalidLayout);
+
+    bytes = BuildFixture();
+    bytes.pop_back();
+    CHECK_EQ(asset::LoadCookedCollisionMemory(bytes).status,
+             asset::CookedCollisionStatus::InvalidLayout);
+
     asset::CookedCollisionLimits limits;
     limits.maxBoxes = 1;
+    CHECK_EQ(asset::LoadCookedCollisionMemory(BuildFixture(), limits).status,
+             asset::CookedCollisionStatus::ResourceLimitExceeded);
+
+    limits = {};
+    limits.maxFileBytes = 71;
     CHECK_EQ(asset::LoadCookedCollisionMemory(BuildFixture(), limits).status,
              asset::CookedCollisionStatus::ResourceLimitExceeded);
 }

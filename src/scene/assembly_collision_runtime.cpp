@@ -61,6 +61,20 @@ bool ValidBox(const InteriorCollisionBox& box)
            box.minimum.z < box.maximum.z;
 }
 
+bool ValidAssemblyTransform(const asset::AssemblyTransform& transform)
+{
+    for (double value : transform.positionMeters)
+        if (!Bounded(value))
+            return false;
+    for (double value : transform.rotationEulerDegrees)
+        if (!Bounded(value))
+            return false;
+    for (double value : transform.scale)
+        if (!Bounded(value) || value <= 0.0)
+            return false;
+    return true;
+}
+
 core::Vec3d CapsuleBoxSeparation(
     const InteriorCapsule& capsule,
     const InteriorCollisionBox& box)
@@ -720,6 +734,12 @@ InteriorCollisionWorldBuildResult BuildAssemblyCollisionWorld(
         uint64_t count = 0;
         for (const asset::AssemblyModule& module : assembly.modules)
         {
+            if (!ValidAssemblyTransform(module.transform))
+            {
+                return BuildFailure(
+                    InteriorCollisionStatus::InvalidArgument,
+                    "assembly module collision transform is invalid");
+            }
             const auto found = collisionByLocator.find(module.collisionSource);
             if (found == collisionByLocator.end() || !found->second)
             {
