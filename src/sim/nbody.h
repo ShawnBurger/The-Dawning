@@ -105,6 +105,12 @@ struct NBodyParticle
     Vec3d    velocity;         // common-frame velocity (m/s)
     double   mu       = 0.0;   // gravitational parameter G*M (0 for a test particle)
     double   softening = 0.0;  // eps (m) = SofteningLength(mu, radius); precomputed
+    double   radius   = 0.0;   // TRUE physical surface radius (m). CONTACT geometry ONLY -
+                               // distinct from softening (a force/GR floor >= radius that is
+                               // itself floored at kSofteningBase). 0 => point/test particle:
+                               // never initiates surface contact (sim/collision.h). Kept
+                               // separate so a small body's contact is not welded to the ~m
+                               // softening scale the architecture keeps apart from geometry.
     uint64_t bodyId   = 0;     // STABLE id → deterministic summation order
     bool     isSource = true;  // produces gravity (massive) vs test particle
 };

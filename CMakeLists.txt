@@ -139,6 +139,7 @@ set(SIM_SOURCES
     src/sim/relativity.cpp
     src/sim/atmosphere.cpp
     src/sim/ftl.cpp
+    src/sim/collision.cpp
 )
 
 set(SIM_HEADERS
@@ -152,6 +153,7 @@ set(SIM_HEADERS
     src/sim/relativity.h
     src/sim/atmosphere.h
     src/sim/ftl.h
+    src/sim/collision.h
 )
 
 set(SCENE_SOURCES
@@ -191,6 +193,7 @@ set(TEST_SOURCES
     tests/test_relativity.cpp
     tests/test_atmosphere.cpp
     tests/test_ftl.cpp
+    tests/test_collision.cpp
 )
 
 set(TEST_HEADERS
@@ -442,6 +445,11 @@ add_executable(TheDawningTests
     # here that pulls in a D3D12 or render header.
     src/sim/ftl.cpp
     src/sim/ftl.h
+    # SIM STAGE 5 collision / close-encounter policy. GPU-free: collision.h includes
+    # only nbody.h, so tests/test_collision.cpp drives the SHIPPED subdivision,
+    # swept-contact detection, mass-fraction bounce and union-find merge.
+    src/sim/collision.cpp
+    src/sim/collision.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
