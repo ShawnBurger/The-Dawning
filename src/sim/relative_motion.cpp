@@ -72,9 +72,17 @@ CWTargeting SolveCWTargeting(const Vec3d& r0, const Vec3d& rf, double n, double 
     const double bx = rf.x - (4.0 - 3.0 * c) * r0.x;
     const double by = rf.y - 6.0 * (s - nt) * r0.x - r0.y;
 
-    // Cross-track is independent: z(t) = c·z0 + (s/n)·vz0.
-    if (std::fabs(det) < 1e-300 || std::fabs(s) < 1e-12)
-        return out; // singular targeting geometry (t ≈ k·period)
+    // Reject SINGULAR targeting geometry with SCALE-FREE conditioning tests. det
+    // carries a 1/n² factor, so a fixed absolute threshold is no conditioning
+    // guard at all — test the dimensionless determinant det·n² = 8(1−cos nt) −
+    // 3·nt·sin nt, whose roots are the true singular times: t = k·period AND
+    // interior times (the first near nt ≈ 8.84 ≈ 1.4·period), where the inverse
+    // blows up as 1/det. The cross-track map z = c·z0 + (s/n)·vz0 is conditioned
+    // by |s| relative to the 1/n time scale, so |s| is the dimensionless measure —
+    // 1e-12 was far too small (it admitted |v0z| ~ 1e9·Δz). One threshold, both.
+    constexpr double kConditioning = 1.0e-6;
+    if (std::fabs(det) * n * n < kConditioning || std::fabs(s) < kConditioning)
+        return out; // singular / ill-conditioned geometry near a degenerate time
 
     const double v0x = (D * bx - B * by) / det;
     const double v0y = (-C * bx + A * by) / det;

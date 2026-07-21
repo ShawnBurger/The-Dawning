@@ -49,9 +49,12 @@ struct CWTargeting
     core::Vec3d arrivalVel;  // relative velocity when it reaches rf
     bool        feasible = false;  // false if the STM velocity block is singular
 };
-// t must avoid the degeneracies where the position→velocity map is singular (the
-// in-plane 2×2 determinant vanishes, or sin(n·t)=0 for the cross-track axis),
-// which occur at t ≈ k·(period); returns feasible=false there and on bad input.
+// t must avoid the transfer times where the position→velocity map is singular:
+// the in-plane 2×2 determinant vanishes — det·n² = 8(1−cos nt) − 3·nt·sin nt = 0
+// — which happens at EVERY integer period AND at interior times (the first near
+// t ≈ 1.4·period), NOT only at k·period; or the cross-track sin(n·t) → 0 (near
+// t ≈ k·period/2). Both are rejected on a scale-free conditioning threshold, so
+// near-singular geometry returns feasible=false too, not just the exact roots.
 CWTargeting SolveCWTargeting(const core::Vec3d& r0, const core::Vec3d& rf,
                              double n, double t);
 

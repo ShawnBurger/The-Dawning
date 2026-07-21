@@ -71,6 +71,39 @@ TEST_CASE(CW_TargetingClosure)
     CHECK_FALSE(SolveCWTargeting(r0, rf, n, kTwoPi / n).feasible);
 }
 
+TEST_CASE(CW_TargetingRejectsSingularGeometries)
+{
+    const double n = MeanMotion(kMu, 7.0e6);
+    const Vec3d r0{ 100.0, -50.0, 30.0 };
+    const Vec3d rf{ -20.0, 80.0, -10.0 };
+
+    // (1) INTERIOR in-plane singularity: det·n² = 8(1−cos u) − 3u·sin u has a root
+    // near u ≈ 8.84 (≈ 1.4 periods), NOT at an integer period. Bisect for it; the
+    // targeting there is genuinely singular and must be rejected. (The old
+    // |det|<1e-300 guard admitted this with |v0| ~ 1e12 m/s.)
+    auto detN2 = [](double u) {
+        return 8.0 * (1.0 - std::cos(u)) - 3.0 * u * std::sin(u);
+    };
+    double lo = 8.7, hi = 8.9; // detN2(8.7) < 0 < detN2(8.9)
+    for (int i = 0; i < 200; ++i)
+    {
+        const double mid = 0.5 * (lo + hi);
+        if (detN2(lo) * detN2(mid) <= 0.0) hi = mid; else lo = mid;
+    }
+    const double uRoot = 0.5 * (lo + hi);
+    CHECK(uRoot > 8.7 && uRoot < 8.9); // an interior root, not a multiple of period
+    CHECK_FALSE(SolveCWTargeting(r0, rf, n, uRoot / n).feasible);
+
+    // (2) CROSS-TRACK near-singularity: nt just past π gives |sin nt| ~ 1e-9, which
+    // the old |s|<1e-12 guard admitted (|v0z| ~ 1e9·Δz). Must be rejected.
+    const double tCross = (3.14159265358979323846 + 1.0e-9) / n;
+    CHECK_FALSE(SolveCWTargeting(r0, rf, n, tCross).feasible);
+
+    // A well-conditioned time between the singularities still succeeds (the guard
+    // does not over-reject).
+    CHECK(SolveCWTargeting(r0, rf, n, 1500.0).feasible);
+}
+
 TEST_CASE(CW_DriftFreeOrbitClosesAfterOnePeriod)
 {
     const double n = MeanMotion(kMu, 7.0e6);
