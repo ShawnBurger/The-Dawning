@@ -174,6 +174,7 @@ set(SIM_SOURCES
     src/sim/lambert.cpp
     src/sim/maneuver.cpp
     src/sim/relative_motion.cpp
+    src/sim/star_system.cpp
     src/sim/simulation_system.cpp
     src/sim/snapshot_system.cpp
 )
@@ -199,6 +200,7 @@ set(SIM_HEADERS
     src/sim/lambert.h
     src/sim/maneuver.h
     src/sim/relative_motion.h
+    src/sim/star_system.h
     src/sim/simulation_system.h
     src/sim/snapshot_system.h
 )
@@ -276,6 +278,7 @@ set(TEST_SOURCES
     tests/test_lambert.cpp
     tests/test_maneuver.cpp
     tests/test_relative_motion.cpp
+    tests/test_star_system.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -684,6 +687,10 @@ add_executable(TheDawningTests
     # station-keeping regime, exact closed-form STM. Pure math.
     src/sim/relative_motion.cpp
     src/sim/relative_motion.h
+    # Deterministic star-system builder: bodies, circular orbits, SOI radii,
+    # parent-before-child topology. Pure data + physics.
+    src/sim/star_system.cpp
+    src/sim/star_system.h
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
