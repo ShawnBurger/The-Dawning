@@ -577,21 +577,20 @@ assumption. Shared application wiring remains an integration task.
 
 The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
-on `main`. The current order is:
+on `main`. Collision policy and the first atomic FTL and atmosphere ECS adapters
+are now integrated as well. The current order is:
 
-1. WS-012 and WS-013 closed the atmosphere and FTL review findings; both are
-   published and retired.
-2. Keep the timed-out reciprocal Claude reviews as explicit manual review debt;
-   they do not reopen the proven integration gates.
-3. WS-014 routed coupled flight assist through real actuator limits so both
-   flight modes expose physical thruster state; it is verified and merged.
-4. Add collision/close-encounter policy before production N-body activation.
-5. Register that lane only after verifying its paths do not overlap Claude.
-
-WS-013 completed the concrete WS-011 review findings, and WS-014 completed the
-physical-actuator flight-control bridge. Collision/close-encounter policy is the
-next candidate lane; Claude's collision worktree must be re-audited before it is
-registered or edited.
+1. Keep timed-out reciprocal Claude reviews as explicit manual review debt; they
+   do not reopen already-proven integration gates.
+2. Preserve the one-owner simulation contracts established by WS-014 through
+   WS-017 while Claude's save/load, asset, and render work remains isolated.
+3. Reconcile the three motion owners (N-body, rails, and force-integrated rigid
+   bodies) and add the frame-aware gravity force bridge required by the ship.
+4. Add the fixed-step orchestration layer that orders gravity, atmosphere,
+   flight control, collision, and frame transitions without moving those pure
+   kernels into application or rendering code.
+5. Register any app/scene wiring only after the active Claude render and asset
+   worktrees are reconciled, because those paths currently overlap.
 
 ### Live collision review handoff (2026-07-20)
 
@@ -1187,6 +1186,166 @@ registered or edited.
   forward without consuming an unbounded frame budget.
 - Next action: retire the clean review worktree after pushing `main`; begin the
   next registered production adapter without extending collision scope
+
+### WS-016: ECS reference-frame and atomic FTL adapter
+
+- Status: COMPLETE
+- Outcome: adapt a live ECS flight body into the reviewed `TeleportState` kernel
+  and commit the complete accepted transition back atomically in a destination
+  reference frame
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/ftl-ecs-adapter`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-ftl-ecs-adapter`
+- Base commit: `9bb4f29`
+- Owned paths: append-only frame binding in `src/ecs/components.h`, new
+  `src/sim/ftl_system.{h,cpp}`, `tests/test_ftl_system.cpp`, their exact CMake
+  entries, and the FTL adapter contract in research documentation
+- Excluded paths: app/input/scene callsites, timer and render/path-trace internals,
+  assets, shaders, collision, atmosphere, N-body/relativity/FTL kernel changes,
+  save/network code, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned;
+  `CMakeLists.txt` and `components.h` are locked only for the named append-only edits
+- Interface contract: require `Transform + SpatialFrame + RigidBody`; resolve the
+  source pose/velocity through `FrameGraph`, widen body-frame float vectors, map
+  optional authoritative `RelativisticBody.momentum`, call `TryApplyTeleport`,
+  express the accepted pose/velocity in the destination frame, flip an optional
+  `GravitationalBody` to `NBodyActive`, and only then commit every component
+- Acceptance gates: identity and rotated known answers across distant frames;
+  optional-component behavior; exact accumulator/history policy; invalid frame,
+  missing component, malformed transform, and unsafe destination all leave every
+  component bit-unchanged; result flags request path-history reset and fixed-step
+  accumulator drain only on success; Debug/Release suites and six-mode smoke
+- Negative controls: direct local-position copying must fail the distant-frame
+  known answer; partial component writes before `TryApplyTeleport` rejection must
+  fail transactional snapshots
+- Latest commits: feature `912891f`; integrated `main` `54b8c4d`
+- Review note: the bounded Claude CLI review was unavailable in this session
+  (the repository wrapper misparsed `-p`, and the direct read-only invocation
+  produced no result before timeout). Per Shawn's explicit fallback, reciprocal
+  review is deferred manual debt and did not block the already-established
+  local review and validation gates.
+- Acceptance result: `SpatialFrame` adds an opt-in frame-local convention without
+  changing legacy world-space entities. `TryTeleportEntity` validates required
+  components and frame bounds, resolves source pose and velocity through
+  `FrameGraph`, rotates optional relativistic momentum, stages the complete
+  destination-frame state, promotes an optional gravitational body off rails,
+  and commits only after every conversion succeeds. Rejections are registry
+  no-ops and publish no host obligations. Debug and Release each pass 309 cases
+  and 16,294 checks. Raster, stable-DXR, and full-DXR smoke pass in both
+  configurations with nonblank 1920x1080 captures.
+- Residual risk: this lane deliberately returns host reset obligations rather than
+  touching renderer/timer state. A later app lane must invoke it inside one fixed
+  step, reset path accumulation without resetting the RNG seed, drain queued fixed
+  steps, and provide authored mouth/frame data and player interaction.
+- Next action: register the production fixed-step FTL callsite lane, keeping
+  authored traversal/input separate from the already-tested transition adapter
+
+### WS-017: ECS atmospheric-flight adapter
+
+- Status: COMPLETE
+- Outcome: adapt a frame-aware live rigid body into the reviewed atmospheric
+  model, applying contractive drag exactly once and staging lift, torque,
+  diagnostics, and rail promotion atomically for the existing fixed-step flight
+  integrator
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/atmosphere-ecs-adapter`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-atmosphere-ecs-adapter`
+- Base commit: `ef173b0` (registration created from `1fee156`)
+- Owned paths: append-only aerodynamic state in `src/ecs/components.h`, new
+  `src/sim/atmosphere_system.{h,cpp}`, `tests/test_atmosphere_system.cpp`, their
+  exact CMake entries, and the production-adapter contract in
+  `docs/research/ATMOSPHERIC_FLIGHT.md`
+- Excluded paths: app/input/scene callsites, timer and rendering internals,
+  shaders, assets, FTL/collision/N-body/relativity kernels, save/network code,
+  and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned;
+  `CMakeLists.txt` and `components.h` are locked only for the named append-only edits
+- Interface contract: require `Transform + SpatialFrame + RigidBody +
+  AerodynamicBody`; resolve world position/velocity through `FrameGraph`; sample
+  altitude from a validated atmospheric body; subtract linear and co-rotating
+  air velocity; apply `SemiImplicitDragAirspeed` directly and never also add a
+  drag force; add lift as world force and the equivalent aerodynamic moment as
+  body torque; promote optional `GravitationalBody.owner` only when density is
+  positive; commit after all conversions remain finite
+- Acceptance gates: moving-frame drag known answer; co-rotating zero-airspeed
+  no-op; exact vacuum/ceiling behavior; lift perpendicularity and restoring
+  moment; optional ownership behavior; malformed environment/component/frame
+  requests leave every component bit-unchanged; deterministic replay;
+  Debug/Release suites and six-mode smoke
+- Negative controls: explicit quadratic drag must gain energy at the watched
+  hostile step while the adapter remains contractive; adding both the direct
+  drag update and a drag force must fail the known answer
+- Latest commits: feature `692ec0d`; integrated `main` commit `58ab6c2`
+- Review note: the bounded Claude CLI review was unavailable during this lane.
+  Shawn explicitly allowed that step to be deferred, so the completed senior
+  self-review and green integration gates are recorded separately from reciprocal
+  reviewer approval.
+- Acceptance result: `AerodynamicBody` provides opt-in authored geometry and
+  coefficients. `ApplyAtmosphereToEntity` resolves frame-aware body and rotating
+  air state, samples live density, applies the reviewed semi-implicit drag update
+  exactly once, stages lift and CoP torque, and promotes an optional gravitational
+  body only in positive density. Vacuum/ceiling paths are exact accepted no-ops;
+  missing components, invalid frames, malformed state, and unsafe numerics reject
+  atomically. Debug and Release each pass 316 cases and 16,681 checks. Raster,
+  stable-DXR, and full-DXR smoke pass in both configurations with nonblank
+  1920x1080 captures.
+- Residual risk: this lane deliberately does not choose a planet or run ordering
+  in `Scene::UpdateSystems`; the later orchestration/callsite lane must call it
+  once before `StepFlightPhysics` for each atmospheric body, must not apply
+  another drag term, and must substep when a fixed step crosses a material
+  fraction of atmospheric scale height.
+- Next action: retire the clean feature worktree after pushing `main`; register
+  the GPU-free force-integrated gravity prerequisite while Claude's app, asset,
+  and rendering paths remain active
+
+### WS-018: Force-integrated gravity and three-way motion ownership
+
+- Status: ACTIVE
+- Outcome: give thrusting, atmospheric, and FTL-capable rigid bodies an explicit
+  gravity-fed motion owner that cannot also be advanced by N-body or Kepler rails
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/force-integrated-gravity`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-force-integrated-gravity`
+- Base commit: registration commit created from `ba49646`
+- Owned paths: the additive `OrbitOwner::ForceIntegrated` value and its comments
+  in `src/ecs/components.h`; `src/sim/physics_system.{h,cpp}`;
+  `tests/test_physics_system.cpp`; the exact owner promotions and assertions in
+  `src/sim/{atmosphere_system,ftl_system}.cpp` and their tests; and the motion
+  ownership/gravity-adapter contracts in existing research documentation
+- Excluded paths: N-body/collision/reference-frame/atmosphere/FTL math kernels,
+  `CMakeLists.txt`, app/input/scene callsites, renderer/shaders/assets, Claude's
+  save codec files, networking, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned. Claude's
+  active save/load lane encodes `OrbitOwner` as a byte and must accept the new
+  value 2 when rebased, but Codex will not edit that dirty worktree or its files
+- Interface contract: `NBodyActive`, `OnRails`, and `ForceIntegrated` are mutually
+  exclusive movers. `StepFlightPhysics` skips gravitational entities owned by
+  N-body or rails while preserving legacy non-gravitational bodies. A GPU-free
+  pre-step gathers valid massive sources, expresses them in each force-integrated
+  target's frame, calls the reviewed deterministic `GravityAccelerationAt`, and
+  atomically stages `mass * acceleration` into each target's force accumulator.
+  Atmosphere entry and rigid-body FTL arrival promote to `ForceIntegrated`
+- Acceptance gates: two-body analytic gravity through the real registry and
+  subsequent rigid-body step; cross-frame known answer; deterministic source
+  ordering; self-source exclusion; exact no-op for N-body and rail owners; legacy
+  flight behavior unchanged; malformed frames, duplicate IDs, invalid source or
+  target state, and force overflow reject without any partial accumulator write;
+  Debug/Release CPU suites and combined six-mode smoke
+- Negative controls: treating every `GravitationalBody` as a flight target must
+  double-advance an N-body/rail fixture; summing sources in ECS insertion order
+  must differ in a cancellation-sensitive fixture; atmosphere or FTL promotion
+  to `NBodyActive` must fail the one-owner assertions
+- Latest commit: registration pending
+- Residual risk: this lane supplies the gravity force and ownership boundary but
+  deliberately does not gather/step/reconcile the passive N-body set, propagate
+  rails, resolve collision entity destruction, or choose scene run order
+- Next action: publish registration, create the isolated worktree, establish the
+  ownership/atomicity negative controls, implement without CMake edits, and run
+  the complete validation matrix
 
 ## 20. Helper Commands
 
