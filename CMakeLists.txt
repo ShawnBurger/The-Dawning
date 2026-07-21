@@ -134,6 +134,8 @@ set(SIM_SOURCES
     src/sim/flight_control.cpp
     src/sim/physics_system.cpp
     src/sim/reference_frame.cpp
+    src/sim/kepler.cpp
+    src/sim/nbody.cpp
 )
 
 set(SIM_HEADERS
@@ -142,6 +144,8 @@ set(SIM_HEADERS
     src/sim/flight_control.h
     src/sim/physics_system.h
     src/sim/reference_frame.h
+    src/sim/kepler.h
+    src/sim/nbody.h
 )
 
 set(SCENE_SOURCES
@@ -176,6 +180,8 @@ set(TEST_SOURCES
     tests/test_flight_control.cpp
     tests/test_physics_system.cpp
     tests/test_reference_frame.cpp
+    tests/test_kepler.cpp
+    tests/test_nbody.cpp
 )
 
 set(TEST_HEADERS
@@ -395,6 +401,16 @@ add_executable(TheDawningTests
     # anything here that pulls in a D3D12 or render header.
     src/sim/reference_frame.cpp
     src/sim/reference_frame.h
+    # SIM STAGE 1 N-body orbital core. GPU-free on the same sanctioned footing:
+    # kepler.h/nbody.h include only core/types.h, ecs/components.h and the other
+    # sim headers (all device-free), so tests/test_kepler.cpp and test_nbody.cpp
+    # drive the SHIPPED Markley solver, universal-variable propagator, Forest-Ruth
+    # symplectic integrator, shared softening and LOD transition rather than a copy.
+    # Do NOT add anything here that pulls in a D3D12 or render header.
+    src/sim/kepler.cpp
+    src/sim/kepler.h
+    src/sim/nbody.cpp
+    src/sim/nbody.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
