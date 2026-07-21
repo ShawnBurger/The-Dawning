@@ -175,6 +175,7 @@ set(SIM_SOURCES
     src/sim/maneuver.cpp
     src/sim/relative_motion.cpp
     src/sim/star_system.cpp
+    src/sim/system_instantiate.cpp
     src/sim/simulation_system.cpp
     src/sim/snapshot_system.cpp
 )
@@ -201,6 +202,7 @@ set(SIM_HEADERS
     src/sim/maneuver.h
     src/sim/relative_motion.h
     src/sim/star_system.h
+    src/sim/system_instantiate.h
     src/sim/simulation_system.h
     src/sim/snapshot_system.h
 )
@@ -279,6 +281,7 @@ set(TEST_SOURCES
     tests/test_maneuver.cpp
     tests/test_relative_motion.cpp
     tests/test_star_system.cpp
+    tests/test_system_instantiate.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -691,6 +694,10 @@ add_executable(TheDawningTests
     # parent-before-child topology. Pure data + physics.
     src/sim/star_system.cpp
     src/sim/star_system.h
+    # Instantiate a StarSystem into live ECS entities: the bridge that gives
+    # the astrodynamics stack a world StepSimulation drives.
+    src/sim/system_instantiate.cpp
+    src/sim/system_instantiate.h
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
