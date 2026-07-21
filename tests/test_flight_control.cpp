@@ -30,6 +30,7 @@
 #include "sim/thrusters.h"
 
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -169,6 +170,85 @@ TEST_CASE(Allocation_PureAngularDemand_TracksTorqueAxisWithNoForce)
     sim::AllocateThrusters(couple2, kZeroF, core::Vec3f{ -1.0f, 0.0f, 0.0f }, kZeroF);
     CHECK_EQ(couple2.thrusters[0].throttle, 0.0f);
     CHECK_EQ(couple2.thrusters[1].throttle, 0.0f);
+}
+
+// -----------------------------------------------------------------------------
+// PHYSICAL-WRENCH ALLOCATION — desired force is measured in newtons, bounded by
+// installed authority, and written into the throttle state ComputeWrench consumes.
+// -----------------------------------------------------------------------------
+TEST_CASE(Allocation_TargetWrench_IsProportionalBoundedAndDeterministic)
+{
+    ecs::ThrusterSet half = MakeSymmetricLinearRig(10.0f);
+    sim::AllocateThrustersForWrench(
+        half, core::Vec3d{ 5.0, 0.0, 0.0 }, kZeroF,
+        core::Quatf::Identity(), kZeroF);
+    CHECK_APPROX_EPS(half.thrusters[0].throttle, 0.5f, 1e-6f);
+    CHECK_EQ(half.thrusters[1].throttle, 0.0f);
+    CHECK_APPROX_EPS(sim::ComputeWrench(half, kZeroF).force.x, 5.0f, 1e-5f);
+
+    ecs::ThrusterSet saturated = MakeSymmetricLinearRig(10.0f);
+    sim::AllocateThrustersForWrench(
+        saturated, core::Vec3d{ 25.0, 0.0, 0.0 }, kZeroF,
+        core::Quatf::Identity(), kZeroF);
+    CHECK_EQ(saturated.thrusters[0].throttle, 1.0f);
+    CHECK_EQ(saturated.thrusters[1].throttle, 0.0f);
+    CHECK_APPROX_EPS(sim::ComputeWrench(saturated, kZeroF).force.x, 10.0f, 1e-5f);
+
+    ecs::ThrusterSet replay = MakeSymmetricLinearRig(10.0f);
+    sim::AllocateThrustersForWrench(
+        replay, core::Vec3d{ 25.0, 0.0, 0.0 }, kZeroF,
+        core::Quatf::Identity(), kZeroF);
+    for (uint32_t i = 0; i < saturated.count; ++i)
+        CHECK_EQ(replay.thrusters[i].throttle, saturated.thrusters[i].throttle);
+}
+
+TEST_CASE(Allocation_TargetWrench_RespectsFramesAndPureCouples)
+{
+    // +X body points toward -Z world after +90 degrees about Y.
+    ecs::ThrusterSet translated = MakeSymmetricLinearRig(10.0f);
+    const core::Quatf yaw = core::Quatf::FromAxisAngle(
+        core::Vec3f{ 0, 1, 0 }, 1.5707963267948966f);
+    sim::AllocateThrustersForWrench(
+        translated, core::Vec3d{ 0.0, 0.0, -5.0 }, kZeroF, yaw, kZeroF);
+    CHECK_APPROX_EPS(translated.thrusters[0].throttle, 0.5f, 1e-5f);
+    CHECK_EQ(translated.thrusters[1].throttle, 0.0f);
+
+    ecs::ThrusterSet couple = MakePitchCouple(10.0f);
+    sim::AllocateThrustersForWrench(
+        couple, kZeroForceD, core::Vec3f{ 5.0f, 0.0f, 0.0f },
+        core::Quatf::Identity(), kZeroF);
+    const sim::Wrench realized = sim::ComputeWrench(couple, kZeroF);
+    CHECK_APPROX_EPS(realized.force.z, 0.0f, 1e-5f);
+    CHECK_APPROX_EPS(realized.torque.x, 5.0f, 1e-5f);
+    CHECK_APPROX_EPS(couple.thrusters[0].throttle, 0.25f, 1e-5f);
+    CHECK_APPROX_EPS(couple.thrusters[1].throttle, 0.25f, 1e-5f);
+}
+
+TEST_CASE(Allocation_TargetWrench_InvalidOrZeroRequestClearsThrottle)
+{
+    ecs::ThrusterSet rig = MakeSymmetricLinearRig(10.0f);
+    for (uint32_t i = 0; i < rig.count; ++i)
+        rig.thrusters[i].throttle = 0.75f;
+
+    sim::AllocateThrustersForWrench(
+        rig, kZeroForceD, kZeroF, core::Quatf::Identity(), kZeroF);
+    for (uint32_t i = 0; i < rig.count; ++i)
+        CHECK_EQ(rig.thrusters[i].throttle, 0.0f);
+
+    rig.thrusters[0].throttle = 0.5f;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    sim::AllocateThrustersForWrench(
+        rig, core::Vec3d{ nan, 0.0, 0.0 }, kZeroF,
+        core::Quatf::Identity(), kZeroF);
+    for (uint32_t i = 0; i < rig.count; ++i)
+        CHECK_EQ(rig.thrusters[i].throttle, 0.0f);
+
+    rig.thrusters[0].throttle = 0.5f;
+    sim::AllocateThrustersForWrench(
+        rig, core::Vec3d{ 1.0, 0.0, 0.0 }, kZeroF,
+        core::Quatf{ 0.0f, 0.0f, 0.0f, 0.0f }, kZeroF);
+    for (uint32_t i = 0; i < rig.count; ++i)
+        CHECK_EQ(rig.thrusters[i].throttle, 0.0f);
 }
 
 // -----------------------------------------------------------------------------
