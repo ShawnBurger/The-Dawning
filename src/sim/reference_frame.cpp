@@ -25,6 +25,14 @@ void CanonicalizeAxis(int64_t& sector, double& off)
         return;  // leave non-finite input untouched; IsCanonical() reports it
 
     const double q = std::floor(off / kSectorSize);
+    // Guard the float->int64 cast: a FINITE but out-of-int64-range quotient (e.g. a
+    // 1e300 offset) makes static_cast<int64_t> undefined behaviour. Such an offset is
+    // wildly out of spec; leave it untouched (IsCanonical/ValidatePos reject it) rather
+    // than execute UB. A legitimate canonicalization carry is +/-a handful of sectors,
+    // so this bound is never hit by valid data.
+    constexpr double kMaxSafeCarry = 9.0e18; // < 2^63, cast-safe
+    if (!(q >= -kMaxSafeCarry && q <= kMaxSafeCarry))
+        return;
     const int64_t carry = static_cast<int64_t>(q);
     sector += carry;
     off -= static_cast<double>(carry) * kSectorSize;

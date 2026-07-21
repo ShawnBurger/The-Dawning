@@ -273,6 +273,12 @@ TEST_CASE(SimSerialize_SaveLoadTransparency_AcrossStepping)
     CHECK_APPROX_EPS(maxPosDiff, 0.0, 1e-12); // MEASURE the divergence
     CHECK_APPROX_EPS(maxVelDiff, 0.0, 1e-12);
     CHECK(Serialize(resumed) == Serialize(cont));
+
+    // NON-VACUITY: the step must have MOVED body 2 macroscopically, else this test
+    // would pass even with a no-op integrator (nothing to preserve is not transparency).
+    for (const BodyRecord& cb : cont.bodies)
+        if (cb.bodyId == 2)
+            CHECK((cb.position - Vec3d{ 100.0, 0, 0 }).Length() > 50.0);
 }
 
 // =============================================================================
@@ -371,4 +377,170 @@ TEST_CASE(SimSerialize_LoadValidation_RejectsDomainViolations)
         SimSnapshot s = MakeSnapshot(); s.fixedDt = 0.0;
         CHECK_EQ(static_cast<int>(LoadOf(s).status), static_cast<int>(SimLoadStatus::InvalidData));
     }
+}
+
+// =============================================================================
+// Raw-buffer assembler: build an arbitrary well-framed, CRC-correct container from
+// explicit sections, so the STRUCTURAL guards (missing/duplicate/unknown sections,
+// secMajor, BadLayout, raw offsets) can be exercised WITHOUT laundering through
+// Serialize()'s canonicalization - what the codec's forward-compat and corruption
+// paths need to be witnessed, per the adversarial review.
+// =============================================================================
+namespace
+{
+struct RawSection { uint32_t tag; uint16_t secMajor; uint16_t secMinor; uint32_t flags; std::vector<uint8_t> body; };
+
+void PutU16(std::vector<uint8_t>& b, uint16_t v) { b.push_back(uint8_t(v)); b.push_back(uint8_t(v >> 8)); }
+void PutU32(std::vector<uint8_t>& b, uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back(uint8_t(v >> (8 * i))); }
+void PutU64(std::vector<uint8_t>& b, uint64_t v) { for (int i = 0; i < 8; ++i) b.push_back(uint8_t(v >> (8 * i))); }
+void PutF64(std::vector<uint8_t>& b, double v) { PutU64(b, std::bit_cast<uint64_t>(v)); }
+constexpr uint32_t FourCC(char a, char b, char c, char d)
+{ return uint32_t(uint8_t(a)) | (uint32_t(uint8_t(b)) << 8) | (uint32_t(uint8_t(c)) << 16) | (uint32_t(uint8_t(d)) << 24); }
+const uint32_t TAG_EPOK = FourCC('E', 'P', 'O', 'K');
+const uint32_t TAG_FRMS = FourCC('F', 'R', 'M', 'S');
+const uint32_t TAG_BODY = FourCC('B', 'O', 'D', 'Y');
+
+// A valid EPOK body (fixedDt>0, masterFrame invalid so it is valid with 0 frames).
+std::vector<uint8_t> EpokBody()
+{ std::vector<uint8_t> b; PutF64(b, 0.0); PutF64(b, 1.0 / 60.0); PutU64(b, 0); PutU32(b, kInvalidFrame); PutU32(b, 0); return b; }
+// A valid FRMS body with zero frames.
+std::vector<uint8_t> FrmsBody0() { std::vector<uint8_t> b; PutU32(b, 0); return b; }
+
+// Assemble header + sections, then fix the CRC. reserved/headerBytes overridable for BadLayout tests.
+std::vector<uint8_t> BuildRaw(const std::vector<RawSection>& secs, uint32_t reservedField = 0, uint32_t headerBytesField = 32)
+{
+    size_t total = 32; for (const auto& s : secs) total += 20 + s.body.size();
+    std::vector<uint8_t> b;
+    for (char m : { 'D', 'W', 'N', 'S' }) b.push_back(uint8_t(m));
+    PutU16(b, 1); PutU16(b, 1); PutU32(b, headerBytesField); PutU32(b, 0); // crc placeholder
+    PutU64(b, total); PutU32(b, static_cast<uint32_t>(secs.size())); PutU32(b, reservedField);
+    for (const auto& s : secs)
+    {
+        PutU32(b, s.tag); PutU16(b, s.secMajor); PutU16(b, s.secMinor); PutU32(b, s.flags);
+        PutU64(b, s.body.size()); b.insert(b.end(), s.body.begin(), s.body.end());
+    }
+    const uint32_t crc = ComputeSimCrc32(b.data(), b.size(), 12);
+    b[12] = uint8_t(crc); b[13] = uint8_t(crc >> 8); b[14] = uint8_t(crc >> 16); b[15] = uint8_t(crc >> 24);
+    return b;
+}
+int St(const std::vector<uint8_t>& b) { return static_cast<int>(Deserialize(b).status); }
+} // namespace
+
+// =============================================================================
+// T9 - STRUCTURAL guards via hand-assembled buffers (forward-compat + framing).
+// =============================================================================
+TEST_CASE(SimSerialize_StructuralGuards)
+{
+    const RawSection epok{ TAG_EPOK, 1, 0, 1u, EpokBody() };
+    const RawSection frms{ TAG_FRMS, 1, 0, 1u, FrmsBody0() };
+
+    // Baseline: EPOK + FRMS alone is a valid (empty) snapshot.
+    CHECK_EQ(St(BuildRaw({ epok, frms })), static_cast<int>(SimLoadStatus::Ok));
+    // MissingRequired: FRMS absent.
+    CHECK_EQ(St(BuildRaw({ epok })), static_cast<int>(SimLoadStatus::MissingRequired));
+    // DuplicateSection: EPOK twice.
+    CHECK_EQ(St(BuildRaw({ epok, epok, frms })), static_cast<int>(SimLoadStatus::DuplicateSection));
+    // UnknownRequired: an unknown tag carrying the REQUIRED flag.
+    const RawSection unkReq{ FourCC('Z', 'Z', 'Z', 'Z'), 1, 0, 1u, { 1, 2, 3, 4 } };
+    CHECK_EQ(St(BuildRaw({ epok, frms, unkReq })), static_cast<int>(SimLoadStatus::UnknownRequired));
+    // Unknown OPTIONAL section is SKIPPED and the rest loads Ok (forward compat).
+    const RawSection unkOpt{ FourCC('X', 'T', 'R', 'A'), 1, 0, 0u, { 9, 9, 9, 9, 9, 9, 9, 9 } };
+    CHECK_EQ(St(BuildRaw({ epok, frms, unkOpt })), static_cast<int>(SimLoadStatus::Ok));
+    // Unsupported secMajor on a REQUIRED section => UnknownRequired (never decoded at old stride).
+    const RawSection epok2{ TAG_EPOK, 2, 0, 1u, EpokBody() };
+    CHECK_EQ(St(BuildRaw({ epok2, frms })), static_cast<int>(SimLoadStatus::UnknownRequired));
+    // Unsupported secMajor on an OPTIONAL section => skipped, Ok.
+    const RawSection bodyV2{ TAG_BODY, 2, 0, 0u, { 0, 0, 0, 0 } };
+    CHECK_EQ(St(BuildRaw({ epok, frms, bodyV2 })), static_cast<int>(SimLoadStatus::Ok));
+    // BadLayout: reserved != 0, and headerBytes != 32 (both checked before CRC).
+    CHECK_EQ(St(BuildRaw({ epok, frms }, 7u)), static_cast<int>(SimLoadStatus::BadLayout));
+    CHECK_EQ(St(BuildRaw({ epok, frms }, 0u, 40u)), static_cast<int>(SimLoadStatus::BadLayout));
+}
+
+// =============================================================================
+// T10 - INTERNAL length guards: a huge record count and a sub-4-byte section body
+//       must be rejected BEFORE any reserve (the HIGH-severity underflow fix), and
+//       a raw out-of-band offset must hit the offset-band gate, not the sector path.
+// =============================================================================
+TEST_CASE(SimSerialize_InternalLengthGuards)
+{
+    // BODY section whose internal count is enormous but body is tiny: countFits must
+    // reject (no giant reserve, no crash), returning BadSectionLength.
+    {
+        std::vector<uint8_t> body; PutU32(body, 0xFFFFFFFFu); // count = 4 billion, no records
+        const RawSection epok{ TAG_EPOK, 1, 0, 1u, EpokBody() };
+        const RawSection frms{ TAG_FRMS, 1, 0, 1u, FrmsBody0() };
+        const RawSection bigBody{ TAG_BODY, 1, 0, 0u, body };
+        CHECK_EQ(St(BuildRaw({ epok, frms, bigBody })), static_cast<int>(SimLoadStatus::BadSectionLength));
+    }
+    // THE underflow witness (HIGH-severity fix): a BODY section with bodyBytes==0
+    // followed by another section, so reading its u32 count consumes the NEXT
+    // section's tag (0xFFFFFFFF here) and advances the cursor PAST bodyEnd. The
+    // CLAMPED countFits yields avail==0 => BadSectionLength before any reserve.
+    // WITHOUT the clamp, (bodyEnd - c.off) wraps to ~2^64 and reserve(0xFFFFFFFF)
+    // requests ~549 GB (bad_alloc -> TooLarge, or an OOM crash on overcommit).
+    {
+        const RawSection epok{ TAG_EPOK, 1, 0, 1u, EpokBody() };
+        const RawSection frms{ TAG_FRMS, 1, 0, 1u, FrmsBody0() };
+        const RawSection emptyBody{ TAG_BODY, 1, 0, 0u, {} };          // bodyBytes == 0
+        const RawSection tail{ 0xFFFFFFFFu, 1, 0, 0u, { 1, 2, 3, 4 } }; // its tag = BODY's "count"
+        CHECK_EQ(St(BuildRaw({ epok, frms, emptyBody, tail })), static_cast<int>(SimLoadStatus::BadSectionLength));
+    }
+    // A section declaring bodyBytes < 4 (so reading the count crosses bodyEnd): the
+    // clamped countFits must NOT underflow into a huge reserve; clean rejection, no crash.
+    {
+        std::vector<uint8_t> bytes = Serialize(MakeSnapshot());
+        size_t off = 32; bool patched = false;
+        for (int i = 0; i < 8 && off + 20 <= bytes.size(); ++i)
+        {
+            uint32_t tag = uint32_t(bytes[off]) | (uint32_t(bytes[off + 1]) << 8) | (uint32_t(bytes[off + 2]) << 16) | (uint32_t(bytes[off + 3]) << 24);
+            uint64_t bb = 0; for (int k = 0; k < 8; ++k) bb |= uint64_t(bytes[off + 12 + k]) << (8 * k);
+            if (tag == TAG_BODY) { bytes[off + 12] = 2; for (int k = 1; k < 8; ++k) bytes[off + 12 + k] = 0; patched = true; break; }
+            off += 20 + bb;
+        }
+        CHECK(patched);
+        const uint32_t crc = ComputeSimCrc32(bytes.data(), bytes.size(), 12);
+        bytes[12] = uint8_t(crc); bytes[13] = uint8_t(crc >> 8); bytes[14] = uint8_t(crc >> 16); bytes[15] = uint8_t(crc >> 24);
+        const SimLoadResult r = Deserialize(bytes);
+        CHECK_FALSE(r.Ok()); // clean rejection, never a crash/OOM
+        CHECK_EQ(static_cast<int>(r.status), static_cast<int>(SimLoadStatus::BadSectionLength));
+    }
+    // A RAW out-of-band frame offset (never laundered through Serialize) hits the
+    // offset-band gate => InvalidData, with no float->int64 UB in the loader.
+    {
+        std::vector<uint8_t> frms; PutU32(frms, 1);                 // 1 frame
+        PutU32(frms, kInvalidFrame);                                // parent
+        PutU64(frms, 0); PutU64(frms, 0); PutU64(frms, 0);          // sectors sx,sy,sz = 0
+        PutF64(frms, 1e300); PutF64(frms, 0.0); PutF64(frms, 0.0);  // offset.x wildly out of band
+        PutF64(frms, 0.0); PutF64(frms, 0.0); PutF64(frms, 0.0);    // velocity
+        const RawSection epok{ TAG_EPOK, 1, 0, 1u, EpokBody() };
+        const RawSection frmsSec{ TAG_FRMS, 1, 0, 1u, frms };
+        CHECK_EQ(St(BuildRaw({ epok, frmsSec })), static_cast<int>(SimLoadStatus::InvalidData));
+    }
+}
+
+// =============================================================================
+// T11 - Remaining ValidateSnapshot guards: one witness per guard (each the SOLE
+//       violation in an otherwise-valid MakeSnapshot).
+// =============================================================================
+TEST_CASE(SimSerialize_ValidationGuards_OneWitnessEach)
+{
+    auto expectInvalid = [](SimSnapshot s) {
+        CHECK_EQ(static_cast<int>(Deserialize(Serialize(s)).status), static_cast<int>(SimLoadStatus::InvalidData));
+    };
+    { SimSnapshot s = MakeSnapshot(); s.masterFrame = 99;             expectInvalid(s); } // masterFrame OOB
+    { SimSnapshot s = MakeSnapshot(); s.bodies[0].frame = 99;         expectInvalid(s); } // body.frame OOB
+    { SimSnapshot s = MakeSnapshot(); s.bodies[0].velocityFrame = 99; expectInvalid(s); } // velocityFrame OOB
+    { SimSnapshot s = MakeSnapshot(); s.gravity[0].isSource = 2;      expectInvalid(s); } // enum range
+    { SimSnapshot s = MakeSnapshot(); s.gravity[0].owner = 5;         expectInvalid(s); } // enum range
+    { SimSnapshot s = MakeSnapshot(); s.gravity[1].hasRails = 1;
+      s.gravity[1].inclination = std::numeric_limits<double>::infinity(); expectInvalid(s); } // rails non-finite
+    { SimSnapshot s = MakeSnapshot(); s.frames[1].velocity.y = std::numeric_limits<double>::quiet_NaN(); expectInvalid(s); } // frame vel NaN
+    { SimSnapshot s = MakeSnapshot(); s.bodies[0].rotation.x = std::numeric_limits<float>::quiet_NaN(); expectInvalid(s); } // rotation NaN
+    { SimSnapshot s = MakeSnapshot(); s.bodies[0].rotation = Quatf{ 2, 0, 0, 0 }; expectInvalid(s); } // grossly non-unit (qn=4)
+    { SimSnapshot s = MakeSnapshot(); s.gravity[0].bodyId = s.gravity[1].bodyId; expectInvalid(s); } // dup GRAV id
+    { SimSnapshot s = MakeSnapshot(); ClockRecord c2 = s.clocks[0]; s.clocks.push_back(c2); expectInvalid(s); } // dup CLKS id
+    { SimSnapshot s = MakeSnapshot(); s.gravity[0].mu = -1.0;         expectInvalid(s); } // negative mu
+    { SimSnapshot s = MakeSnapshot(); s.gravity[0].radius = -1.0;     expectInvalid(s); } // negative radius
+    { SimSnapshot s = MakeSnapshot(); s.coordinateTimeEpoch = std::numeric_limits<double>::infinity(); expectInvalid(s); } // global non-finite
 }

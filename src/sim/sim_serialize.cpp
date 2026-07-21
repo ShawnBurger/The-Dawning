@@ -242,6 +242,11 @@ bool ValidatePos(WorldPos& wp)
     for (double v : o)
         if (!Finite(v) || !(v >= -kSectorSize && v < 2.0 * kSectorSize)) return false;
     wp = Canonicalize(wp); // now provably safe: |off/kSectorSize| < 2, carry in {-1,0,1}
+    // Re-check the sector range AFTER the carry: a pre-canonicalize sector at the cap
+    // with an out-of-[0,kSectorSize) offset can carry +/-1 to one past the cap, which
+    // IsCanonical (offset-only) would not catch.
+    for (int64_t v : { wp.sx, wp.sy, wp.sz })
+        if (!(v >= -kMaxSectorCoord && v <= kMaxSectorCoord)) return false;
     return IsCanonical(wp);
 }
 } // namespace
@@ -287,6 +292,10 @@ SimLoadStatus ValidateSnapshot(SimSnapshot& s, std::string& err)
     for (const GravRecord& g : s.gravity)
     {
         if (!Finite(g.mu) || !Finite(g.radius)) { err = "grav non-finite"; return SimLoadStatus::InvalidData; }
+        // Sign: a negative mu can drive the shared Plummer softening floor to <= 0
+        // (SofteningLength = max(radius, 2*mu/c^2 + eps0)), so two coincident sources
+        // give r^2 = 0 and 1/sqrt(0) = inf in StepNBody - NaN one step after load.
+        if (!(g.mu >= 0.0) || !(g.radius >= 0.0)) { err = "grav mu/radius negative"; return SimLoadStatus::InvalidData; }
         if (g.isSource > 1 || g.owner > 1 || g.hasRails > 1) { err = "grav enum out of range"; return SimLoadStatus::InvalidData; }
         if (g.hasRails)
         {
@@ -361,9 +370,14 @@ SimLoadResult Deserialize(const uint8_t* data, size_t size)
             const bool supported = (secMajor == 1);
             const bool required = (flags & kFlagRequired) != 0;
 
-            // Count bound helper (division form, no multiply overflow).
+            // Count bound helper (division form, no multiply overflow). The
+            // subtraction is CLAMPED: reading the u32 count from a section whose
+            // bodyBytes < 4 advances c.off PAST bodyEnd, and an unclamped
+            // (bodyEnd - c.off) would wrap to ~2^64 and wave through an
+            // attacker-controlled reserve()/decode loop before the desync check.
             auto countFits = [&](uint32_t count, uint32_t minRec) {
-                return static_cast<uint64_t>(count) <= (bodyEnd - c.off) / (minRec ? minRec : 1);
+                const size_t avail = (bodyEnd >= c.off) ? (bodyEnd - c.off) : 0;
+                return static_cast<uint64_t>(count) <= avail / (minRec ? minRec : 1);
             };
 
             if (tag == kTagEPOK && supported)
@@ -452,21 +466,23 @@ SimLoadResult Deserialize(const uint8_t* data, size_t size)
             if (!c.ok) return Fail(SimLoadStatus::ShortBuffer, "section body truncated");
             if (c.off != bodyEnd) return Fail(SimLoadStatus::BadSectionLength, "section record stream desync");
         }
+
+        if (c.off != size) return Fail(SimLoadStatus::BadSectionLength, "trailing gap/overlap");
+        if (!seenEPOK || !seenFRMS) return Fail(SimLoadStatus::MissingRequired, "EPOK or FRMS absent");
+
+        // Validation allocates unordered_sets - kept INSIDE the try so a large valid
+        // buffer's bad_alloc becomes a clean TooLarge, honouring the never-throws contract.
+        std::string err;
+        const SimLoadStatus vs = ValidateSnapshot(snap, err);
+        if (vs != SimLoadStatus::Ok) return Fail(vs, std::move(err));
+
+        SimLoadResult r; r.status = SimLoadStatus::Ok; r.snapshot = std::move(snap);
+        return r;
     }
     catch (const std::bad_alloc&)
     {
         return Fail(SimLoadStatus::TooLarge, "allocation failed");
     }
-
-    if (c.off != size) return Fail(SimLoadStatus::BadSectionLength, "trailing gap/overlap");
-    if (!seenEPOK || !seenFRMS) return Fail(SimLoadStatus::MissingRequired, "EPOK or FRMS absent");
-
-    std::string err;
-    const SimLoadStatus vs = ValidateSnapshot(snap, err);
-    if (vs != SimLoadStatus::Ok) return Fail(vs, std::move(err));
-
-    SimLoadResult r; r.status = SimLoadStatus::Ok; r.snapshot = std::move(snap);
-    return r;
 }
 
 SimLoadResult Deserialize(std::span<const uint8_t> bytes)
