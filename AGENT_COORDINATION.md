@@ -1528,7 +1528,7 @@ are now integrated as well. The current order is:
 
 ### WS-022: Deterministic cooked-assembly runtime contract
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: compile a validated `.tdasset.json` assembly manifest into a compact,
   versioned runtime artifact and load it fail-closed while preserving stable
   module, zone, portal, socket, interaction, and moving-part identity. This is
@@ -1582,9 +1582,13 @@ are now integrated as well. The current order is:
   found and fixed aggregate allocation and closure/socket wiring gaps, and
   repeated both build/test matrices. Claude review remains a nonblocking
   follow-up after quota reset.
-- Latest commit: `0f9bd23`
-- Next action: wait for feature-branch CI, fast-forward clean `main`, rerun the
-  resulting main CI, and retire the task worktree after publication
+- Integration: fast-forwarded to `main` at `22eef62`; GitHub CI run
+  `29836377806` passed Windows/MSVC Debug and Release build/test jobs.
+- Latest commit: `22eef62`
+- Next action: claim a separate transactional runtime-assembly workstream before
+  resolving cooked visual/collision/nav resources or creating scene/ECS state;
+  keep interaction, pressure, navigation, lighting, and streaming behavior in
+  their owning systems and join them only through cooked stable indices
 
 ## 20. Helper Commands
 
