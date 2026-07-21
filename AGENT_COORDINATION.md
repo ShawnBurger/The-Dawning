@@ -1242,6 +1242,50 @@ registered or edited.
 - Next action: register the production fixed-step FTL callsite lane, keeping
   authored traversal/input separate from the already-tested transition adapter
 
+### WS-017: ECS atmospheric-flight adapter
+
+- Status: ACTIVE
+- Outcome: adapt a frame-aware live rigid body into the reviewed atmospheric
+  model, applying contractive drag exactly once and staging lift, torque,
+  diagnostics, and rail promotion atomically for the existing fixed-step flight
+  integrator
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/atmosphere-ecs-adapter`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-atmosphere-ecs-adapter`
+- Base commit: registration commit created from `1fee156`
+- Owned paths: append-only aerodynamic state in `src/ecs/components.h`, new
+  `src/sim/atmosphere_system.{h,cpp}`, `tests/test_atmosphere_system.cpp`, their
+  exact CMake entries, and the production-adapter contract in
+  `docs/research/ATMOSPHERIC_FLIGHT.md`
+- Excluded paths: app/input/scene callsites, timer and rendering internals,
+  shaders, assets, FTL/collision/N-body/relativity kernels, save/network code,
+  and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned;
+  `CMakeLists.txt` and `components.h` are locked only for the named append-only edits
+- Interface contract: require `Transform + SpatialFrame + RigidBody +
+  AerodynamicBody`; resolve world position/velocity through `FrameGraph`; sample
+  altitude from a validated atmospheric body; subtract linear and co-rotating
+  air velocity; apply `SemiImplicitDragAirspeed` directly and never also add a
+  drag force; add lift as world force and the equivalent aerodynamic moment as
+  body torque; promote optional `GravitationalBody.owner` only when density is
+  positive; commit after all conversions remain finite
+- Acceptance gates: moving-frame drag known answer; co-rotating zero-airspeed
+  no-op; exact vacuum/ceiling behavior; lift perpendicularity and restoring
+  moment; optional ownership behavior; malformed environment/component/frame
+  requests leave every component bit-unchanged; deterministic replay;
+  Debug/Release suites and six-mode smoke
+- Negative controls: explicit quadratic drag must gain energy at the watched
+  hostile step while the adapter remains contractive; adding both the direct
+  drag update and a drag force must fail the known answer
+- Latest commit: registration pending
+- Residual risk: this lane deliberately does not choose a planet or run ordering
+  in `Scene::UpdateSystems`; the later app/scene lane must call it once before
+  `StepFlightPhysics` for each atmospheric body and must not apply another drag
+  term
+- Next action: publish registration, create the isolated worktree, establish
+  moving-frame and atomicity tests, implement, and run the combined matrix
+
 ## 20. Helper Commands
 
 Create a task worktree:
