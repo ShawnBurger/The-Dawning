@@ -1414,6 +1414,45 @@ are now integrated as well. The current order is:
 - Next action: publish and integrate this isolated lane, then register a host and
   save-snapshot wiring pass after reconciling Claude's live scene/app changes
 
+### WS-020: Whole-repository runtime wiring and snapshot bridge
+
+- Status: ACTIVE
+- Outcome: make the WS-019 scheduler the production fixed-step callsite, supply
+  the missing ECS-to-save snapshot transaction, and correct concrete integration
+  defects found by a source-level audit of every runtime subsystem
+- Primary: Codex
+- Reviewer: Claude (optional/deferred while the CLI session limit is active)
+- Branch: `codex/repository-runtime-audit`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-repository-runtime-audit`
+- Base commit: `9f66d4d`
+- Owned paths: additive `src/sim/snapshot_system.{h,cpp}` and tests; current-main
+  `src/scene/scene.{h,cpp}` and `src/app.{h,cpp}` scheduler/save host wiring;
+  exact resource/lifecycle/build/tool corrections proved by this audit; CMake,
+  audit documentation, and this ledger entry
+- Superseded recovery worktrees: Claude worktrees `wf_0ad58e41-92a-8` and
+  `wf_a9e2859b-170-8` remain untouched, but their uncommitted glTF/per-object
+  experiments are based on `619cb3e`/`e2f9c72` and have already been replaced by
+  the merged cooked-model, glTF, structured-buffer, shader-probe, and rendering
+  implementations on current `main`. They are read-only recovery sources, not
+  current shared-file locks
+- Interface contract: `Scene::UpdateSystems` calls `StepSimulation` exactly once
+  per approved fixed step and owns frame graph, coordinate time, operation queues,
+  atmosphere bindings, and clock bindings. FTL reset-history and accumulator
+  drain obligations propagate to `App`. Snapshot build order is canonical;
+  applying a validated snapshot either replaces the simulation-owned ECS/frame
+  state completely or changes nothing
+- Acceptance gates: unchanged playable-ship behavior through the production
+  scene callsite; host phase-order witness; build/save/load/apply/rebuild bit-exact
+  snapshot tests; malformed and conflicting snapshots are atomic no-ops; every
+  compiled source belongs to a target; Debug/Release CPU suites; asset tool
+  invocations; six-mode GPU smoke; clean Git state and published `main`
+- Exclusions: no speculative networking, AI, combat, terrain, economy, or content
+  implementation; no destructive cleanup of any Claude worktree; no asset or
+  shader visual redesign without a reproduced runtime defect
+- Next action: create the isolated worktree, audit host/timer/save ownership, and
+  implement the smallest end-to-end runtime and snapshot transaction
+
 ## 20. Helper Commands
 
 Create a task worktree:
