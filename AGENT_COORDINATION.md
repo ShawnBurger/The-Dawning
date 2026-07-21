@@ -1863,7 +1863,7 @@ are now integrated as well. The current order is:
 
 ### WS-027: Deterministic interactive-interior runtime
 
-- Status: ACTIVE
+- Status: READY FOR INTEGRATION
 - Outcome: execute the interaction, portal, socket, and moving-part topology
   already present in the cooked production assembly. The runtime owns stable
   interaction state indices and normalized motion progress, accepts bounded
@@ -1916,9 +1916,20 @@ are now integrated as well. The current order is:
   vocabulary, non-finite/negative time or rates, out-of-range activation,
   stale entity, malformed snapshot, wrong topology digest, and closed/locked/
   partially open closures cannot become traversable or partially mutate state
-- Latest commit: claim pending
-- Next action: implement and exhaustively test the GPU-free state machine first,
-  then connect moving entities, host lifetime, input, and smoke proof
+- Validation: Debug and Release all-target builds pass; both CTest matrices pass
+  all four contracts; 421 CPU cases and 17,735 checks pass; Debug raster,
+  stable-DXR, full-DXR, and stable-DXR with D3D12 GPU validation pass; Release
+  raster, stable-DXR, and full-DXR pass. Every smoke mode requires the exact
+  three-interaction/two-portal runtime topology and proves `outer_hatch` reaches
+  `open` before `outer_entry` reports traversable.
+- Review: Claude Code 2.1.216 was invoked read-only against
+  `3835f90..0b57ef6` but the service rejected the session at its weekly limit
+  (reset Jul 24, 5am America/Chicago). The manual fallback found one atomicity
+  edge case in custom motion-rate preflight; it was corrected and pinned by a
+  new regression before the final feature commit.
+- Latest commits: `62afa66` claim, `3b44ac8` implementation
+- Next action: recheck branch overlap and canonical `main`, fast-forward the two
+  WS-027 commits, repeat integrated tests/smoke, push, and record merged state
 
 ## 20. Helper Commands
 
