@@ -723,26 +723,37 @@ Codex's playable-ship vertical slice are both on `main`. The current order is:
 
 ### WS-005: glTF/content-pipeline closure
 
-- Status: PLANNED
-- Outcome: close the highest-value remaining gap from source glTF/GLB through
-  deterministic cooking, runtime GPU upload, materials, and a real rendered asset
+- Status: ACTIVE
+- Outcome: close the Stage 4 gap by loading deterministic `.tdmodel` content
+  through the existing GPU/material bridge and shipping one real corridor asset
+  in Git LFS so a clean clone exercises the cooked runtime path
 - Primary: Codex
 - Reviewer: Claude
-- Branch: scoped after WS-004 reaches `REVIEW`
-- Worktree: dedicated Codex task worktree
-- Base commit: then-current `main`
-- Owned paths: `src/asset/**`, asset tools/tests, and the minimum declared runtime
-  bridge
+- Branch: `codex/gltf-content-closure`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-gltf-content-closure`
+- Base commit: `2115c11`
+- Owned paths: `src/scene/model_loader.*`, the generated-asset load block in
+  `src/app.cpp`, `tools/smoke_test.ps1`, `.gitattributes`, `.gitignore`,
+  `assets/runtime/**`, focused asset tests, and asset-pipeline documentation
 - Excluded paths: simulation foundation and unrelated rendering refactors
-- Shared-file locks: build registration and scene spawn remain integration-only
-- Interface contract: audit merged code and unmerged historical branches before
-  writing anything; reuse the canonical cooked format and resource handles
-- Dependencies: WS-004 no longer `ACTIVE`; current asset pipeline inventory
-- Acceptance gates: malformed/resource-limit tests, deterministic cook, round
-  trip, dependency integrity, and one real asset rendered in raster and DXR
-- Negative controls: a clean clone must not depend on ignored build-output assets
-- Latest commit: none
-- Next action: inventory what is already merged and select one missing vertical gap
+- Shared-file locks: `src/app.cpp`, `tools/smoke_test.ps1`, and `.gitattributes`
+  locked to WS-005; `CMakeLists.txt` remains integration-only and is not expected
+  to change because the existing build already copies `assets/**`
+- Interface contract: `LoadCookedModelIntoScene` deserializes the versioned
+  engine-owned format and feeds the same `ImportedModel` GPU upload/material path
+  as source glTF; runtime never calls Meshy and never needs `MESHY_API_KEY`
+- Dependencies: WS-004 merged; cooked format/compiler, source snapshotting, glTF
+  importer, image decoding, and runtime `ImportedModel` bridge already on `main`
+- Acceptance gates: LFS integrity, byte-identical recook from the recorded source,
+  cooked load/round trip and malformed/resource-limit tests, Debug/Release CPU
+  suites, and required real-model markers in raster, stable-DXR, and full-DXR smoke
+- Negative controls: removing or corrupting the shipped `.tdmodel` must fail the
+  runtime/smoke gate; a clean clone must not use ignored generated GLBs or API keys
+- Latest commit: none; inventory completed against `main` and historical asset
+  branches
+- Next action: publish the cooked corridor through LFS, factor raw/cooked loading
+  onto one GPU bridge, and make smoke require the cooked-model marker
 
 ### WS-006: Shadow/rendering improvement
 
