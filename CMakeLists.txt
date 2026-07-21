@@ -29,6 +29,7 @@ set(CORE_SOURCES
     src/core/shadow_cascades.cpp
     src/core/sky_radiance.cpp
     src/core/sh_irradiance.cpp
+    src/core/job_system.cpp
 )
 
 set(CORE_HEADERS
@@ -40,6 +41,7 @@ set(CORE_HEADERS
     src/core/shadow_cascades.h
     src/core/sky_radiance.h
     src/core/sh_irradiance.h
+    src/core/job_system.h
 )
 
 set(ASSET_SOURCES
@@ -188,6 +190,7 @@ set(SCENE_HEADERS
 set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_math.cpp
+    tests/test_job_system.cpp
     tests/test_ecs.cpp
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
@@ -434,6 +437,10 @@ add_executable(TheDawningTests
     src/core/timer.cpp
     src/core/shadow_cascades.h
     src/core/shadow_cascades.cpp
+    # Job system: GPU-free thread pool; tests/test_job_system.cpp drives the SHIPPED
+    # pool (deterministic ParallelFor result, exactly-once, race-free, Wait barrier).
+    src/core/job_system.h
+    src/core/job_system.cpp
     # CPU evaluation of the procedural sky. GPU-free for the same reason
     # shadow_cascades.cpp is, but NOT on the same footing: it is a hand-written
     # MIRROR of shaders/sky_common.hlsli rather than shipped code, and the engine
