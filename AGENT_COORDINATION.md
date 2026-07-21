@@ -579,12 +579,12 @@ The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. The current order is:
 
-1. WS-006 is merged; Codex completes its combined-main publication and retires
-   the clean worktree before opening another implementation lane.
-2. Claude registers the atmosphere implementation workstream before editing the
-   clean `claude/sim-atmosphere` worktree, with Codex assigned as reviewer.
-3. Codex completes the deferred numerical review of merged WS-008 before Claude
-   builds another dependent simulation stage.
+1. WS-006 is merged, published, and retired.
+2. Claude's atmosphere implementation `45cf4db` reached `main` through
+   `fa4f983` without a registered workstream or independent review; reconcile
+   that review debt after WS-009.
+3. Codex completes WS-009, the deferred numerical review and finite-domain
+   hardening of merged WS-008, before another dependent simulation stage.
 4. Route coupled flight assist through real actuator limits so both flight modes
    expose physical thruster state.
 5. Add collision/close-encounter policy before production N-body activation.
@@ -847,8 +847,39 @@ on `main`. The current order is:
   failed with 2,598 mismatch pixels while the older object/material witnesses
   stayed clean. Deterministic before/after captures changed 187 pixels inside a
   247x82 distant-shadow region, with no scene-wide blur or color shift.
-- Next action: publish the combined-main matrix, retire the clean task worktree,
-  and complete the deferred manual Claude review when capacity is available
+- Next action: complete the deferred manual Claude review when capacity is
+  available
+
+### WS-009: Relativity review hardening
+
+- Status: ACTIVE
+- Outcome: close the concrete finite-domain and verification gaps found in the
+  independent review of WS-008 without changing its public module boundary
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/review-sim-relativity`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-relativity`
+- Base commit: `fa4f983`
+- Owned paths: `src/sim/relativity.h`, `src/sim/relativity.cpp`, and
+  `tests/test_relativity.cpp`
+- Excluded paths: atmosphere, N-body and reference-frame implementation,
+  gameplay/scene wiring, renderer, assets, ECS layout, and `CMakeLists.txt`
+- Shared-file locks: the three owned relativity files locked to WS-009;
+  `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve the shipped function signatures and
+  momentum-authoritative ownership; reject invalid updates without emitting a
+  non-finite state, and keep valid low-speed behavior unchanged
+- Dependencies: merged WS-008 and the current atmosphere merge on `main`
+- Acceptance gates: finite high-dynamic-range momentum recovery and energy,
+  invalid-mass/force/state guards, proper-time factor-domain guards,
+  deterministic replay, timestep convergence, and Debug/Release CPU suites
+- Negative controls: the added finite-momentum, invalid-update, clock-domain,
+  replay, and convergence tests must fail against the reviewed WS-008 behavior
+  where applicable before the implementation is corrected
+- Latest commit: none; review range `277aec3..6b32caa`
+- Next action: create the isolated review worktree, land the missing adversarial
+  tests first, record their baseline failures, then implement the bounded fix
 
 ## 20. Helper Commands
 
