@@ -1188,6 +1188,46 @@ registered or edited.
 - Next action: retire the clean review worktree after pushing `main`; begin the
   next registered production adapter without extending collision scope
 
+### WS-016: ECS reference-frame and atomic FTL adapter
+
+- Status: ACTIVE
+- Outcome: adapt a live ECS flight body into the reviewed `TeleportState` kernel
+  and commit the complete accepted transition back atomically in a destination
+  reference frame
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/ftl-ecs-adapter`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-ftl-ecs-adapter`
+- Base commit: registration commit created from `515b95d`
+- Owned paths: append-only frame binding in `src/ecs/components.h`, new
+  `src/sim/ftl_system.{h,cpp}`, `tests/test_ftl_system.cpp`, their exact CMake
+  entries, and the FTL adapter contract in research documentation
+- Excluded paths: app/input/scene callsites, timer and render/path-trace internals,
+  assets, shaders, collision, atmosphere, N-body/relativity/FTL kernel changes,
+  save/network code, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned;
+  `CMakeLists.txt` and `components.h` are locked only for the named append-only edits
+- Interface contract: require `Transform + SpatialFrame + RigidBody`; resolve the
+  source pose/velocity through `FrameGraph`, widen body-frame float vectors, map
+  optional authoritative `RelativisticBody.momentum`, call `TryApplyTeleport`,
+  express the accepted pose/velocity in the destination frame, flip an optional
+  `GravitationalBody` to `NBodyActive`, and only then commit every component
+- Acceptance gates: identity and rotated known answers across distant frames;
+  optional-component behavior; exact accumulator/history policy; invalid frame,
+  missing component, malformed transform, and unsafe destination all leave every
+  component bit-unchanged; result flags request path-history reset and fixed-step
+  accumulator drain only on success; Debug/Release suites and six-mode smoke
+- Negative controls: direct local-position copying must fail the distant-frame
+  known answer; partial component writes before `TryApplyTeleport` rejection must
+  fail transactional snapshots
+- Latest commit: registration pending
+- Residual risk: this lane deliberately returns host reset obligations rather than
+  touching renderer/timer state. A later app lane must invoke it inside one fixed
+  step, reset path accumulation without resetting the RNG seed, drain queued fixed
+  steps, and provide authored mouth/frame data and player interaction.
+- Next action: publish registration, create the isolated worktree, establish the
+  watched adapter tests, implement, and run the combined integration matrix
+
 ## 20. Helper Commands
 
 Create a task worktree:
