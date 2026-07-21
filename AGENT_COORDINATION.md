@@ -588,6 +588,9 @@ on `main`. The current order is:
 5. Do not start another simulation stage until WS-010 and WS-011 review debt is
    resolved and the next lane is registered before editing.
 
+WS-012 is the active Codex review-fix lane for the concrete WS-010 findings.
+It may proceed while WS-011 remains queued because its owned files are disjoint.
+
 ### WS-001: Coordination contract
 
 - Status: MERGED
@@ -949,6 +952,41 @@ on `main`. The current order is:
   eight `TEST_CASE` blocks; reconcile the evidence during review.
 - Next action: Codex reviews this after WS-010 and before any engine callsite is
   integrated
+
+### WS-012: Atmospheric-flight review hardening
+
+- Status: ACTIVE
+- Outcome: close the ceiling-continuity, finite-domain, and public-contract gaps
+  found during the independent WS-010 review without adding a production callsite
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/review-sim-atmosphere`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-atmosphere`
+- Base commit: `347d5a3`
+- Owned paths: `src/sim/atmosphere.h`, `src/sim/atmosphere.cpp`,
+  `tests/test_atmosphere.cpp`, `docs/research/ATMOSPHERIC_FLIGHT.md`, and the
+  atmosphere contract in `docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md`
+- Excluded paths: FTL, N-body, relativity, scene/gameplay wiring, renderer,
+  assets, ECS layout, and `CMakeLists.txt`
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve the shipped atmosphere API and external-force
+  ownership; make the configured ceiling genuinely C0 in density/force and keep
+  valid ordinary-flight results unchanged
+- Dependencies: merged WS-010 implementation and WS-009 finite-domain policy
+- Acceptance gates: watched baseline failures for the hard cutoff and invalid or
+  extreme inputs; monotone soft-ceiling taper; finite/neutral public outputs;
+  contractive stiff-drag update; published USSA anchors; Debug/Release CPU suites;
+  combined raster, stable-DXR, and full-DXR smoke after integration
+- Negative controls: the reviewed hard-cut implementation must fail the new
+  ceiling-continuity test, and invalid model/force/heating inputs must not emit
+  NaN/Inf or reverse aerodynamic dissipation
+- Latest commit: none; tests are written first against `347d5a3`
+- Review note: Claude review is requested after the fix commit; under Shawn's
+  explicit direction, a failed or unavailable automated review is recorded as
+  deferred manual review debt and does not block evidence-backed integration
+- Next action: create the isolated worktree, prove the findings against the
+  reviewed implementation, then correct and verify them
 
 ## 20. Helper Commands
 
