@@ -136,6 +136,7 @@ set(SIM_SOURCES
     src/sim/reference_frame.cpp
     src/sim/kepler.cpp
     src/sim/nbody.cpp
+    src/sim/relativity.cpp
 )
 
 set(SIM_HEADERS
@@ -146,6 +147,7 @@ set(SIM_HEADERS
     src/sim/reference_frame.h
     src/sim/kepler.h
     src/sim/nbody.h
+    src/sim/relativity.h
 )
 
 set(SCENE_SOURCES
@@ -182,6 +184,7 @@ set(TEST_SOURCES
     tests/test_reference_frame.cpp
     tests/test_kepler.cpp
     tests/test_nbody.cpp
+    tests/test_relativity.cpp
 )
 
 set(TEST_HEADERS
@@ -411,6 +414,14 @@ add_executable(TheDawningTests
     src/sim/kepler.h
     src/sim/nbody.cpp
     src/sim/nbody.h
+    # SIM STAGE 2 relativistic dynamics + time dilation. GPU-free on the same
+    # sanctioned footing: relativity.h includes only core/types.h, ecs/components.h
+    # and the other sim headers (all device-free) and REUSES nbody.h's kSpeedOfLight
+    # and SofteningLength, so tests/test_relativity.cpp drives the SHIPPED
+    # momentum-space stepper, dilation clocks and master-frame β composition rather
+    # than a copy. Do NOT add anything here that pulls in a D3D12 or render header.
+    src/sim/relativity.cpp
+    src/sim/relativity.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

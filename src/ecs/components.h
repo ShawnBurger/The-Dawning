@@ -327,4 +327,73 @@ struct OrbitState
     double          epoch = 0.0;      // coordinate time at which `elements` hold
 };
 
+// =============================================================================
+// Relativity (Sim Stage 2) — APPENDED, do not reorder the above.
+// =============================================================================
+// The state a relativistic body needs, per docs/research/
+// RELATIVISTIC_SIM_ARCHITECTURE.md §3 (momentum-space dynamics) and §2 (proper
+// time). Consumed by the pure functions in src/sim/relativity.h exactly the way
+// RigidBody is consumed by sim/rigid_body.h — sim includes ecs; ecs never
+// includes sim, so no cycle. These add NO call site; the ship-slice lane wires
+// them.
+//
+// WHY MOMENTUM IS A STORED COMPONENT AND NOT DERIVED FROM RigidBody.linearVelocity
+// (the §3.3 decision, made concrete):
+//   The architecture (§3.1) advances relativistic MOMENTUM `p += F·dt` and
+//   RECOVERS velocity `v = p / sqrt(m² + (|p|/c)²)`. Storing `p` as the
+//   authoritative dynamical state — rather than re-deriving it from a stored
+//   velocity each step — buys two things a velocity store cannot:
+//     1. |v| < c is a STRUCTURAL property of the stored state. Any finite `p`
+//        recovers a strictly sub-c `v`; there is no γ to clamp.
+//     2. γ = sqrt(1 + (|p|/(mc))²) is precise at ARBITRARY boost. Recovering γ
+//        from a velocity stored near c would form 1 − v²/c², a catastrophic
+//        cancellation that loses all precision exactly where dilation matters.
+//   §3.3 says linearVelocity "stays a Vec3d ... and p is derived/stored
+//   ALONGSIDE it" — so momentum lives here as its own field, and the recovered
+//   `v` is written back into RigidBody.linearVelocity each step for the position
+//   integrator and the orbital invariants (½v²−μ/r, r×v) that are written over
+//   velocity. RECONCILIATION CONTRACT: in the relativistic lane RelativisticBody
+//   .momentum is authoritative and RigidBody.linearVelocity is a per-step
+//   projection of it; a body uses EITHER the Newtonian velocity lane OR the
+//   relativistic momentum lane, never writing both independently — the same
+//   one-owner discipline OrbitOwner enforces for the N-body/rails split.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// RelativisticBody — momentum-space dynamical state (see sim/relativity.h).
+// -----------------------------------------------------------------------------
+struct RelativisticBody
+{
+    // Relativistic momentum p = γ m v (kg·m/s), WORLD/frame vector like
+    // RigidBody.linearVelocity. This is the AUTHORITATIVE state the force step
+    // advances (p += F·dt). |v| < c is structural because velocity is recovered
+    // as v = p / sqrt(m² + (|p|/c)²) for whatever finite p this holds. Vec3d by
+    // RULE 1: it is a world-frame dynamical vector, and its magnitude spans the
+    // full non-relativistic-to-ultrarelativistic range in double.
+    core::Vec3d momentum = { 0.0, 0.0, 0.0 };
+
+    // Rest mass m (kg), > 0 for a relativistic body. The recovery radicand
+    // m² + (|p|/c)² is strictly positive for m > 0, which is WHY the recovery
+    // cannot go imaginary or divide by zero. Equals 1/RigidBody.invMass when the
+    // body is also a rigid body; stored here so the relativistic functions are
+    // pure in (p, m) and need no RigidBody.
+    double restMass = 1.0;
+};
+
+// -----------------------------------------------------------------------------
+// RelativisticClock — the proper-time sidecar (see sim/relativity.h, §2.2).
+// -----------------------------------------------------------------------------
+// Proper time is accumulated as the DEVIATION Σ(dτ − dt), NEVER as τ += dτ:
+// near β=0 and r=∞ the dilation factor is ~1.0 and dτ − dt is a ~1e-9 residual
+// that would drown if summed onto a coordinate-time-magnitude running total.
+// The deviation is kept in its own double so the tiny signal survives a long
+// trip; proper time is RECONSTRUCTED as coordinateTime + deviation on demand
+// (sim::ProperTime), which is not the same as accumulating τ directly — the
+// residual is never rounded against the large magnitude during accumulation.
+struct RelativisticClock
+{
+    double coordinateTime       = 0.0; // Σ dt : elapsed coordinate time (master frame)
+    double properTimeDeviation  = 0.0; // Σ (dτ − dt) : the isolated dilation residual (≤ 0)
+};
+
 } // namespace ecs
