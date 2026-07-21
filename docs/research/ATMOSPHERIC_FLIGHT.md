@@ -642,8 +642,10 @@ forming the body-frame torque. The adapter must run once before
 All numeric state and frame conversions are staged before any component write.
 Malformed requests reject without changing the registry. A valid vacuum or
 ceiling sample is an accepted exact no-op. Positive density promotes an optional
-`GravitationalBody` from rails to `NBodyActive`; `OrbitState` remains intact for a
-later deterministic demotion. Diagnostics (density, dynamic pressure, Mach,
+`GravitationalBody` from rails or passive N-body motion to `ForceIntegrated`;
+`OrbitState` remains intact for a later deterministic demotion. Any stale
+accumulators from the previous mover are cleared at that boundary before the new
+aerodynamic wrench is staged. Diagnostics (density, dynamic pressure, Mach,
 angle of attack, and heat flux) are returned to gameplay and never feed back into
 the trajectory except through the explicit drag/lift path above.
 
