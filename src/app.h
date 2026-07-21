@@ -9,6 +9,7 @@
 #include "render/renderer.h"
 #include "scene/scene.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -23,6 +24,7 @@ struct AppOptions
     bool smokeCapture = false;
     bool smokeResize = false;
     bool smokeUnlocked = false;
+    bool smokeFlight = false;
     // --smoke-force-grow: steepen the structured-buffer sizing ramp so the
     // reallocate-and-DeferredRelease branch runs far more often than the default
     // run already makes it. Opt-in heavy case, not the coverage floor - the
@@ -57,6 +59,8 @@ private:
     // reallocate with frames in flight, which is a raster-path hazard.
     void ApplySmokeGrowthStress();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
+    void UpdatePlayerShipInput();
+    void UpdatePlayerShipVisuals();
     void UpdateCamera(const core::TimeStep& timeStep);
     bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
@@ -121,6 +125,12 @@ private:
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;
     ecs::Entity m_smokeTextureEntity;
+    ecs::Entity m_playerShip;
+    std::array<ecs::Entity, ecs::ThrusterSet::kMaxThrusters> m_thrusterVisuals = {};
+    scene::MeshHandle m_thrusterVisualMesh;
+    uint32_t m_thrusterVisualCount = 0;
+    float m_pendingPointerPitch = 0.0f;
+    float m_pendingPointerYaw = 0.0f;
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
     uint32_t m_smokeSavedNormalTexture = UINT32_MAX;

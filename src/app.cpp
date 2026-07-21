@@ -3,6 +3,7 @@
 
 #include "core/input.h"
 #include "core/log.h"
+#include "gameplay/playable_ship.h"
 #include "render/mesh.h"
 #include "render/texture.h"
 
@@ -56,6 +57,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeCapture = HasOption(args, "--smoke-capture");
     options.smokeResize = HasOption(args, "--smoke-resize");
     options.smokeUnlocked = HasOption(args, "--smoke-unlocked");
+    options.smokeFlight = HasOption(args, "--smoke-flight");
     options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
@@ -107,10 +109,11 @@ int App::Run(const char* commandLine)
     m_options = ParseOptions(commandLine);
     if (m_options.smoke)
     {
-        core::Log::Infof("Smoke mode enabled (rt=%s, full=%s, unlocked=%s, seconds=%.2f)",
+        core::Log::Infof("Smoke mode enabled (rt=%s, full=%s, unlocked=%s, flight=%s, seconds=%.2f)",
                          m_options.smokeRT ? "yes" : "no",
                          m_options.smokeFullQuality ? "yes" : "no",
                          m_options.smokeUnlocked ? "yes" : "no",
+                         m_options.smokeFlight ? "yes" : "no",
                          m_options.smokeSeconds);
     }
 
@@ -523,11 +526,54 @@ bool App::InitializeScene()
                        cubeAlbedo.value, cubeNormal.value, cubeOrm.value,
                        core::Color{ 0.25f, 0.85f, 1.0f, 1.0f }, 2.5f,
                        cubeEmissive.value };
-    m_smokeTextureEntity = m_scene.CreateSpinner(
-        "BlueCube", cube,
-        m_smokeGrowthMaterial,
-        ecs::Transform{ { 0, 0.5f, 0 }, core::Quatf::Identity(), { 1, 1, 1 } },
-        0.5f);
+    ecs::Material playerMaterial = m_smokeGrowthMaterial;
+    playerMaterial.albedo = { 0.18f, 0.32f, 0.58f, 1.0f };
+    playerMaterial.emissiveStrength = 0.45f;
+    m_playerShip = m_scene.CreateRenderable(
+        "PlayerShip", cube,
+        playerMaterial,
+        ecs::Transform{ { 0, 1.2, -2.0 }, core::Quatf::Identity(),
+                        { 3.0f, 0.9f, 4.4f } });
+    if (m_playerShip.IsNull())
+        return false;
+
+    auto& registry = m_scene.GetRegistry();
+    registry.Assign<ecs::RigidBody>(m_playerShip, gameplay::MakeFighterRigidBody());
+    registry.Assign<ecs::ThrusterSet>(m_playerShip, gameplay::MakeFighterThrusterSet());
+    registry.Assign<ecs::FlightControl>(m_playerShip, ecs::FlightControl{});
+    m_smokeTextureEntity = m_playerShip;
+
+    // Exhaust creation adds more Transform components and can reallocate that
+    // pool, so keep value copies while the visual entities are being spawned.
+    const ecs::Transform shipTransform = registry.Get<ecs::Transform>(m_playerShip);
+    const ecs::ThrusterSet thrusters = registry.Get<ecs::ThrusterSet>(m_playerShip);
+    m_thrusterVisualMesh = cube;
+    m_thrusterVisualCount = thrusters.count < ecs::ThrusterSet::kMaxThrusters
+        ? thrusters.count
+        : ecs::ThrusterSet::kMaxThrusters;
+    const ecs::Material exhaustMaterial{
+        { 0.08f, 0.35f, 0.95f, 1.0f }, 0.18f, 0.0f,
+        UINT32_MAX, UINT32_MAX, UINT32_MAX,
+        { 0.12f, 0.55f, 1.0f, 1.0f }, 0.0f, UINT32_MAX
+    };
+    for (uint32_t i = 0; i < m_thrusterVisualCount; ++i)
+    {
+        char exhaustName[32] = {};
+        std::snprintf(exhaustName, sizeof(exhaustName), "PlayerExhaust_%02u", i);
+        const gameplay::ThrusterVisualState visual =
+            gameplay::BuildThrusterVisualState(shipTransform, thrusters.thrusters[i]);
+        m_thrusterVisuals[i] = m_scene.CreateRenderable(
+            exhaustName, cube, exhaustMaterial, visual.transform);
+        if (m_thrusterVisuals[i].IsNull())
+            return false;
+        // Inactive exhaust is not a draw at all. Keeping an invisible
+        // MeshInstance here would inflate Scene::MeshInstanceCount and force
+        // renderer buffers to grow for entities neither pass can consume.
+        registry.Remove<ecs::MeshInstance>(m_thrusterVisuals[i]);
+    }
+
+    core::Log::Infof("Playable ship ready: entity=%u thrusters=%u mode=COUPLED",
+                     m_playerShip.id, m_thrusterVisualCount);
 
     m_scene.CreateRenderable(
         "RedSphere", sphere,
@@ -604,7 +650,8 @@ void App::InitializePathTracingState()
                      m_rtQualityInfo.samplesPerPixel,
                      m_rtQualityInfo.maxBounces,
                      m_rtQualityInfo.maxBounces == 1 ? "" : "s");
-    core::Log::Info("Controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
+    core::Log::Info("Flight controls: WASD translate, Space/Ctrl lift, mouse or arrows steer, Q/E roll, V coupled/decoupled");
+    core::Log::Info("Render controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
 }
 
 bool App::EnsurePathTracing()
@@ -770,6 +817,7 @@ int App::RunMainLoop()
             TogglePathTracing();
 
         core::TimeStep timeStep = m_timer.Tick();
+        bool advancedFlightStep = false;
         if (m_options.smoke)
         {
             timeStep.dt = kSmokeFixedDeltaSeconds;
@@ -1021,8 +1069,7 @@ int App::RunMainLoop()
             }
         }
 
-        UpdateWindowTitle(timeStep);
-        UpdateCamera(timeStep);
+        UpdatePlayerShipInput();
 
         if (!HandleResize())
             continue;
@@ -1031,6 +1078,8 @@ int App::RunMainLoop()
             // Simulation is suspended with rendering. Discard elapsed fixed
             // steps so restoring the window cannot trigger an unbounded catch-up.
             while (m_timer.ConsumeFixedStep()) {}
+            m_pendingPointerPitch = 0.0f;
+            m_pendingPointerYaw = 0.0f;
             Sleep(10);
             continue;
         }
@@ -1041,12 +1090,26 @@ int App::RunMainLoop()
             // on how quickly this machine happens to render the test.
             while (m_timer.ConsumeFixedStep()) {}
             m_scene.UpdateSystems(kSmokeFixedDeltaSeconds);
+            advancedFlightStep = true;
         }
         else
         {
             while (m_timer.ConsumeFixedStep())
+            {
                 m_scene.UpdateSystems(m_timer.GetFixedDt());
+                advancedFlightStep = true;
+            }
         }
+
+        if (advancedFlightStep)
+        {
+            m_pendingPointerPitch = 0.0f;
+            m_pendingPointerYaw = 0.0f;
+        }
+
+        UpdatePlayerShipVisuals();
+        UpdateCamera(timeStep);
+        UpdateWindowTitle(timeStep);
 
         if (!RenderFrame(timeStep))
         {
@@ -1078,15 +1141,159 @@ void App::UpdateWindowTitle(const core::TimeStep& timeStep)
         std::snprintf(modeText, sizeof(modeText), "RASTERIZED");
     }
 
-    char title[160] = {};
+    const auto& registry = m_scene.GetRegistry();
+    const auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
+    const auto* body = registry.TryGet<ecs::RigidBody>(m_playerShip);
+    const char* flightMode = control && control->mode == ecs::FlightMode::Decoupled
+        ? "DECOUPLED"
+        : "COUPLED";
+    const double speed = body ? body->linearVelocity.Length() : 0.0;
+
+    char title[224] = {};
     std::snprintf(title, sizeof(title),
-                  "The Dawning V3 | %.1f fps | %u entities | %s [F1 render | F2 quality | F3 overlay]",
-                  timeStep.fps, m_scene.EntityCount(), modeText);
+                  "The Dawning V3 | %.1f fps | %u entities | %s | FLIGHT %s %.1f m/s [V mode | F1 render | F2 quality]",
+                  timeStep.fps, m_scene.EntityCount(), modeText, flightMode, speed);
     SetWindowTextA(m_window.GetHWND(), title);
+}
+
+void App::UpdatePlayerShipInput()
+{
+    auto& registry = m_scene.GetRegistry();
+    auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
+    auto* thrusters = registry.TryGet<ecs::ThrusterSet>(m_playerShip);
+    if (!control || !thrusters)
+        return;
+
+    const auto& input = core::input::GetState();
+    gameplay::PilotInputSnapshot snapshot;
+    snapshot.thrustForward = input.KeyDown('W');
+    snapshot.thrustBackward = input.KeyDown('S');
+    snapshot.strafeLeft = input.KeyDown('A');
+    snapshot.strafeRight = input.KeyDown('D');
+    snapshot.liftUp = input.KeyDown(VK_SPACE);
+    snapshot.liftDown = input.KeyDown(VK_CONTROL);
+    snapshot.pitchUp = input.KeyDown(VK_UP);
+    snapshot.pitchDown = input.KeyDown(VK_DOWN);
+    snapshot.yawLeft = input.KeyDown(VK_LEFT);
+    snapshot.yawRight = input.KeyDown(VK_RIGHT);
+    snapshot.rollLeft = input.KeyDown('Q');
+    snapshot.rollRight = input.KeyDown('E');
+    snapshot.toggleMode = input.KeyPressed('V');
+
+    if (m_window.IsCaptured())
+    {
+        constexpr float pointerDemandPerPixel = 0.035f;
+        m_pendingPointerPitch = gameplay::ClampDemand(
+            m_pendingPointerPitch +
+            static_cast<float>(input.mouse.deltaY) * pointerDemandPerPixel);
+        m_pendingPointerYaw = gameplay::ClampDemand(
+            m_pendingPointerYaw +
+            static_cast<float>(input.mouse.deltaX) * pointerDemandPerPixel);
+    }
+    else
+    {
+        m_pendingPointerPitch = 0.0f;
+        m_pendingPointerYaw = 0.0f;
+    }
+    snapshot.pointerPitch = m_pendingPointerPitch;
+    snapshot.pointerYaw = m_pendingPointerYaw;
+
+    if (m_options.smokeFlight)
+    {
+        const uint64_t endFrame = SmokeFrameForTime(m_options.smokeSeconds);
+        snapshot = gameplay::PilotInputSnapshot{};
+        m_pendingPointerPitch = 0.0f;
+        m_pendingPointerYaw = 0.0f;
+        snapshot.toggleMode = m_frameCount == 2;
+        snapshot.thrustForward = m_frameCount + 12 > endFrame;
+    }
+
+    const ecs::FlightMode previousMode = control->mode;
+    gameplay::ApplyPilotInput(snapshot, *control);
+    if (control->mode == ecs::FlightMode::Coupled)
+    {
+        // Coupled assist is an ideal wrench in the current Stage 2 law, so no
+        // physical nozzle is active. Clear any decoupled throttle left over from
+        // the preceding fixed step before presenting its state to the renderer.
+        gameplay::ClearThrusterThrottles(*thrusters);
+    }
+
+    if (control->mode != previousMode)
+    {
+        core::Log::Infof("Flight mode: %s",
+                         control->mode == ecs::FlightMode::Coupled
+                             ? "COUPLED"
+                             : "DECOUPLED");
+    }
+}
+
+void App::UpdatePlayerShipVisuals()
+{
+    auto& registry = m_scene.GetRegistry();
+    const auto* ship = registry.TryGet<ecs::Transform>(m_playerShip);
+    const auto* thrusters = registry.TryGet<ecs::ThrusterSet>(m_playerShip);
+    if (!ship || !thrusters)
+        return;
+
+    const uint32_t count = m_thrusterVisualCount < thrusters->count
+        ? m_thrusterVisualCount
+        : thrusters->count;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const ecs::Entity visualEntity = m_thrusterVisuals[i];
+        auto* transform = registry.TryGet<ecs::Transform>(visualEntity);
+        auto* material = registry.TryGet<ecs::Material>(visualEntity);
+        if (!transform || !material)
+            continue;
+
+        const gameplay::ThrusterVisualState visual =
+            gameplay::BuildThrusterVisualState(*ship, thrusters->thrusters[i]);
+        *transform = visual.transform;
+        material->emissiveStrength = visual.emissiveStrength;
+
+        if (visual.visible)
+        {
+            if (!registry.Has<ecs::MeshInstance>(visualEntity))
+            {
+                registry.Assign<ecs::MeshInstance>(
+                    visualEntity,
+                    ecs::MeshInstance{ m_thrusterVisualMesh.value, true });
+            }
+        }
+        else
+        {
+            registry.Remove<ecs::MeshInstance>(visualEntity);
+        }
+    }
+
+    if (m_options.smokeFlight &&
+        m_frameCount == SmokeFrameForTime(m_options.smokeSeconds))
+    {
+        const auto* body = registry.TryGet<ecs::RigidBody>(m_playerShip);
+        const auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
+        const float mainThrottle = thrusters->count > 4
+            ? thrusters->thrusters[4].throttle
+            : 0.0f;
+        core::Log::Infof(
+            "[SMOKE] playable_ship=ok mode=%s speed=%.3f main_throttle=%.3f",
+            control && control->mode == ecs::FlightMode::Decoupled
+                ? "decoupled"
+                : "coupled",
+            body ? body->linearVelocity.Length() : 0.0,
+            mainThrottle);
+    }
 }
 
 void App::UpdateCamera(const core::TimeStep& timeStep)
 {
+    const auto& registry = m_scene.GetRegistry();
+    if (const auto* ship = registry.TryGet<ecs::Transform>(m_playerShip))
+    {
+        const gameplay::ChaseCameraPose pose = gameplay::BuildChaseCameraPose(*ship);
+        m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
+        return;
+    }
+
     const auto& input = core::input::GetState();
     float mouseDeltaX = 0.0f;
     float mouseDeltaY = 0.0f;
