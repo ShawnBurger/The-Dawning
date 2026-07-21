@@ -83,20 +83,34 @@ TEST_CASE(StarSystem_RailsBodiesAreGenuineCircularOrbits)
     }
 }
 
-TEST_CASE(StarSystem_KeplersThirdLawHoldsAcrossPlanets)
+TEST_CASE(StarSystem_ConcreteOrbitsAndKeplersThirdLaw)
 {
     const StarSystem s = BuildReferenceSystem();
-    const SystemBody* p1 = Find(s, 10);
-    const SystemBody* p2 = Find(s, 20);
-    CHECK(p1 && p2);
-    if (!p1 || !p2) return;
+    const SystemBody* p1   = Find(s, 10);
+    const SystemBody* p2   = Find(s, 20);
+    const SystemBody* moon = Find(s, 11);
+    CHECK(p1 && p2 && moon);
+    if (!p1 || !p2 || !moon) return;
 
+    constexpr double kAU = 1.495978707e11;
+    // Pin the CONCRETE orbital radii to their intended values. This is the
+    // non-tautological guard: the Kepler-form check below derives the period from
+    // a, so it cannot detect a wrong a — only these literal comparisons can. In
+    // particular this catches the outer planet coinciding with the inner one.
+    CHECK_APPROX_EPS(p1->orbit.elements.semiMajorAxis, 1.00 * kAU, kAU * 1.0e-12);
+    CHECK_APPROX_EPS(p2->orbit.elements.semiMajorAxis, 1.52 * kAU, kAU * 1.0e-12);
+    CHECK_APPROX_EPS(moon->orbit.elements.semiMajorAxis, 3.844e8, 1.0);
+    CHECK(p2->orbit.elements.semiMajorAxis > p1->orbit.elements.semiMajorAxis);
+    // Concrete gravitational parameters too (a wrong mu would rescale periods).
+    CHECK_APPROX_EPS(p1->mu, 3.986004418e14, 1.0e6);
+    CHECK_APPROX_EPS(p2->mu, 4.282837e13, 1.0e5);
+
+    // With distinct, pinned a's, Kepler's third law is a genuine cross-check that
+    // ONE shared primaryMu governs both: T²/a³ is the same constant (4π²/mu).
     const double a1 = p1->orbit.elements.semiMajorAxis;
     const double a2 = p2->orbit.elements.semiMajorAxis;
-    const double muSun = p1->orbit.primaryMu; // both orbit the star
+    const double muSun = p1->orbit.primaryMu;
     CHECK_EQ(p2->orbit.primaryMu, muSun);
-
-    // T^2 / a^3 is the same constant (4π²/mu) for both planets.
     const double k1 = Period(a1, muSun) * Period(a1, muSun) / (a1 * a1 * a1);
     const double k2 = Period(a2, muSun) * Period(a2, muSun) / (a2 * a2 * a2);
     CHECK_APPROX_EPS(k1, k2, k1 * 1.0e-12);
@@ -149,6 +163,9 @@ TEST_CASE(StarSystem_CircularOrbitHelper)
     CHECK_EQ(o.elements.semiMajorAxis, 1.0e7);
     CHECK_EQ(o.elements.eccentricity, 0.0);
     CHECK_EQ(o.elements.inclination, 0.5);
+    CHECK_EQ(o.elements.longitudeAscNode, 0.3); // node passed through unchanged
+    CHECK_EQ(o.elements.trueAnomaly, 1.2);      // phase folds into true anomaly
+    CHECK_EQ(o.elements.argPeriapsis, 0.0);     // undefined for e=0; zeroed
     CHECK_EQ(o.primaryMu, 3.986e14);
     CHECK_EQ(o.primaryBodyId, 42ull);
     CHECK_EQ(o.epoch, 5.0);
