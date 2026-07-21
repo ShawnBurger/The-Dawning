@@ -5,8 +5,12 @@
 //   * HohmannDeltaV against the textbook LEO->GEO budget (~3.9 km/s).
 //   * ZERO-COST self-rendezvous — planning an intercept of your OWN future
 //     position (target == chaser) needs no burn, because your current velocity
-//     already flies that transfer. The strongest sign check: any flipped burn
-//     sign makes it ~2·|v|.
+//     already flies that transfer. This witnesses that the burns genuinely
+//     VANISH for a self-transfer, so it catches any error that makes them
+//     non-zero (e.g. ADDING rather than subtracting the current velocity). It
+//     does NOT pin the subtraction DIRECTION (transferV1 − chaserVel vs the
+//     reverse): since both endpoints coincide, |a−b| == |b−a| ~ 0 either way —
+//     that direction is discriminated by the closure test below.
 //   * Intercept CLOSURE — applying the departure burn and flying tof (through the
 //     shipped PropagateUniversal) arrives at the intercept point, and the arrival
 //     burn matches the target's velocity there. Self-checking, no reference numbers.
@@ -141,4 +145,15 @@ TEST_CASE(Maneuver_RejectsInfeasiblePlan)
                               target.position, target.velocity, 2600.0,
                               std::numeric_limits<double>::quiet_NaN(), true)
                     .feasible);
+
+    // A non-finite CHASER VELOCITY is the one input that bypasses BOTH delegated
+    // guards (SolveLambert guards chaserPos; PropagateUniversal guards the
+    // target). Without an explicit check it would flow into departureBurn as a
+    // NaN yet be reported feasible=true — so it must be rejected outright.
+    const Vec3d nanVel{ std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0 };
+    const InterceptPlan bad =
+        PlanIntercept(chaser.position, nanVel, target.position, target.velocity,
+                      2600.0, kMu, true);
+    CHECK_FALSE(bad.feasible);
+    CHECK_EQ(bad.departureCost, 0.0); // no NaN leaks into the returned plan
 }

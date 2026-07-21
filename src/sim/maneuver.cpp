@@ -13,6 +13,13 @@ namespace sim {
 
 using core::Vec3d;
 
+namespace {
+bool Finite(const Vec3d& v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+} // namespace
+
 HohmannTransfer HohmannDeltaV(double r1, double r2, double mu)
 {
     HohmannTransfer h;
@@ -38,6 +45,16 @@ InterceptPlan PlanIntercept(const Vec3d& chaserPos, const Vec3d& chaserVel,
                             double tof, double mu, bool prograde)
 {
     InterceptPlan plan;
+
+    // Validate ALL inputs up front rather than by delegation. chaserVel in
+    // particular touches neither SolveLambert (which guards chaserPos) nor
+    // PropagateUniversal (which guards the target state), so without this a
+    // non-finite chaserVel would flow into departureBurn = transferV1 − chaserVel
+    // and produce a plan wrongly marked feasible=true with a NaN burn.
+    if (!Finite(chaserPos) || !Finite(chaserVel) || !Finite(targetPos) ||
+        !Finite(targetVel) || !std::isfinite(tof) || tof <= 0.0 ||
+        !std::isfinite(mu) || mu <= 0.0)
+        return plan; // feasible == false
 
     // Where the target will be after tof.
     bool ok = false;
