@@ -139,6 +139,7 @@ set(SIM_SOURCES
     src/sim/relativity.cpp
     src/sim/atmosphere.cpp
     src/sim/ftl.cpp
+    src/sim/ftl_system.cpp
     src/sim/collision.cpp
 )
 
@@ -153,6 +154,7 @@ set(SIM_HEADERS
     src/sim/relativity.h
     src/sim/atmosphere.h
     src/sim/ftl.h
+    src/sim/ftl_system.h
     src/sim/collision.h
 )
 
@@ -193,6 +195,7 @@ set(TEST_SOURCES
     tests/test_relativity.cpp
     tests/test_atmosphere.cpp
     tests/test_ftl.cpp
+    tests/test_ftl_system.cpp
     tests/test_collision.cpp
 )
 
@@ -445,6 +448,11 @@ add_executable(TheDawningTests
     # here that pulls in a D3D12 or render header.
     src/sim/ftl.cpp
     src/sim/ftl.h
+    # ECS/reference-frame adapter for the retained-state teleport above. It
+    # includes only GPU-free ECS and sim headers, so these tests exercise the
+    # shipped transactional registry commit and frame conversion directly.
+    src/sim/ftl_system.cpp
+    src/sim/ftl_system.h
     # SIM STAGE 5 collision / close-encounter policy. GPU-free: collision.h includes
     # only nbody.h, so tests/test_collision.cpp drives the SHIPPED subdivision,
     # swept-contact detection, mass-fraction bounce and union-find merge.
