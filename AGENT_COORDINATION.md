@@ -1935,6 +1935,59 @@ are now integrated as well. The current order is:
   deterministic capsule query/locomotion boundary; do not fold navmesh,
   pressure, possession, or final geometry into that collision lane
 
+### WS-028: Cooked interior collision and capsule locomotion runtime
+
+- Status: ACTIVE
+- Outcome: publish concrete, versioned cooked collision resources for authored
+  assembly module collision locators, build an immutable CPU collision world
+  from the prepared assembly transforms, and expose deterministic capsule
+  overlap, sweep, grounded, depenetration, slide, slope, and step behavior. This
+  is Stage 5B's walkable collision/query boundary, not a complete on-foot player
+  controller or final production collision geometry.
+- Primary: Codex
+- Reviewer: Claude, read-only after a stable commit; manual review fallback if
+  the Claude service remains unavailable or rate-limited
+- Branch: `codex/interior-collision-runtime`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-interior-collision-runtime`
+- Base commit: `7f72f88`
+- Owned paths: new cooked-collision format/compiler/runtime modules under
+  `src/asset/**` and `src/scene/**`; focused tests under `tests/**`; additive
+  reference collision source/cooked artifacts under `assets/**`; additive
+  research and contract documentation; the smallest required typed runtime-
+  content, assembly-host, CMake, asset-copy, App smoke, and smoke-script hooks
+- Excluded paths: `src/sim/collision.{h,cpp}` and all orbital/rigid-body
+  collision policy; `src/ecs/**`; renderer and shaders; navmesh generation or
+  pathfinding; pressure/atmosphere; boarding, seat possession, and final player
+  input/camera control; networking; Meshy generation; final ship geometry; and
+  unrelated manifest, catalog, resolver, or assembly-instantiation semantics
+- Shared-file locks: WS-028 holds only additive CMake/test registration, typed
+  collision-resource publication in the runtime-content/host path, and focused
+  App/smoke witness hooks. Existing Stage 5A interaction semantics stay frozen
+  except for an explicit read-only portal/blocker bridge if collision closure
+  state is included.
+- Interface contract: collision cooking is deterministic, versioned, bounded,
+  finite-only, hash-addressed, and path-confined. Runtime publication validates
+  every concrete package before mutation, binds exact typed catalog identities,
+  constructs immutable shape records in stable authored order, and leaves no
+  partial world on failure. Capsule queries use bounded iteration and stable
+  tie-breaking, never tunnel through supported static shapes, never return
+  non-finite state, and report grounding/slope/step decisions explicitly.
+- Dependencies: merged WS-022 through WS-027 asset assembly, leased catalog,
+  prepared transforms, runtime host, and interaction/portal topology
+- Acceptance gates: deterministic collision artifact reproduction; malformed,
+  oversized, non-finite, duplicate, stale-hash, path-traversal, unsupported-
+  shape, and partial-publication rejection; analytic overlap/sweep/slide/slope/
+  step/depenetration tests including partitioning and stable-order controls;
+  assembly lifecycle/teardown tests; Debug/Release all-target builds and CPU
+  suites; raster/stable-DXR/full-DXR smoke with an exact collision-world witness
+- Negative controls: contract-only collision identities, wrong typed owner,
+  missing/corrupt package, invalid transform/scale, zero-size shape, starting
+  penetration, excessive step, steep slope, corner contact, and bounded-
+  iteration exhaustion cannot silently publish or produce an invalid pose
+- Next action: freeze the cooked collision and query contracts from repository
+  evidence plus primary physics-engine guidance before implementation
+
 ## 20. Helper Commands
 
 Create a task worktree:
