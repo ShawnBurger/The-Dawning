@@ -2092,6 +2092,67 @@ are now integrated as well. The current order is:
   player spawn socket, and ship-root transform boundary around this controller.
   Keep crouch, EVA, pressure, navmesh, and general rigid bodies in later lanes.
 
+### WS-030: Pilot-seat possession and ship-root player boundary
+
+- Status: ACTIVE
+- Outcome: add an explicit, deterministic transition between the existing
+  playable ship and the Stage 5C on-foot controller. The authored pilot seat
+  owns entry, an authored spawn socket owns exit placement, and all on-foot
+  simulation remains assembly-local while camera and interaction queries are
+  composed through the live ship-root transform.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit from a stable implementation commit
+- Branch: `codex/on-foot-possession`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-on-foot-possession`
+- Base commit: `5252783`
+- Owned paths: new possession gameplay module and focused tests; additive
+  player-spawn socket in the reference assembly source/cooked witness; minimal
+  resolved socket-pose access in the assembly interior/host boundary; minimal
+  CMake, App input/fixed-step/camera/title, smoke, and contract-document hooks
+- Excluded paths: general ECS hierarchy propagation; replacement production
+  ship art; per-part production collision; crouch, prone, ladders, EVA,
+  arbitrary gravity, moving-platform inertia, pressure/atmosphere, navmesh,
+  animation, UI prompts, networking, persistence envelopes, input rebinding,
+  gamepad/HOTAS, renderer/shader behavior, and general rigid-body policy
+- Shared-file locks: WS-030 owns only its additive CMake/test entries, the
+  smallest host/interior accessors, the reference manifest plus reproducible
+  cooked assembly artifact, and focused App/smoke sites. It does not alter
+  simulation, renderer, shader, or resource-catalog semantics.
+- Interface contract: possession is an explicit finite state with exactly one
+  active input owner. Exit is allowed only from ship possession through the
+  exact authored available/occupied pilot seat and a valid authored Spawn
+  socket. It creates a complete capsule state in assembly-local space only if
+  the live collision snapshot accepts that pose, then atomically marks the seat
+  available. Re-entry requires an on-foot player within a bounded, forward-
+  facing seat range; it atomically marks the seat occupied and returns control
+  to the same ship entity. Any validation, topology, collision, or interaction
+  failure preserves possession, seat state, player state, flight demand, and
+  camera ownership. Root composition validates finite unit rotation and
+  positive scale; local-to-world and world-to-local round trips are tested at
+  large translated, rotated roots without narrowing the world translation.
+- Dependencies: merged WS-027 interaction state, WS-028 assembly-local
+  collision, WS-029 on-foot controller, authored socket/module topology, the
+  current modern movement binding, raw mouse capture, fixed-step scheduler,
+  and existing playable-ship entity/camera contracts
+- Acceptance gates: exact seat/spawn topology resolution; ship-to-foot and
+  foot-to-ship transition state/seat ownership; rejected double exit/re-entry;
+  occupied/unavailable/missing/wrong-type socket controls; blocked spawn and
+  stale collision controls; input exclusivity; fixed-step on-foot movement;
+  world/local transform and camera basis round trips under translated/rotated
+  roots; root motion carries presentation without mutating local capsule state;
+  Debug/Release all-target builds and CPU suites; raster/stable/full-DXR smoke
+  with exact possession transition witnesses and D3D12 GPU-validation coverage
+- Negative controls: malformed/nonfinite/nonunit root, nonuniform root scale,
+  duplicate/missing IDs, wrong module ownership, non-seat interaction, wrong
+  state vocabulary, out-of-range use, obstructed/depenetrating spawn, stale
+  topology/revision, invalid command/time step, destroyed ship/assembly entity,
+  and failed seat mutation cannot partially transfer control or leak old input
+- Next action: implement and adversarially audit WS-030, then claim the separate
+  assembly-root presentation propagation lane needed to replace the prototype
+  cube with the production ship hierarchy; do not hide that larger hierarchy
+  problem inside possession.
+
 ## 20. Helper Commands
 
 Create a task worktree:
