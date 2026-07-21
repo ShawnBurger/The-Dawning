@@ -2109,16 +2109,19 @@ are now integrated as well. The current order is:
 - Owned paths: new possession gameplay module and focused tests; additive
   player-spawn socket in the reference assembly source/cooked witness; minimal
   resolved socket-pose access in the assembly interior/host boundary; minimal
-  CMake, App input/fixed-step/camera/title, smoke, and contract-document hooks
+  CMake, App input/fixed-step/camera/title, smoke, and contract-document hooks;
+  one additive GPU-free camera basis setter so a rolled ship retains local up
 - Excluded paths: general ECS hierarchy propagation; replacement production
   ship art; per-part production collision; crouch, prone, ladders, EVA,
   arbitrary gravity, moving-platform inertia, pressure/atmosphere, navmesh,
   animation, UI prompts, networking, persistence envelopes, input rebinding,
-  gamepad/HOTAS, renderer/shader behavior, and general rigid-body policy
+  gamepad/HOTAS, renderer PSO/shader/projection behavior, and general rigid-body
+  policy
 - Shared-file locks: WS-030 owns only its additive CMake/test entries, the
   smallest host/interior accessors, the reference manifest plus reproducible
-  cooked assembly artifact, and focused App/smoke sites. It does not alter
-  simulation, renderer, shader, or resource-catalog semantics.
+  cooked assembly artifact, focused App/smoke sites, and an additive explicit-
+  basis path in `render/camera.{h,cpp}`. It does not alter simulation, renderer
+  pipeline, shader, projection, or resource-catalog semantics.
 - Interface contract: possession is an explicit finite state with exactly one
   active input owner. Exit is allowed only from ship possession through the
   exact authored available/occupied pilot seat and a valid authored Spawn
