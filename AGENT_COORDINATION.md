@@ -577,21 +577,18 @@ assumption. Shared application wiring remains an integration task.
 
 The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
-on `main`. The current order is:
+on `main`. Collision policy and the first atomic FTL and atmosphere ECS adapters
+are now integrated as well. The current order is:
 
-1. WS-012 and WS-013 closed the atmosphere and FTL review findings; both are
-   published and retired.
-2. Keep the timed-out reciprocal Claude reviews as explicit manual review debt;
-   they do not reopen the proven integration gates.
-3. WS-014 routed coupled flight assist through real actuator limits so both
-   flight modes expose physical thruster state; it is verified and merged.
-4. Add collision/close-encounter policy before production N-body activation.
-5. Register that lane only after verifying its paths do not overlap Claude.
-
-WS-013 completed the concrete WS-011 review findings, and WS-014 completed the
-physical-actuator flight-control bridge. Collision/close-encounter policy is the
-next candidate lane; Claude's collision worktree must be re-audited before it is
-registered or edited.
+1. Keep timed-out reciprocal Claude reviews as explicit manual review debt; they
+   do not reopen already-proven integration gates.
+2. Preserve the one-owner simulation contracts established by WS-014 through
+   WS-017 while Claude's save/load, asset, and render work remains isolated.
+3. Add the fixed-step orchestration layer that orders gravity, atmosphere,
+   flight control, collision, and frame transitions without moving those pure
+   kernels into application or rendering code.
+4. Register any app/scene wiring only after the active Claude render and asset
+   worktrees are reconciled, because those paths currently overlap.
 
 ### Live collision review handoff (2026-07-20)
 
@@ -1244,7 +1241,7 @@ registered or edited.
 
 ### WS-017: ECS atmospheric-flight adapter
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: adapt a frame-aware live rigid body into the reviewed atmospheric
   model, applying contractive drag exactly once and staging lift, torque,
   diagnostics, and rail promotion atomically for the existing fixed-step flight
@@ -1253,7 +1250,7 @@ registered or edited.
 - Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
 - Branch: `codex/atmosphere-ecs-adapter`
 - Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-atmosphere-ecs-adapter`
-- Base commit: registration commit created from `1fee156`
+- Base commit: `ef173b0` (registration created from `1fee156`)
 - Owned paths: append-only aerodynamic state in `src/ecs/components.h`, new
   `src/sim/atmosphere_system.{h,cpp}`, `tests/test_atmosphere_system.cpp`, their
   exact CMake entries, and the production-adapter contract in
@@ -1278,13 +1275,28 @@ registered or edited.
 - Negative controls: explicit quadratic drag must gain energy at the watched
   hostile step while the adapter remains contractive; adding both the direct
   drag update and a drag force must fail the known answer
-- Latest commit: registration pending
+- Latest commits: feature `692ec0d`; integrated `main` commit `58ab6c2`
+- Review note: the bounded Claude CLI review was unavailable during this lane.
+  Shawn explicitly allowed that step to be deferred, so the completed senior
+  self-review and green integration gates are recorded separately from reciprocal
+  reviewer approval.
+- Acceptance result: `AerodynamicBody` provides opt-in authored geometry and
+  coefficients. `ApplyAtmosphereToEntity` resolves frame-aware body and rotating
+  air state, samples live density, applies the reviewed semi-implicit drag update
+  exactly once, stages lift and CoP torque, and promotes an optional gravitational
+  body only in positive density. Vacuum/ceiling paths are exact accepted no-ops;
+  missing components, invalid frames, malformed state, and unsafe numerics reject
+  atomically. Debug and Release each pass 316 cases and 16,681 checks. Raster,
+  stable-DXR, and full-DXR smoke pass in both configurations with nonblank
+  1920x1080 captures.
 - Residual risk: this lane deliberately does not choose a planet or run ordering
-  in `Scene::UpdateSystems`; the later app/scene lane must call it once before
-  `StepFlightPhysics` for each atmospheric body and must not apply another drag
-  term
-- Next action: publish registration, create the isolated worktree, establish
-  moving-frame and atomicity tests, implement, and run the combined matrix
+  in `Scene::UpdateSystems`; the later orchestration/callsite lane must call it
+  once before `StepFlightPhysics` for each atmospheric body, must not apply
+  another drag term, and must substep when a fixed step crosses a material
+  fraction of atmospheric scale height.
+- Next action: retire the clean feature worktree after pushing `main`; register a
+  GPU-free fixed-step simulation orchestration lane while Claude's app, asset, and
+  rendering paths remain active
 
 ## 20. Helper Commands
 
