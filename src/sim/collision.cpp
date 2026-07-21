@@ -23,19 +23,6 @@ double Magnitude(const Vec3d& v)
     return std::hypot(v.x, v.y, v.z);
 }
 
-bool IsValidConfig(const CloseEncounterConfig& cfg)
-{
-    return std::isfinite(cfg.eta) && cfg.eta > 0.0 &&
-           std::isfinite(cfg.etaContact) && cfg.etaContact > 0.0 &&
-           std::isfinite(cfg.contactScale) && cfg.contactScale > 0.0 &&
-           std::isfinite(cfg.restitution) && cfg.restitution >= 0.0 &&
-           cfg.restitution <= 1.0 &&
-           std::isfinite(cfg.stickRestitution) && cfg.stickRestitution >= 0.0 &&
-           cfg.stickRestitution <= 1.0 &&
-           std::isfinite(cfg.deepMergeFrac) && cfg.deepMergeFrac >= 0.0 &&
-           cfg.solverIterations > 0;
-}
-
 bool IsValidParticle(const NBodyParticle& p)
 {
     return IsFinite(p.position) && IsFinite(p.velocity) &&
@@ -168,10 +155,23 @@ uint32_t DsuFind(std::vector<uint32_t>& parent, uint32_t x)
 
 } // namespace
 
+bool IsValidCloseEncounterConfig(const CloseEncounterConfig& cfg)
+{
+    return std::isfinite(cfg.eta) && cfg.eta > 0.0 &&
+           std::isfinite(cfg.etaContact) && cfg.etaContact > 0.0 &&
+           std::isfinite(cfg.contactScale) && cfg.contactScale > 0.0 &&
+           std::isfinite(cfg.restitution) && cfg.restitution >= 0.0 &&
+           cfg.restitution <= 1.0 &&
+           std::isfinite(cfg.stickRestitution) && cfg.stickRestitution >= 0.0 &&
+           cfg.stickRestitution <= 1.0 &&
+           std::isfinite(cfg.deepMergeFrac) && cfg.deepMergeFrac >= 0.0 &&
+           cfg.solverIterations > 0;
+}
+
 int RequiredSubdivisionLevel(const std::vector<NBodyParticle>& bodies,
                              double dt, const CloseEncounterConfig& cfg)
 {
-    if (!(dt > 0.0) || !std::isfinite(dt) || !IsValidConfig(cfg) ||
+    if (!(dt > 0.0) || !std::isfinite(dt) || !IsValidCloseEncounterConfig(cfg) ||
         !IsValidState(bodies))
         return 0;
 
@@ -236,7 +236,7 @@ FindCloseEncounterPairs(const std::vector<NBodyParticle>& bodies,
                         double dt, const CloseEncounterConfig& cfg)
 {
     std::vector<std::pair<uint32_t, uint32_t>> pairs;
-    if (!(dt > 0.0) || !std::isfinite(dt) || !IsValidConfig(cfg) ||
+    if (!(dt > 0.0) || !std::isfinite(dt) || !IsValidCloseEncounterConfig(cfg) ||
         !IsValidState(bodies))
         return pairs;
     const size_t sz = bodies.size();
@@ -272,7 +272,7 @@ void ResolveContactsAtBoundary(std::vector<NBodyParticle>& bodies,
                                CloseEncounterReport& report)
 {
     const uint32_t n = static_cast<uint32_t>(bodies.size());
-    if (n < 2 || prevPos.size() != bodies.size() || !IsValidConfig(cfg) ||
+    if (n < 2 || prevPos.size() != bodies.size() || !IsValidCloseEncounterConfig(cfg) ||
         !IsValidState(bodies) ||
         !std::all_of(prevPos.begin(), prevPos.end(), IsFinite))
         return;
@@ -455,7 +455,7 @@ void StepNBodyCollisional(std::vector<NBodyParticle>& bodies, double dt,
 {
     report = CloseEncounterReport{};
     if (!(dt > 0.0) || !std::isfinite(dt) || bodies.empty() ||
-        !IsValidConfig(cfg) || !IsValidState(bodies))
+        !IsValidCloseEncounterConfig(cfg) || !IsValidState(bodies))
         return; // house guard (matches StepNBody)
 
     const int desiredLevel = RequiredSubdivisionLevel(bodies, dt, cfg);

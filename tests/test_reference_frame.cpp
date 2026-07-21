@@ -376,6 +376,24 @@ TEST_CASE(FrameGraph_RelativeVelocityIsFrameInvariant)
     CHECK_APPROX(rel.z, 0.0);
 }
 
+TEST_CASE(FrameGraph_SeparationBetweenDisconnectedRootsUsesWorldSpace)
+{
+    sim::FrameGraph g;
+    const sim::FrameId rootA =
+        g.CreateFrame(sim::kInvalidFrame, WorldPos{ 4, 0, 0, { 10.0, 0.0, 0.0 } });
+    const sim::FrameId rootB =
+        g.CreateFrame(sim::kInvalidFrame, WorldPos{ 4, 0, 0, { 25.0, 0.0, 0.0 } });
+
+    const sim::Body a{ rootA, { 2.0, 0.0, 0.0 }, {} };
+    const sim::Body b{ rootB, { 5.0, 0.0, 0.0 }, {} };
+
+    CHECK_EQ(g.NearestCommonAncestor(rootA, rootB), sim::kInvalidFrame);
+    const Vec3d separation = g.SeparationBetween(a, b);
+    CHECK_APPROX(separation.x, 18.0);
+    CHECK_APPROX(separation.y, 0.0);
+    CHECK_APPROX(separation.z, 0.0);
+}
+
 // =============================================================================
 // REBASE - world position preserved exactly
 // =============================================================================

@@ -48,6 +48,13 @@ struct GravityAccumulationResult
     uint32_t targetCount = 0;
 };
 
+struct FlightPhysicsStepResult
+{
+    bool accepted = false;
+    uint32_t advancedBodyCount = 0;
+    uint32_t relativisticBodyCount = 0;
+};
+
 // Stage the softened gravity of every valid massive source into every
 // ForceIntegrated body's world-force accumulator. Source and target positions
 // are expressed in each target's frame before calling GravityAccelerationAt.
@@ -61,8 +68,9 @@ GravityAccumulationResult AccumulateForceIntegratedGravity(
 // dt <= 0 or non-finite is a whole-system no-op (matches IntegrateRigidBody).
 // Gravitational bodies advance here only when owner == ForceIntegrated; the
 // other ownership states are exact no-ops so two movers cannot update one pose.
-void StepFlightPhysics(ecs::Registry& registry,
-                       double dt,
-                       const FlightAssistParams& params = FlightAssistParams{});
+FlightPhysicsStepResult StepFlightPhysics(
+    ecs::Registry& registry,
+    double dt,
+    const FlightAssistParams& params = FlightAssistParams{});
 
 } // namespace sim

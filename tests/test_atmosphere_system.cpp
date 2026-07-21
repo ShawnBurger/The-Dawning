@@ -4,6 +4,8 @@
 
 #include "test_framework.h"
 #include "sim/atmosphere_system.h"
+#include "sim/physics_system.h"
+#include "sim/relativity.h"
 
 #include <cmath>
 #include <limits>
@@ -440,4 +442,56 @@ TEST_CASE(AtmosphereSystem_DeterministicReplay_IsBitExact)
                         *b.TryGet<ecs::RigidBody>(eb));
     CHECK(a.TryGet<ecs::GravitationalBody>(ea)->owner ==
           b.TryGet<ecs::GravitationalBody>(eb)->owner);
+}
+
+TEST_CASE(AtmosphereSystem_RelativisticMomentumKeepsDragAcrossFlightStep)
+{
+    const WorldPos center = WorldPos::FromOffset(
+        Vec3d{ 20000.0, 30000.0, 40000.0 });
+    FrameGraph frames;
+    const FrameId frame = frames.CreateFrame(kInvalidFrame, center);
+
+    ecs::AerodynamicBody aero;
+    aero.referenceArea = 3.0;
+    aero.baseDragCoefficient = 1.0;
+    aero.angleOfAttackDrag = 0.0;
+    aero.liftSlope = 0.0;
+    aero.centerOfPressure = Vec3f{};
+
+    ecs::Registry registry;
+    const Vec3d initialVelocity{ 250.0, 0.0, 0.0 };
+    const ecs::Entity entity = MakeBody(
+        registry, frame, Vec3d{ 0.0, 1000.0, 0.0 }, initialVelocity, aero);
+    ecs::RigidBody* body = registry.TryGet<ecs::RigidBody>(entity);
+    body->forceAccum = Vec3d{};
+    body->torqueAccum = Vec3f{};
+    registry.TryGet<ecs::GravitationalBody>(entity)->owner =
+        ecs::OrbitOwner::ForceIntegrated;
+
+    ecs::RelativisticBody relativistic;
+    relativistic.restMass = 1.0 / body->invMass;
+    relativistic.momentum = MomentumFromVelocity(
+        initialVelocity, relativistic.restMass);
+    registry.Assign<ecs::RelativisticBody>(entity, relativistic);
+
+    const AtmosphereEnvironment environment = MakeEnvironment(center);
+    constexpr double dt = 0.5;
+    const AtmosphereStepResult atmosphere = ApplyAtmosphereToEntity(
+        registry, entity, frames, environment, dt);
+    CHECK(atmosphere.accepted);
+    CHECK(atmosphere.inAtmosphere);
+
+    const Vec3d draggedVelocity = body->linearVelocity;
+    CHECK(draggedVelocity.Length() < initialVelocity.Length());
+    CHECK(registry.Get<ecs::RelativisticBody>(entity).momentum ==
+          MomentumFromVelocity(draggedVelocity, relativistic.restMass));
+
+    const FlightPhysicsStepResult flight = StepFlightPhysics(registry, dt);
+    CHECK(flight.accepted);
+    CHECK_EQ(flight.relativisticBodyCount, 1u);
+    CHECK(registry.Get<ecs::RigidBody>(entity).linearVelocity ==
+          draggedVelocity);
+    const Vec3d expectedPosition =
+        Vec3d{ 0.0, 1000.0, 0.0 } + draggedVelocity * dt;
+    CHECK(registry.Get<ecs::Transform>(entity).position == expectedPosition);
 }

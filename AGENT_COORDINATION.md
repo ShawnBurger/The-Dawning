@@ -1354,7 +1354,7 @@ are now integrated as well. The current order is:
 
 ### WS-019: Repository wiring audit and simulation orchestration foundation
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: establish a source-backed runtime wiring inventory, correct the live
   save/load ownership mismatch, and connect the passive orbit/collision kernels
   behind one deterministic GPU-free fixed-step orchestration interface
@@ -1364,9 +1364,13 @@ are now integrated as well. The current order is:
 - Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-runtime-integration-audit`
 - Base commit: registration commit from `436adb8`
 - Owned paths: new `src/sim/*_system.{h,cpp}` orchestration/adapter files and
-  matching tests; the exact `sim_serialize` owner-range and total-input fixes;
-  their exact CMake entries; `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`;
-  and this completion ledger entry
+  matching tests; the exact `physics_system` relativistic linear-step and
+  `atmosphere_system` momentum-reconciliation corrections found by the audit;
+  the exact `sim_serialize` owner-range and total-input fixes; their exact CMake
+  entries and configuration-independent DXC runtime deployment; exact ECS and
+  reference-frame safety fixes found by repository auditing;
+  `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`; and this completion
+  ledger entry
 - Excluded paths: `src/app.*`, `src/scene/*`, renderer, shaders, model/asset
   import and upload, generated assets, and every dirty Claude worktree
 - Shared-file locks: Claude's dirty per-object and asset lanes currently own
@@ -1388,11 +1392,27 @@ are now integrated as well. The current order is:
   it in the deliberately wrong control and remain exact in production; old
   save/load owner bound 1 must reject the new valid fixture; missing collision
   reconciliation must leave a merged-away entity alive
-- Residual risk: application/scene callsites, authored atmosphere bindings, FTL
-  commands, and ECS snapshot application remain integration work until Claude's
-  overlapping render/asset worktrees are reconciled
-- Next action: publish registration, create the isolated worktree, write the
-  call-graph audit, then implement and falsify the GPU-free adapters
+- Review note: Claude CLI review was attempted directly after the project wrapper
+  swallowed its short prompt option, but Claude reported a session limit before
+  reading the diff. Shawn explicitly allows this review to be deferred; the
+  complete senior self-review and automated gates are recorded independently.
+- Acceptance result: `StepSimulation` now owns the fixed-step phase contract and
+  composes FTL, atmosphere, passive orbit/collision, force gravity, flight with
+  relativistic momentum, and proper clocks. All adapters validate and stage
+  their own writes; duplicate per-step operators reject before the first phase.
+  Entity terminal generations retire without ABA, disconnected frame roots use
+  safe world separation, save/load accepts owner 2 and total null input, and
+  every build configuration receives the DXC runtime. Debug and Release each
+  pass 350 cases and 16,971 checks. Raster, stable-DXR, and full-DXR smoke pass
+  in both configurations with 1920x1080 captures at 99.9-100% nonblack.
+- Residual risk: application/scene callsites, authored atmosphere/clock bindings,
+  FTL command queues, render-history/accumulator obligation handling, and ECS
+  snapshot application remain integration work until Claude's overlapping
+  render/asset worktrees are reconciled. The scheduler is subsystem-atomic, not
+  a whole-step rollback transaction; `completedStage` makes partial acceptance
+  visible to a future transactional host.
+- Next action: publish and integrate this isolated lane, then register a host and
+  save-snapshot wiring pass after reconciling Claude's live scene/app changes
 
 ## 20. Helper Commands
 

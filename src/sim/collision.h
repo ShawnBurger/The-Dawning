@@ -89,6 +89,11 @@ struct CloseEncounterReport
     std::vector<CollisionEvent> events; // sorted ASCENDING by survivorId
 };
 
+// Shared public validation for callers that must reject a malformed fixed-step
+// configuration before staging any ECS writes. The collision kernel uses this
+// same predicate internally.
+bool IsValidCloseEncounterConfig(const CloseEncounterConfig& cfg);
+
 // -----------------------------------------------------------------------------
 // Public API - free functions, pure, dt-as-parameter, deterministic bodyId order,
 // house guard (invalid dt/config/body state or empty input => no-op). Positive

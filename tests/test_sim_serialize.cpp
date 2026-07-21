@@ -65,7 +65,7 @@ SimSnapshot MakeSnapshot()
     b1.position = Vec3d{ 5.0, 6.0, 7.0 };
     s.bodies = { b1, b0 }; // out of order on purpose (canonicalize sorts)
 
-    GravRecord g0; g0.bodyId = 10; g0.mu = 3.986e14; g0.radius = 6.371e6; g0.isSource = 1; g0.owner = 0;
+    GravRecord g0; g0.bodyId = 10; g0.mu = 3.986e14; g0.radius = 6.371e6; g0.isSource = 1; g0.owner = 2;
     GravRecord g1; g1.bodyId = 20; g1.mu = 0.0; g1.radius = 1.0; g1.isSource = 0; g1.owner = 1;
     g1.hasRails = 1; g1.semiMajorAxis = 7.0e6; g1.eccentricity = 0.1; g1.inclination = 0.5;
     g1.longitudeAscNode = 1.0; g1.argPeriapsis = 2.0; g1.trueAnomaly = 3.0;
@@ -131,6 +131,8 @@ TEST_CASE(SimSerialize_TruncationAtEveryPrefix_NeverOkNeverCrashes)
     CHECK(Deserialize(bytes).Ok());
     // A zero-length and a tiny buffer are ShortBuffer, not a crash.
     CHECK_EQ(static_cast<int>(Deserialize(nullptr, 0).status), static_cast<int>(SimLoadStatus::ShortBuffer));
+    CHECK_EQ(static_cast<int>(Deserialize(nullptr, bytes.size()).status),
+             static_cast<int>(SimLoadStatus::ShortBuffer));
 }
 
 // =============================================================================

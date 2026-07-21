@@ -296,7 +296,7 @@ SimLoadStatus ValidateSnapshot(SimSnapshot& s, std::string& err)
         // (SofteningLength = max(radius, 2*mu/c^2 + eps0)), so two coincident sources
         // give r^2 = 0 and 1/sqrt(0) = inf in StepNBody - NaN one step after load.
         if (!(g.mu >= 0.0) || !(g.radius >= 0.0)) { err = "grav mu/radius negative"; return SimLoadStatus::InvalidData; }
-        if (g.isSource > 1 || g.owner > 1 || g.hasRails > 1) { err = "grav enum out of range"; return SimLoadStatus::InvalidData; }
+        if (g.isSource > 1 || g.owner > 2 || g.hasRails > 1) { err = "grav enum out of range"; return SimLoadStatus::InvalidData; }
         if (g.hasRails)
         {
             const double e[8] = { g.semiMajorAxis, g.eccentricity, g.inclination, g.longitudeAscNode,
@@ -330,6 +330,7 @@ SimLoadResult Fail(SimLoadStatus st, std::string msg)
 SimLoadResult Deserialize(const uint8_t* data, size_t size)
 {
     if (size > kMaxBufferBytes) return Fail(SimLoadStatus::TooLarge, "buffer over cap");
+    if (!data && size != 0) return Fail(SimLoadStatus::ShortBuffer, "null buffer");
     if (size < kHeaderBytes + kSectionHeader) return Fail(SimLoadStatus::ShortBuffer, "below minimum size");
 
     Cursor c{ data, size };

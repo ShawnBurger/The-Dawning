@@ -183,6 +183,8 @@ Vec3d FrameGraph::ExpressInFrame(const Body& body, FrameId frameId) const
 Vec3d FrameGraph::SeparationBetween(const Body& a, const Body& b) const
 {
     const FrameId common = NearestCommonAncestor(a.frame, b.frame);
+    if (common == kInvalidFrame)
+        return Separation(ResolveWorldPos(a), ResolveWorldPos(b));
     return ExpressInFrame(b, common) - ExpressInFrame(a, common);
 }
 

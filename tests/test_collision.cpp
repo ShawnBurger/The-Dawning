@@ -91,6 +91,23 @@ void ResolveInstant(std::vector<NBodyParticle>& bodies, const CloseEncounterConf
 }
 } // namespace
 
+TEST_CASE(Collision_ConfigValidationIsSharedWithCallers)
+{
+    CHECK(IsValidCloseEncounterConfig(CloseEncounterConfig{}));
+
+    CloseEncounterConfig invalid;
+    invalid.eta = (std::numeric_limits<double>::quiet_NaN)();
+    CHECK_FALSE(IsValidCloseEncounterConfig(invalid));
+
+    invalid = CloseEncounterConfig{};
+    invalid.etaContact = 0.0;
+    CHECK_FALSE(IsValidCloseEncounterConfig(invalid));
+
+    invalid = CloseEncounterConfig{};
+    invalid.solverIterations = 0;
+    CHECK_FALSE(IsValidCloseEncounterConfig(invalid));
+}
+
 // =============================================================================
 // T1 - INERT BETWEEN COLLISIONS: with no pair in reach, StepNBodyCollisional is
 //      BIT-IDENTICAL to a single StepNBody(dt), and reports no subdivision.

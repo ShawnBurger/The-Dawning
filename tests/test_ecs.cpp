@@ -153,6 +153,63 @@ TEST_CASE(EntityManager_FreeListIsLifo)
     CHECK_EQ(em.AliveCount(), 4u);
 }
 
+TEST_CASE(EntityManager_EntityAtIndexReturnsCurrentGenerationOnly)
+{
+    ecs::EntityManager em;
+    const ecs::Entity first = em.Create();
+
+    CHECK(em.EntityAtIndex(first.Index()) == first);
+    CHECK(em.EntityAtIndex(first.Index()).Generation() == 0u);
+
+    em.Destroy(first);
+    CHECK(em.EntityAtIndex(first.Index()).IsNull());
+
+    const ecs::Entity recycled = em.Create();
+    CHECK_EQ(recycled.Index(), first.Index());
+    CHECK_EQ(recycled.Generation(), 1u);
+    CHECK(em.EntityAtIndex(recycled.Index()) == recycled);
+    CHECK(em.EntityAtIndex(ecs::Entity::kMaxIndex).IsNull());
+}
+
+TEST_CASE(EntityManager_TerminalGenerationRetiresSlotWithoutABA)
+{
+    ecs::EntityManager em;
+    const ecs::Entity oldest = em.Create();
+    ecs::Entity current = oldest;
+
+    bool generationsWereMonotonic = true;
+    for (uint32_t generation = 0; generation < ecs::Entity::kMaxGen; generation++)
+    {
+        if (current.Index() != oldest.Index() ||
+            current.Generation() != generation ||
+            !em.IsAlive(current))
+        {
+            generationsWereMonotonic = false;
+        }
+
+        em.Destroy(current);
+        current = em.Create();
+    }
+
+    CHECK(generationsWereMonotonic);
+    CHECK_EQ(current.Index(), oldest.Index());
+    CHECK_EQ(current.Generation(), ecs::Entity::kMaxGen);
+    CHECK(em.IsAlive(current));
+
+    em.Destroy(current);
+    CHECK_FALSE(em.IsAlive(oldest));
+    CHECK_FALSE(em.IsAlive(current));
+
+    // The retired slot cannot wrap to generation zero. Allocation advances to
+    // a fresh index instead, so even the oldest handle remains permanently dead.
+    const ecs::Entity fresh = em.Create();
+    CHECK_EQ(fresh.Index(), oldest.Index() + 1u);
+    CHECK_EQ(fresh.Generation(), 0u);
+    CHECK(em.IsAlive(fresh));
+    CHECK_FALSE(em.IsAlive(oldest));
+    CHECK_EQ(em.SlotCount(), 2u);
+}
+
 // -----------------------------------------------------------------------------
 // REGRESSION GUARD — defect L4, docs/ANALYSIS.md section 4 (LOW)
 // -----------------------------------------------------------------------------
@@ -711,4 +768,15 @@ TEST_CASE(Registry_StaleHandleIsRejected_M6)
     intruder.position = { 333.0f, 0.0f, 0.0f };
     reg.Assign<ecs::Transform>(original, intruder);
     CHECK_APPROX(reg.Get<ecs::Transform>(recycled).position.x, 222.0f);
+}
+
+TEST_CASE(Registry_AssignToDeadEntityDoesNotCreatePool)
+{
+    ecs::Registry reg;
+    const ecs::Entity entity = reg.Create();
+    reg.Destroy(entity);
+
+    CHECK(reg.GetPool<Payload>() == nullptr);
+    reg.Assign<Payload>(entity, Payload{ 7, 3.5f });
+    CHECK(reg.GetPool<Payload>() == nullptr);
 }

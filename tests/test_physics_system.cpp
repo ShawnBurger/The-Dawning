@@ -31,6 +31,7 @@
 #include "sim/rigid_body.h"
 #include "sim/flight_control.h"
 #include "sim/nbody.h"
+#include "sim/relativity.h"
 #include "sim/thrusters.h"
 
 #include <cmath>
@@ -650,4 +651,84 @@ TEST_CASE(PhysicsSystem_GravityBridge_InvalidRegistryIsAtomic)
     CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
     CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
     CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
+}
+
+TEST_CASE(PhysicsSystem_RelativisticBodyConsumesLinearForceExactlyOnce)
+{
+    ecs::Registry registry;
+    const ecs::Entity entity = registry.Create();
+    registry.Assign<ecs::Transform>(entity, ecs::Transform{});
+
+    ecs::RigidBody body;
+    body.invMass = 0.5;
+    body.invInertiaDiag = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+    body.forceAccum = core::Vec3d{ 120.0, -30.0, 15.0 };
+    registry.Assign<ecs::RigidBody>(entity, body);
+
+    ecs::RelativisticBody relativistic;
+    relativistic.restMass = 2.0;
+    relativistic.momentum = sim::MomentumFromVelocity(
+        core::Vec3d{ 10.0, 20.0, -5.0 }, relativistic.restMass);
+    registry.Assign<ecs::RelativisticBody>(entity, relativistic);
+
+    constexpr double dt = 0.25;
+    core::Vec3d expectedVelocity;
+    const core::Vec3d expectedMomentum = sim::RelativisticMomentumStep(
+        relativistic.momentum, body.forceAccum,
+        relativistic.restMass, dt, expectedVelocity);
+    const core::Vec3d newtonianDoubleUse =
+        expectedVelocity + body.forceAccum * body.invMass * dt;
+
+    const sim::FlightPhysicsStepResult result =
+        sim::StepFlightPhysics(registry, dt);
+    CHECK(result.accepted);
+    CHECK_EQ(result.advancedBodyCount, 1u);
+    CHECK_EQ(result.relativisticBodyCount, 1u);
+    CHECK(registry.Get<ecs::RelativisticBody>(entity).momentum ==
+          expectedMomentum);
+    CHECK(registry.Get<ecs::RigidBody>(entity).linearVelocity ==
+          expectedVelocity);
+    CHECK(registry.Get<ecs::Transform>(entity).position ==
+          expectedVelocity * dt);
+    CHECK(registry.Get<ecs::RigidBody>(entity).linearVelocity !=
+          newtonianDoubleUse);
+    CHECK(registry.Get<ecs::RigidBody>(entity).linearVelocity.Length() <
+          sim::kSpeedOfLight);
+    CHECK(registry.Get<ecs::RigidBody>(entity).forceAccum == core::Vec3d{});
+}
+
+TEST_CASE(PhysicsSystem_InvalidRelativisticMassRejectsBeforeAnyBodyMoves)
+{
+    ecs::Registry registry;
+    auto makeBody = [&](double x) {
+        const ecs::Entity entity = registry.Create();
+        ecs::Transform transform;
+        transform.position = core::Vec3d{ x, 0.0, 0.0 };
+        registry.Assign<ecs::Transform>(entity, transform);
+        ecs::RigidBody body;
+        body.invMass = 0.5;
+        body.invInertiaDiag = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+        body.linearVelocity = core::Vec3d{ 3.0, 0.0, 0.0 };
+        body.forceAccum = core::Vec3d{ 4.0, 0.0, 0.0 };
+        registry.Assign<ecs::RigidBody>(entity, body);
+        return entity;
+    };
+
+    const ecs::Entity first = makeBody(1.0);
+    const ecs::Entity invalid = makeBody(2.0);
+    ecs::RelativisticBody relativistic;
+    relativistic.restMass = 3.0;
+    registry.Assign<ecs::RelativisticBody>(invalid, relativistic);
+
+    const ecs::Transform firstBefore = registry.Get<ecs::Transform>(first);
+    const ecs::RigidBody firstBodyBefore = registry.Get<ecs::RigidBody>(first);
+    const sim::FlightPhysicsStepResult result =
+        sim::StepFlightPhysics(registry, 0.5);
+    CHECK_FALSE(result.accepted);
+    CHECK(registry.Get<ecs::Transform>(first).position ==
+          firstBefore.position);
+    CHECK(registry.Get<ecs::RigidBody>(first).linearVelocity ==
+          firstBodyBefore.linearVelocity);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum ==
+          firstBodyBefore.forceAccum);
 }

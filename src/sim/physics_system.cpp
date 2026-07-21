@@ -5,6 +5,7 @@
 #include "physics_system.h"
 
 #include "nbody.h"
+#include "relativity.h"
 #include "rigid_body.h"
 #include "thrusters.h"
 
@@ -23,6 +24,44 @@ bool IsFinite(const core::Vec3d& value)
 {
     return std::isfinite(value.x) && std::isfinite(value.y) &&
            std::isfinite(value.z);
+}
+
+bool IsFinite(const core::Vec3f& value)
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
+}
+
+bool IsFinite(const core::Quatf& value)
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z) && std::isfinite(value.w);
+}
+
+bool IsValidRigidBody(const ecs::RigidBody& body)
+{
+    return IsFinite(body.linearVelocity) && IsFinite(body.angularVelocity) &&
+           IsFinite(body.forceAccum) && IsFinite(body.torqueAccum) &&
+           IsFinite(body.prevPosition) && IsFinite(body.prevRotation) &&
+           std::isfinite(body.invMass) && body.invMass >= 0.0 &&
+           IsFinite(body.invInertiaDiag) &&
+           body.invInertiaDiag.x >= 0.0f &&
+           body.invInertiaDiag.y >= 0.0f &&
+           body.invInertiaDiag.z >= 0.0f;
+}
+
+bool RelativisticMassMatches(const ecs::RelativisticBody& relativistic,
+                             const ecs::RigidBody& body)
+{
+    if (!(relativistic.restMass > 0.0) ||
+        !std::isfinite(relativistic.restMass) ||
+        !IsFinite(relativistic.momentum) || !(body.invMass > 0.0))
+        return false;
+
+    const double inertialMass = 1.0 / body.invMass;
+    const double scale = (std::max)(inertialMass, relativistic.restMass);
+    return std::isfinite(inertialMass) &&
+           std::fabs(inertialMass - relativistic.restMass) <= 1.0e-12 * scale;
 }
 
 bool IsSafeLocal(const core::Vec3d& value)
@@ -193,12 +232,48 @@ GravityAccumulationResult AccumulateForceIntegratedGravity(
     return result;
 }
 
-void StepFlightPhysics(ecs::Registry& registry, double dt, const FlightAssistParams& params)
+FlightPhysicsStepResult StepFlightPhysics(
+    ecs::Registry& registry, double dt, const FlightAssistParams& params)
 {
+    FlightPhysicsStepResult result;
     // Whole-system no-op on a bad step, so the fixed-step accumulator can retry
     // without any body advancing on stale state (matches IntegrateRigidBody).
     if (!(dt > 0.0) || !std::isfinite(dt))
-        return;
+        return result;
+
+    // Validate every body before the first write. This preserves the existing
+    // whole-system no-op contract when a relativistic sidecar is malformed.
+    auto* bodyPool = registry.GetPool<ecs::RigidBody>();
+    if (bodyPool)
+    {
+        for (uint32_t i = 0; i < bodyPool->Count(); ++i)
+        {
+            const uint32_t entityIndex = bodyPool->EntityAt(i);
+            if (!registry.HasByIndex<ecs::Transform>(entityIndex))
+                continue;
+            const ecs::Transform& transform =
+                registry.GetByIndex<ecs::Transform>(entityIndex);
+            const ecs::RigidBody& body = bodyPool->DataAt(i);
+            if (!IsSafeLocal(transform.position) ||
+                !IsFinite(transform.rotation) || !IsValidRigidBody(body))
+                return result;
+
+            if (registry.HasByIndex<ecs::GravitationalBody>(entityIndex))
+            {
+                const ecs::GravitationalBody& gravity =
+                    registry.GetByIndex<ecs::GravitationalBody>(entityIndex);
+                if (!IsKnownOwner(gravity.owner))
+                    return result;
+                if (gravity.owner != ecs::OrbitOwner::ForceIntegrated)
+                    continue;
+            }
+
+            if (registry.HasByIndex<ecs::RelativisticBody>(entityIndex) &&
+                !RelativisticMassMatches(
+                    registry.GetByIndex<ecs::RelativisticBody>(entityIndex), body))
+                return result;
+        }
+    }
 
     // No external accelerations in Stage 2 (gravity is Stage 5, §4). The body
     // origin is the centre of mass, so lever arms are measured from zero.
@@ -215,6 +290,14 @@ void StepFlightPhysics(ecs::Registry& registry, double dt, const FlightAssistPar
             {
                 return;
             }
+
+            ecs::RelativisticBody* relativistic =
+                registry.HasByIndex<ecs::RelativisticBody>(entityIndex)
+                    ? &registry.GetByIndex<ecs::RelativisticBody>(entityIndex)
+                    : nullptr;
+            if (relativistic)
+                body.linearVelocity = VelocityFromMomentum(
+                    relativistic->momentum, relativistic->restMass);
 
             const bool hasControl   = registry.HasByIndex<ecs::FlightControl>(entityIndex);
             const bool hasThrusters = registry.HasByIndex<ecs::ThrusterSet>(entityIndex);
@@ -262,11 +345,30 @@ void StepFlightPhysics(ecs::Registry& registry, double dt, const FlightAssistPar
                 AccumulateBodyWrench(body, transform.rotation, w);
             }
 
-            // One semi-implicit-Euler step of the PASSED dt, writing the pose back
-            // into Transform and zeroing the accumulators.
+            if (relativistic)
+            {
+                core::Vec3d recoveredVelocity;
+                const core::Vec3d nextMomentum = RelativisticMomentumStep(
+                    relativistic->momentum, body.forceAccum,
+                    relativistic->restMass, dt, recoveredVelocity);
+                relativistic->momentum = nextMomentum;
+                body.linearVelocity = recoveredVelocity;
+                // The momentum step consumed the world force. Leave torque for
+                // the unchanged angular half and prevent Newtonian double use.
+                body.forceAccum = core::Vec3d{};
+                ++result.relativisticBodyCount;
+            }
+
+            // One semi-implicit fixed step of the PASSED dt, writing the pose
+            // back into Transform and zeroing the accumulators. Relativistic
+            // bodies enter with their force already consumed in momentum space.
             IntegrateRigidBody(transform.position, transform.rotation, body,
                                kZeroForce, kZeroTorque, dt);
+            ++result.advancedBodyCount;
         });
+
+    result.accepted = true;
+    return result;
 }
 
 } // namespace sim

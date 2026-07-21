@@ -7,6 +7,10 @@
 // - Generation prevents ABA problem when slots are recycled
 // - Max ~1M concurrent entities, 4096 generations per slot
 //
+// The all-ones packed value is reserved for NullEntity. EntityManager therefore
+// allocates indices [0, kMaxIndex), keeping every allocated slot valid through
+// all 4096 generation values.
+//
 // Based on EnTT's entity model (used in Minecraft Bedrock Edition).
 // =============================================================================
 
@@ -89,9 +93,21 @@ public:
         if (!slot.alive || slot.generation != entity.Generation()) return;
 
         slot.alive = false;
-        slot.generation = (slot.generation + 1) & Entity::kGenMask;
-        slot.nextFree = m_freeHead;
-        m_freeHead = index;
+
+        // Wrapping to generation zero would make the oldest stale handle for
+        // this index valid again. Retire terminal-generation slots permanently
+        // instead. Slot exhaustion after 4096 complete lifetimes is preferable
+        // to an ABA alias that can mutate an unrelated live entity.
+        if (slot.generation == Entity::kMaxGen)
+        {
+            slot.nextFree = UINT32_MAX;
+        }
+        else
+        {
+            slot.generation++;
+            slot.nextFree = m_freeHead;
+            m_freeHead = index;
+        }
         m_aliveCount--;
     }
 
@@ -100,6 +116,13 @@ public:
         uint32_t index = entity.Index();
         if (index >= m_slotCount) return false;
         return m_slots[index].alive && m_slots[index].generation == entity.Generation();
+    }
+
+    Entity EntityAtIndex(uint32_t index) const
+    {
+        if (index >= m_slotCount || !m_slots[index].alive)
+            return NullEntity;
+        return Entity(index, m_slots[index].generation);
     }
 
     uint32_t AliveCount() const { return m_aliveCount; }

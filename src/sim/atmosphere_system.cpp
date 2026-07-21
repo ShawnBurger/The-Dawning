@@ -4,6 +4,8 @@
 
 #include "atmosphere_system.h"
 
+#include "relativity.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -200,6 +202,8 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
     ecs::RigidBody* rigidBody = registry.TryGet<ecs::RigidBody>(entity);
     const ecs::AerodynamicBody* aero =
         registry.TryGet<ecs::AerodynamicBody>(entity);
+    ecs::RelativisticBody* relativistic =
+        registry.TryGet<ecs::RelativisticBody>(entity);
     ecs::GravitationalBody* gravitational =
         registry.TryGet<ecs::GravitationalBody>(entity);
     if (!transform || !spatialFrame || !rigidBody || !aero ||
@@ -221,11 +225,18 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
         !IsFinite(rigidBody->forceAccum) ||
         !IsFinite(rigidBody->angularVelocity) ||
         !IsFinite(rigidBody->torqueAccum) ||
-        !std::isfinite(rigidBody->invMass) || !(rigidBody->invMass > 0.0))
+        !std::isfinite(rigidBody->invMass) || !(rigidBody->invMass > 0.0) ||
+        (relativistic &&
+         (!(relativistic->restMass > 0.0) ||
+          !std::isfinite(relativistic->restMass) ||
+          !IsFinite(relativistic->momentum))))
         return result;
 
     const double mass = 1.0 / rigidBody->invMass;
-    if (!std::isfinite(mass) || !(mass > 0.0))
+    if (!std::isfinite(mass) || !(mass > 0.0) ||
+        (relativistic &&
+         std::fabs(relativistic->restMass - mass) >
+             1.0e-12 * (std::max)(relativistic->restMass, mass)))
         return result;
 
     const Body frameBody{ frameId, transform->position,
@@ -369,9 +380,21 @@ AtmosphereStepResult ApplyAtmosphereToEntity(ecs::Registry& registry,
         nextGravitational.owner = ecs::OrbitOwner::ForceIntegrated;
     }
 
+    ecs::RelativisticBody nextRelativistic;
+    if (relativistic)
+    {
+        nextRelativistic = *relativistic;
+        nextRelativistic.momentum = MomentumFromVelocity(
+            nextLocalVelocity, nextRelativistic.restMass);
+        if (!IsFinite(nextRelativistic.momentum))
+            return AtmosphereStepResult{};
+    }
+
     *rigidBody = nextRigidBody;
     if (gravitational)
         *gravitational = nextGravitational;
+    if (relativistic)
+        *relativistic = nextRelativistic;
     return result;
 }
 

@@ -64,7 +64,7 @@ struct GravRecord
     double   mu       = 0.0;
     double   radius   = 0.0;    // primary; NBodyParticle.softening is DERIVED, not stored
     uint8_t  isSource = 1;      // 0/1
-    uint8_t  owner    = 0;      // ecs::OrbitOwner { NBodyActive=0, OnRails=1 }
+    uint8_t  owner    = 0;      // ecs::OrbitOwner { NBodyActive=0, OnRails=1, ForceIntegrated=2 }
     uint8_t  hasRails = 0;      // 0/1; the rails fields below are valid iff 1
     // OrbitState (valid iff hasRails): osculating elements + primary + epoch.
     double   semiMajorAxis    = 0.0;

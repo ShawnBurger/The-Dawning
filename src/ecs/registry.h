@@ -61,6 +61,13 @@ public:
         return m_entities.IsAlive(entity);
     }
 
+    // Recover the current generational handle while iterating a component pool
+    // by raw entity index. Returns NullEntity for a dead or unseen slot.
+    Entity EntityAtIndex(uint32_t entityIndex) const
+    {
+        return m_entities.EntityAtIndex(entityIndex);
+    }
+
     uint32_t EntityCount() const { return m_entities.AliveCount(); }
 
     // --- Component operations ---
@@ -73,9 +80,9 @@ public:
     template<typename T>
     T& Assign(Entity entity, const T& component = T{})
     {
-        auto& pool = GetOrCreatePool<T>();
         if (!m_entities.IsAlive(entity))
             return FallbackComponent<T>();
+        auto& pool = GetOrCreatePool<T>();
         pool.Add(entity.Index(), component);
         return pool.Get(entity.Index());
     }

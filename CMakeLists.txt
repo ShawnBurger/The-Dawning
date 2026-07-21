@@ -137,12 +137,15 @@ set(SIM_SOURCES
     src/sim/kepler.cpp
     src/sim/nbody.cpp
     src/sim/relativity.cpp
+    src/sim/relativity_system.cpp
     src/sim/atmosphere.cpp
     src/sim/atmosphere_system.cpp
     src/sim/ftl.cpp
     src/sim/ftl_system.cpp
     src/sim/collision.cpp
     src/sim/sim_serialize.cpp
+    src/sim/orbit_system.cpp
+    src/sim/simulation_system.cpp
 )
 
 set(SIM_HEADERS
@@ -154,12 +157,15 @@ set(SIM_HEADERS
     src/sim/kepler.h
     src/sim/nbody.h
     src/sim/relativity.h
+    src/sim/relativity_system.h
     src/sim/atmosphere.h
     src/sim/atmosphere_system.h
     src/sim/ftl.h
     src/sim/ftl_system.h
     src/sim/collision.h
     src/sim/sim_serialize.h
+    src/sim/orbit_system.h
+    src/sim/simulation_system.h
 )
 
 set(SCENE_SOURCES
@@ -197,12 +203,15 @@ set(TEST_SOURCES
     tests/test_kepler.cpp
     tests/test_nbody.cpp
     tests/test_relativity.cpp
+    tests/test_relativity_system.cpp
     tests/test_atmosphere.cpp
     tests/test_atmosphere_system.cpp
     tests/test_ftl.cpp
     tests/test_ftl_system.cpp
     tests/test_collision.cpp
     tests/test_sim_serialize.cpp
+    tests/test_orbit_system.cpp
+    tests/test_simulation_system.cpp
 )
 
 set(TEST_HEADERS
@@ -288,6 +297,47 @@ add_custom_command(TARGET TheDawningV3 POST_BUILD
         "$<TARGET_FILE_DIR:TheDawningV3>/assets"
     COMMENT "Copying assets to output directory"
 )
+
+# DXC is loaded dynamically by shader_utils.cpp for Shader Model 6 / DXR. Make
+# each configuration self-contained instead of relying on DLLs manually copied
+# into one build output. DAWNING_DXC_RUNTIME_DIR supports standalone DXC/NuGet
+# layouts; otherwise prefer the newest x64 Windows SDK runtime pair.
+set(DAWNING_DXC_RUNTIME_DIR "" CACHE PATH
+    "Directory containing dxcompiler.dll and dxil.dll")
+
+if(WIN32)
+    set(_dxc_runtime_dir "${DAWNING_DXC_RUNTIME_DIR}")
+    if(NOT _dxc_runtime_dir)
+        file(GLOB _windows_sdk_x64_bins LIST_DIRECTORIES true
+            "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/bin/*/x64")
+        list(SORT _windows_sdk_x64_bins COMPARE NATURAL ORDER DESCENDING)
+        foreach(_candidate IN LISTS _windows_sdk_x64_bins)
+            if(EXISTS "${_candidate}/dxcompiler.dll" AND
+               EXISTS "${_candidate}/dxil.dll")
+                set(_dxc_runtime_dir "${_candidate}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(EXISTS "${_dxc_runtime_dir}/dxcompiler.dll" AND
+       EXISTS "${_dxc_runtime_dir}/dxil.dll")
+        add_custom_command(TARGET TheDawningV3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_dxc_runtime_dir}/dxcompiler.dll"
+                "$<TARGET_FILE_DIR:TheDawningV3>/dxcompiler.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_dxc_runtime_dir}/dxil.dll"
+                "$<TARGET_FILE_DIR:TheDawningV3>/dxil.dll"
+            COMMENT "Copying DXC runtime to output directory"
+        )
+        message(STATUS "DXC runtime: ${_dxc_runtime_dir}")
+    else()
+        message(WARNING
+            "DXC runtime not found. Set DAWNING_DXC_RUNTIME_DIR to a directory "
+            "containing dxcompiler.dll and dxil.dll; DXR will be unavailable.")
+    endif()
+endif()
 
 # =============================================================================
 # Source groups for Visual Studio
@@ -440,6 +490,8 @@ add_executable(TheDawningTests
     # than a copy. Do NOT add anything here that pulls in a D3D12 or render header.
     src/sim/relativity.cpp
     src/sim/relativity.h
+    src/sim/relativity_system.cpp
+    src/sim/relativity_system.h
     # SIM STAGE 3 atmospheric flight. GPU-free on the same sanctioned footing:
     # atmosphere.h includes only core/types.h, so tests/test_atmosphere.cpp drives
     # the SHIPPED USSA76 model, the semi-implicit stiff-drag update and the firewalled
@@ -473,6 +525,13 @@ add_executable(TheDawningTests
     # SHIPPED versioned/checksummed serializer and bounded-cursor deserializer.
     src/sim/sim_serialize.cpp
     src/sim/sim_serialize.h
+    # Passive orbital ECS adapter. Gathers NBodyActive/OnRails owners into the
+    # shipped collision/Kepler kernels and reconciles their real components.
+    src/sim/orbit_system.cpp
+    src/sim/orbit_system.h
+    # Complete fixed-step simulation phase order over the GPU-free adapters.
+    src/sim/simulation_system.cpp
+    src/sim/simulation_system.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
