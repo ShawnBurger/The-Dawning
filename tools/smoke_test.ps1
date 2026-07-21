@@ -185,6 +185,14 @@ Assert-Marker "interior_collision_ready" "ok"
 Assert-Marker "packages" "3"
 Assert-Marker "boxes" "12"
 Assert-Marker "frame" "assembly_local"
+Assert-Marker "interior_dynamic_collision_ready" "ok"
+Assert-Marker "revision" "1"
+Assert-Marker "initial_blockers" "4"
+Assert-Marker "initial_combined_boxes" "16"
+Assert-Marker "on_foot_controller" "ok"
+Assert-Marker "closed" "blocked"
+Assert-Marker "open" "traversable"
+Assert-Marker "blockers" "2"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never

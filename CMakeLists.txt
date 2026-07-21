@@ -136,6 +136,17 @@ set(ECS_HEADERS
     src/ecs/registry.h
 )
 
+# Platform- and GPU-free gameplay policies. These consume custom engine
+# collision/simulation contracts but never read Win32 input or renderer state.
+set(GAMEPLAY_SOURCES
+    src/gameplay/on_foot_controller.cpp
+)
+
+set(GAMEPLAY_HEADERS
+    src/gameplay/on_foot_controller.h
+    src/gameplay/playable_ship.h
+)
+
 # Flight & physics (Phase 4). GPU-free by construction: sim/*.h include only
 # core/types.h and ecs/components.h (both device-free), so every file here also
 # links into TheDawningTests below and the analytic tests drive the SHIPPED
@@ -184,6 +195,7 @@ set(SIM_HEADERS
 
 set(SCENE_SOURCES
     src/scene/assembly_collision_runtime.cpp
+    src/scene/assembly_dynamic_collision_runtime.cpp
     src/scene/assembly_interior_runtime.cpp
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_runtime_host.cpp
@@ -195,6 +207,7 @@ set(SCENE_SOURCES
 
 set(SCENE_HEADERS
     src/scene/assembly_collision_runtime.h
+    src/scene/assembly_dynamic_collision_runtime.h
     src/scene/assembly_interior_runtime.h
     src/scene/assembly_instantiator.h
     src/scene/assembly_runtime_host.h
@@ -216,6 +229,7 @@ set(TEST_SOURCES
     tests/test_resource_handle.cpp
     tests/test_assembly_interior_runtime.cpp
     tests/test_assembly_collision_runtime.cpp
+    tests/test_assembly_dynamic_collision_runtime.cpp
     tests/test_assembly_instantiator.cpp
     tests/test_assembly_runtime_resources.cpp
     tests/test_assembly_resource_catalog.cpp
@@ -233,6 +247,7 @@ set(TEST_SOURCES
     tests/test_ibl_consume_probe.cpp
     tests/test_rigid_body.cpp
     tests/test_flight_control.cpp
+    tests/test_on_foot_controller.cpp
     tests/test_physics_system.cpp
     tests/test_reference_frame.cpp
     tests/test_kepler.cpp
@@ -268,6 +283,8 @@ add_executable(TheDawningV3 WIN32
     ${RENDER_SOURCES}
     ${RENDER_HEADERS}
     ${ECS_HEADERS}
+    ${GAMEPLAY_SOURCES}
+    ${GAMEPLAY_HEADERS}
     ${SIM_SOURCES}
     ${SIM_HEADERS}
     ${SCENE_SOURCES}
@@ -518,6 +535,13 @@ add_executable(TheDawningTests
     # query/locomotion. GPU-free and intentionally separate from sim/collision.
     src/scene/assembly_collision_runtime.cpp
     src/scene/assembly_collision_runtime.h
+    # Transactional moving closure panels and exact-open portal guards.
+    src/scene/assembly_dynamic_collision_runtime.cpp
+    src/scene/assembly_dynamic_collision_runtime.h
+    # Fixed-step view-relative capsule controller consuming the same published
+    # collision snapshot as production. GPU- and platform-free.
+    src/gameplay/on_foot_controller.cpp
+    src/gameplay/on_foot_controller.h
     src/scene/assembly_runtime_resources.cpp
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h

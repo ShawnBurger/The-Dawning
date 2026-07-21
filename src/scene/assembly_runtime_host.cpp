@@ -42,6 +42,42 @@ AssemblyInteriorResult InteriorFailure(
     return result;
 }
 
+AssemblyInteriorResult DynamicCollisionFailure(
+    const AssemblyDynamicCollisionResult& dynamic)
+{
+    AssemblyInteriorStatus status = AssemblyInteriorStatus::InternalError;
+    switch (dynamic.status)
+    {
+    case AssemblyDynamicCollisionStatus::NotInitialized:
+        status = AssemblyInteriorStatus::NotInitialized;
+        break;
+    case AssemblyDynamicCollisionStatus::TopologyMismatch:
+        status = AssemblyInteriorStatus::TopologyMismatch;
+        break;
+    case AssemblyDynamicCollisionStatus::InvalidArgument:
+        status = AssemblyInteriorStatus::InvalidArgument;
+        break;
+    case AssemblyDynamicCollisionStatus::InvalidTopology:
+    case AssemblyDynamicCollisionStatus::ResourceLimitExceeded:
+    case AssemblyDynamicCollisionStatus::CollisionFailure:
+        status = AssemblyInteriorStatus::InvalidTopology;
+        break;
+    case AssemblyDynamicCollisionStatus::AllocationFailure:
+        status = AssemblyInteriorStatus::AllocationFailure;
+        break;
+    case AssemblyDynamicCollisionStatus::Success:
+    case AssemblyDynamicCollisionStatus::InternalError:
+        break;
+    }
+    return InteriorFailure(
+        status,
+        std::string("dynamic interior collision failed: ") +
+            AssemblyDynamicCollisionStatusName(dynamic.status) +
+            (dynamic.error.empty()
+                ? std::string{}
+                : std::string(" (") + dynamic.error + ")"));
+}
+
 bool IsNonZero(const asset::Sha256Digest& digest)
 {
     for (uint8_t byte : digest.bytes)
@@ -178,7 +214,8 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
     const std::filesystem::path& manifestPath)
 {
     if (m_pending || m_instance || m_plan || m_catalog || m_owners ||
-        m_interior.IsInitialized() || !m_models.empty() ||
+        m_interior.IsInitialized() || m_dynamicCollision.IsInitialized() ||
+        !m_models.empty() ||
         !m_collisions.empty() || m_collisionWorld)
     {
         return Failure(
@@ -549,6 +586,25 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
                     : std::string(" (") + interiorInitialized.error + ")"));
     }
 
+    const AssemblyDynamicCollisionResult dynamicInitialized =
+        m_dynamicCollision.Initialize(
+            m_assembly, m_collisionWorld, m_interior);
+    if (!dynamicInitialized.Succeeded())
+    {
+        DestroyAssemblyInstance(target, *committed.instance);
+        m_dynamicCollision.Shutdown();
+        m_interior.Shutdown();
+        m_plan.reset();
+        m_pending = false;
+        return Failure(
+            AssemblyRuntimeHostStatus::CollisionFailure,
+            std::string("dynamic interior collision initialization failed: ") +
+                AssemblyDynamicCollisionStatusName(dynamicInitialized.status) +
+                (dynamicInitialized.error.empty()
+                    ? std::string{}
+                    : std::string(" (") + dynamicInitialized.error + ")"));
+    }
+
     m_instance = committed.instance;
     const AssemblyInteriorResult initialTransforms =
         ApplyInteriorTransforms(scene);
@@ -556,6 +612,7 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
     {
         DestroyAssemblyInstance(target, *m_instance);
         m_instance.reset();
+        m_dynamicCollision.Shutdown();
         m_interior.Shutdown();
         m_plan.reset();
         m_pending = false;
@@ -582,13 +639,25 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
         "[SMOKE] interior_collision_ready=ok packages=%zu boxes=%zu frame=assembly_local",
         m_collisions.size(),
         m_collisionWorld ? m_collisionWorld->BoxCount() : 0u);
+    const auto& dynamicSnapshot = m_dynamicCollision.Snapshot();
+    core::Log::Infof(
+        "[SMOKE] interior_dynamic_collision_ready=ok revision=%llu initial_blockers=%zu initial_combined_boxes=%zu",
+        static_cast<unsigned long long>(
+            dynamicSnapshot ? dynamicSnapshot->revision : 0),
+        dynamicSnapshot ? dynamicSnapshot->dynamicBoxes.size() : 0u,
+        dynamicSnapshot && dynamicSnapshot->collisionWorld
+            ? dynamicSnapshot->collisionWorld->BoxCount()
+            : 0u);
     return { AssemblyRuntimeHostStatus::Success, {} };
 }
 
 AssemblyInteriorResult AssemblyRuntimeHost::ValidateInteriorEntities(
     Scene& scene) const
 {
-    if (!m_instance || !m_instance->IsAlive() || !m_interior.IsInitialized())
+    if (!m_instance || !m_instance->IsAlive() || !m_interior.IsInitialized() ||
+        !m_dynamicCollision.IsInitialized() ||
+        !m_dynamicCollision.Snapshot() ||
+        !m_dynamicCollision.Snapshot()->collisionWorld)
     {
         return InteriorFailure(
             AssemblyInteriorStatus::NotInitialized,
@@ -625,6 +694,35 @@ AssemblyInteriorResult AssemblyRuntimeHost::ValidateInteriorEntities(
     return { AssemblyInteriorStatus::Success };
 }
 
+AssemblyInteriorResult AssemblyRuntimeHost::RefreshDynamicCollision()
+{
+    const AssemblyDynamicCollisionResult refreshed =
+        m_dynamicCollision.Refresh(m_interior);
+    if (!refreshed.Succeeded())
+        return DynamicCollisionFailure(refreshed);
+    AssemblyInteriorResult result;
+    result.status = AssemblyInteriorStatus::Success;
+    result.changed = refreshed.changed;
+    return result;
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::RollbackInteriorMutation(
+    const AssemblyInteriorSnapshot& interior,
+    std::shared_ptr<const AssemblyInteriorCollisionSnapshot> collision,
+    AssemblyInteriorResult failure)
+{
+    const AssemblyInteriorResult restored = m_interior.ApplySnapshot(interior);
+    const bool collisionRestored =
+        m_dynamicCollision.RestorePublishedSnapshot(std::move(collision));
+    if (!restored.Succeeded() || !collisionRestored)
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::InternalError,
+            "interior mutation rollback failed after: " + failure.error);
+    }
+    return failure;
+}
+
 AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorTransforms(
     Scene& scene) const
 {
@@ -648,9 +746,20 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
     uint32_t stableIndex)
 {
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
-    return validated.Succeeded()
-        ? m_interior.ActivateInteraction(stableIndex)
-        : validated;
+    if (!validated.Succeeded())
+        return validated;
+    const AssemblyInteriorSnapshot previousInterior =
+        m_interior.CaptureSnapshot();
+    const auto previousCollision = m_dynamicCollision.Snapshot();
+    const AssemblyInteriorResult activated =
+        m_interior.ActivateInteraction(stableIndex);
+    if (!activated.Succeeded() || !activated.changed)
+        return activated;
+    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+    return refreshed.Succeeded()
+        ? activated
+        : RollbackInteriorMutation(
+            previousInterior, previousCollision, refreshed);
 }
 
 AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
@@ -658,9 +767,19 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
     std::string_view id)
 {
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
-    return validated.Succeeded()
-        ? m_interior.ActivateInteraction(id)
-        : validated;
+    if (!validated.Succeeded())
+        return validated;
+    const AssemblyInteriorSnapshot previousInterior =
+        m_interior.CaptureSnapshot();
+    const auto previousCollision = m_dynamicCollision.Snapshot();
+    const AssemblyInteriorResult activated = m_interior.ActivateInteraction(id);
+    if (!activated.Succeeded() || !activated.changed)
+        return activated;
+    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+    return refreshed.Succeeded()
+        ? activated
+        : RollbackInteriorMutation(
+            previousInterior, previousCollision, refreshed);
 }
 
 AssemblyInteriorResult AssemblyRuntimeHost::ActivateNearestInteraction(
@@ -668,9 +787,19 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateNearestInteraction(
     const AssemblyInteractionQuery& query)
 {
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
-    return validated.Succeeded()
-        ? m_interior.ActivateNearest(query)
-        : validated;
+    if (!validated.Succeeded())
+        return validated;
+    const AssemblyInteriorSnapshot previousInterior =
+        m_interior.CaptureSnapshot();
+    const auto previousCollision = m_dynamicCollision.Snapshot();
+    const AssemblyInteriorResult activated = m_interior.ActivateNearest(query);
+    if (!activated.Succeeded() || !activated.changed)
+        return activated;
+    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+    return refreshed.Succeeded()
+        ? activated
+        : RollbackInteriorMutation(
+            previousInterior, previousCollision, refreshed);
 }
 
 AssemblyInteriorResult AssemblyRuntimeHost::AdvanceInterior(
@@ -681,12 +810,24 @@ AssemblyInteriorResult AssemblyRuntimeHost::AdvanceInterior(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
+    const AssemblyInteriorSnapshot previousInterior =
+        m_interior.CaptureSnapshot();
+    const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult advanced = m_interior.Advance(dt, config);
     if (!advanced.Succeeded() || !advanced.changed)
         return advanced;
+    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+    if (!refreshed.Succeeded())
+    {
+        return RollbackInteriorMutation(
+            previousInterior, previousCollision, refreshed);
+    }
     const AssemblyInteriorResult applied = ApplyInteriorTransforms(scene);
     if (!applied.Succeeded())
-        return applied;
+    {
+        return RollbackInteriorMutation(
+            previousInterior, previousCollision, applied);
+    }
     return advanced;
 }
 
@@ -702,12 +843,24 @@ AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorSnapshot(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
+    const AssemblyInteriorSnapshot previousInterior =
+        m_interior.CaptureSnapshot();
+    const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult applied = m_interior.ApplySnapshot(snapshot);
     if (!applied.Succeeded() || !applied.changed)
         return applied;
+    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+    if (!refreshed.Succeeded())
+    {
+        return RollbackInteriorMutation(
+            previousInterior, previousCollision, refreshed);
+    }
     const AssemblyInteriorResult transformed = ApplyInteriorTransforms(scene);
     if (!transformed.Succeeded())
-        return transformed;
+    {
+        return RollbackInteriorMutation(
+            previousInterior, previousCollision, transformed);
+    }
     return applied;
 }
 
@@ -717,6 +870,7 @@ bool AssemblyRuntimeHost::Shutdown(
     render::Renderer& renderer) noexcept
 {
     bool ok = true;
+    m_dynamicCollision.Shutdown();
     m_interior.Shutdown();
     if (m_instance && m_instance->IsAlive())
     {
@@ -733,6 +887,7 @@ void AssemblyRuntimeHost::ReleaseState(
     render::D3D12Device& device,
     render::Renderer& renderer) noexcept
 {
+    m_dynamicCollision.Shutdown();
     m_interior.Shutdown();
     m_instance.reset();
     m_plan.reset();

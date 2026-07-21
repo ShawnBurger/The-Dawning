@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assembly_collision_runtime.h"
+#include "assembly_dynamic_collision_runtime.h"
 #include "assembly_interior_runtime.h"
 #include "assembly_runtime_resources.h"
 #include "model_loader.h"
@@ -97,11 +98,21 @@ public:
     {
         return m_collisionWorld.get();
     }
+    const std::shared_ptr<const AssemblyInteriorCollisionSnapshot>&
+        InteractiveCollisionSnapshot() const
+    {
+        return m_dynamicCollision.Snapshot();
+    }
     const asset::RuntimeContentManifest& Manifest() const { return m_manifest; }
 
 private:
     AssemblyInteriorResult ValidateInteriorEntities(Scene& scene) const;
     AssemblyInteriorResult ApplyInteriorTransforms(Scene& scene) const;
+    AssemblyInteriorResult RefreshDynamicCollision();
+    AssemblyInteriorResult RollbackInteriorMutation(
+        const AssemblyInteriorSnapshot& interior,
+        std::shared_ptr<const AssemblyInteriorCollisionSnapshot> collision,
+        AssemblyInteriorResult failure);
 
     void ReleaseState(
         Scene& scene,
@@ -114,6 +125,7 @@ private:
     std::map<std::string, std::shared_ptr<const asset::CookedCollision>>
         m_collisions;
     std::shared_ptr<const InteriorCollisionWorld> m_collisionWorld;
+    AssemblyDynamicCollisionRuntime m_dynamicCollision;
     std::shared_ptr<AssemblyRuntimeResourceOwners> m_owners;
     std::unique_ptr<asset::AssemblyResourceCatalogStore> m_catalog;
     std::shared_ptr<const PreparedAssemblyPlan> m_plan;

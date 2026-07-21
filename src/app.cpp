@@ -3,6 +3,7 @@
 
 #include "core/input.h"
 #include "core/log.h"
+#include "gameplay/on_foot_controller.h"
 #include "gameplay/playable_ship.h"
 #include "render/mesh.h"
 #include "render/texture.h"
@@ -483,6 +484,46 @@ bool App::InitializeScene()
     }
     if (m_options.smoke)
     {
+        const auto closedCollision =
+            m_runtimeAssembly.InteractiveCollisionSnapshot();
+        if (!closedCollision || !closedCollision->collisionWorld)
+        {
+            core::Log::Error("On-foot smoke has no closed collision snapshot");
+            return false;
+        }
+        gameplay::OnFootState closedWalk;
+        closedWalk.capsule.center = { 0.0, 0.32, -2.0 };
+        gameplay::OnFootCommand walkForward;
+        walkForward.moveForward = 1.0;
+        bool closedBlocked = false;
+        for (uint32_t step = 0; step < 120; ++step)
+        {
+            const gameplay::OnFootStepResult walked =
+                gameplay::StepOnFootController(
+                    *closedCollision,
+                    closedWalk,
+                    walkForward,
+                    kSmokeFixedDeltaSeconds);
+            if (!walked.Succeeded())
+            {
+                core::Log::Errorf(
+                    "Closed on-foot smoke step failed [%s/%s]",
+                    gameplay::OnFootControllerStatusName(walked.status),
+                    scene::InteriorCollisionStatusName(
+                        walked.collisionStatus));
+                return false;
+            }
+            closedBlocked = closedBlocked || walked.blocked;
+            closedWalk = walked.state;
+        }
+        if (!closedBlocked || closedWalk.capsule.center.z >= -1.35)
+        {
+            core::Log::Errorf(
+                "Closed inner door did not block controller (z=%.6f)",
+                closedWalk.capsule.center.z);
+            return false;
+        }
+
         const scene::AssemblyInteriorResult activated =
             m_runtimeAssembly.ActivateInteraction(m_scene, "outer_hatch");
         const scene::AssemblyInteriorResult advanced = activated.Succeeded()
@@ -505,6 +546,62 @@ bool App::InitializeScene()
         }
         core::Log::Info(
             "[SMOKE] interior_interaction=ok interaction=outer_hatch state=open portal=outer_entry traversable=yes");
+
+        const scene::AssemblyInteriorResult innerActivated =
+            m_runtimeAssembly.ActivateInteraction(m_scene, "inner_door");
+        const scene::AssemblyInteriorResult innerAdvanced =
+            innerActivated.Succeeded()
+                ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
+                : innerActivated;
+        const uint32_t innerPortal = interior.InteractionPortalIndex(
+            innerActivated.stableIndex);
+        const auto openCollision =
+            m_runtimeAssembly.InteractiveCollisionSnapshot();
+        if (!innerActivated.Succeeded() || !innerAdvanced.Succeeded() ||
+            interior.InteractionStateName(innerActivated.stableIndex) != "open" ||
+            innerPortal == asset::kAssemblyNoIndex ||
+            !interior.IsPortalTraversable(innerPortal) || !openCollision ||
+            !openCollision->collisionWorld)
+        {
+            core::Log::Errorf(
+                "Open on-foot smoke setup failed [%s]: %s",
+                scene::AssemblyInteriorStatusName(innerAdvanced.status),
+                innerAdvanced.error.c_str());
+            return false;
+        }
+
+        gameplay::OnFootState openWalk;
+        openWalk.capsule.center = { 0.0, 0.32, -2.0 };
+        for (uint32_t step = 0; step < 120; ++step)
+        {
+            const gameplay::OnFootStepResult walked =
+                gameplay::StepOnFootController(
+                    *openCollision,
+                    openWalk,
+                    walkForward,
+                    kSmokeFixedDeltaSeconds);
+            if (!walked.Succeeded())
+            {
+                core::Log::Errorf(
+                    "Open on-foot smoke step failed [%s/%s]",
+                    gameplay::OnFootControllerStatusName(walked.status),
+                    scene::InteriorCollisionStatusName(
+                        walked.collisionStatus));
+                return false;
+            }
+            openWalk = walked.state;
+        }
+        if (openWalk.capsule.center.z <= -0.5 ||
+            openCollision->dynamicBoxes.size() != 2)
+        {
+            core::Log::Errorf(
+                "Open inner door did not admit controller (z=%.6f blockers=%zu)",
+                openWalk.capsule.center.z,
+                openCollision->dynamicBoxes.size());
+            return false;
+        }
+        core::Log::Info(
+            "[SMOKE] on_foot_controller=ok closed=blocked open=traversable blockers=2");
     }
 
     auto& resources = m_scene.GetResources();

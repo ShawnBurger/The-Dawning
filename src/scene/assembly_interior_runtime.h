@@ -90,6 +90,10 @@ public:
     size_t InteractionCount() const { return m_interactions.size(); }
     size_t PortalCount() const;
     size_t MovingPartCount() const { return m_movingTransforms.size(); }
+    const asset::Sha256Digest* TopologySha256() const
+    {
+        return m_assembly ? &m_assembly->sourceManifestSha256 : nullptr;
+    }
 
     AssemblyInteriorResult ActivateInteraction(uint32_t stableIndex);
     AssemblyInteriorResult ActivateInteraction(std::string_view id);
