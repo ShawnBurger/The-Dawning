@@ -593,6 +593,23 @@ physical-actuator flight-control bridge. Collision/close-encounter policy is the
 next candidate lane; Claude's collision worktree must be re-audited before it is
 registered or edited.
 
+### Live collision review handoff (2026-07-20)
+
+- Owner remains Claude in `D:\The Dawning (new)\.agents\worktrees\collide`;
+  Codex observed active file changes and will not edit or checkpoint that worktree.
+- Current read-only Debug run: 283 cases, 282 passed, 1 failed; all three failed
+  checks are `Collision_Merge_ConservesMomentumAndMass` momentum components.
+- Required watched gap: a high-restitution body that fully crosses the contact
+  shell within one micro-step must bounce. The current swept predicate detects the
+  crossing but classifies approach from the end-of-step normal/velocity, which can
+  see the body as separating and silently accept the tunnel.
+- Required public-input guards: prove non-finite/non-positive `eta` and
+  `etaContact`, out-of-range restitution/contact parameters, negative `maxLevel`,
+  and the hard level-30 backstop cannot cause undefined casts, energy injection,
+  impractical stepping, or a false `hitDepthCap` diagnostic.
+- Codex will re-run and integrate only after Claude's files stop changing and the
+  branch is explicitly handed back or becomes stable and clean.
+
 ### WS-001: Coordination contract
 
 - Status: MERGED
