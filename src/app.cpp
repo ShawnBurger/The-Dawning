@@ -663,7 +663,7 @@ void App::InitializePathTracingState()
                      m_rtQualityInfo.samplesPerPixel,
                      m_rtQualityInfo.maxBounces,
                      m_rtQualityInfo.maxBounces == 1 ? "" : "s");
-    core::Log::Info("Flight controls: WASD translate, Space/Ctrl lift, mouse or arrows steer, Q/E roll, V coupled/decoupled");
+    core::Log::Info("Flight controls: WASD/arrows translate, Space/Ctrl lift, captured mouse steers, IJKL attitude, Q/E roll, V coupled/decoupled");
     core::Log::Info("Render controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
 }
 
@@ -714,7 +714,7 @@ void App::TogglePathTracing()
 
 int App::RunMainLoop()
 {
-    core::Log::Info("=== Entering main loop (WASD+Mouse, click to capture, ESC to release) ===");
+    core::Log::Info("=== Entering main loop (WASD/arrows + mouse, click to capture, ESC to release) ===");
     m_running = true;
     if (m_options.smoke)
     {
@@ -1091,8 +1091,8 @@ int App::RunMainLoop()
             // Simulation is suspended with rendering. Discard elapsed fixed
             // steps so restoring the window cannot trigger an unbounded catch-up.
             m_timer.DiscardFixedSteps();
-            m_pendingPointerPitch = 0.0f;
-            m_pendingPointerYaw = 0.0f;
+            m_pendingPointerDeltaX = 0.0f;
+            m_pendingPointerDeltaY = 0.0f;
             Sleep(10);
             continue;
         }
@@ -1124,8 +1124,8 @@ int App::RunMainLoop()
 
         if (advancedFlightStep)
         {
-            m_pendingPointerPitch = 0.0f;
-            m_pendingPointerYaw = 0.0f;
+            m_pendingPointerDeltaX = 0.0f;
+            m_pendingPointerDeltaY = 0.0f;
         }
 
         UpdatePlayerShipVisuals();
@@ -1237,44 +1237,52 @@ void App::UpdatePlayerShipInput()
 
     const auto& input = core::input::GetState();
     gameplay::PilotInputSnapshot snapshot;
-    snapshot.thrustForward = input.KeyDown('W');
-    snapshot.thrustBackward = input.KeyDown('S');
-    snapshot.strafeLeft = input.KeyDown('A');
-    snapshot.strafeRight = input.KeyDown('D');
-    snapshot.liftUp = input.KeyDown(VK_SPACE);
-    snapshot.liftDown = input.KeyDown(VK_CONTROL);
-    snapshot.pitchUp = input.KeyDown(VK_UP);
-    snapshot.pitchDown = input.KeyDown(VK_DOWN);
-    snapshot.yawLeft = input.KeyDown(VK_LEFT);
-    snapshot.yawRight = input.KeyDown(VK_RIGHT);
+    const gameplay::LocalMovementInput movement =
+        gameplay::ResolveMovementBindings({
+            input.KeyDown('W'), input.KeyDown('S'),
+            input.KeyDown('A'), input.KeyDown('D'),
+            input.KeyDown(VK_UP), input.KeyDown(VK_DOWN),
+            input.KeyDown(VK_LEFT), input.KeyDown(VK_RIGHT),
+            input.KeyDown(VK_SPACE), input.KeyDown(VK_CONTROL),
+        });
+    snapshot.thrustForward = movement.forward;
+    snapshot.thrustBackward = movement.backward;
+    snapshot.strafeLeft = movement.left;
+    snapshot.strafeRight = movement.right;
+    snapshot.liftUp = movement.up;
+    snapshot.liftDown = movement.down;
+    snapshot.pitchUp = input.KeyDown('I');
+    snapshot.pitchDown = input.KeyDown('K');
+    snapshot.yawLeft = input.KeyDown('J');
+    snapshot.yawRight = input.KeyDown('L');
     snapshot.rollLeft = input.KeyDown('Q');
     snapshot.rollRight = input.KeyDown('E');
     snapshot.toggleMode = input.KeyPressed('V');
 
     if (m_window.IsCaptured())
     {
-        constexpr float pointerDemandPerPixel = 0.035f;
-        m_pendingPointerPitch = gameplay::ClampDemand(
-            m_pendingPointerPitch +
-            static_cast<float>(input.mouse.deltaY) * pointerDemandPerPixel);
-        m_pendingPointerYaw = gameplay::ClampDemand(
-            m_pendingPointerYaw +
-            static_cast<float>(input.mouse.deltaX) * pointerDemandPerPixel);
+        constexpr float maxPendingPixels = 112.0f;
+        m_pendingPointerDeltaX = (std::max)(-maxPendingPixels, (std::min)(
+            maxPendingPixels,
+            m_pendingPointerDeltaX + static_cast<float>(input.mouse.deltaX)));
+        m_pendingPointerDeltaY = (std::max)(-maxPendingPixels, (std::min)(
+            maxPendingPixels,
+            m_pendingPointerDeltaY + static_cast<float>(input.mouse.deltaY)));
     }
     else
     {
-        m_pendingPointerPitch = 0.0f;
-        m_pendingPointerYaw = 0.0f;
+        m_pendingPointerDeltaX = 0.0f;
+        m_pendingPointerDeltaY = 0.0f;
     }
-    snapshot.pointerPitch = m_pendingPointerPitch;
-    snapshot.pointerYaw = m_pendingPointerYaw;
+    snapshot.pointerPitch = gameplay::PointerSteeringDemand(m_pendingPointerDeltaY);
+    snapshot.pointerYaw = gameplay::PointerSteeringDemand(m_pendingPointerDeltaX);
 
     if (m_options.smokeFlight)
     {
         const uint64_t endFrame = SmokeFrameForTime(m_options.smokeSeconds);
         snapshot = gameplay::PilotInputSnapshot{};
-        m_pendingPointerPitch = 0.0f;
-        m_pendingPointerYaw = 0.0f;
+        m_pendingPointerDeltaX = 0.0f;
+        m_pendingPointerDeltaY = 0.0f;
         snapshot.toggleMode = m_frameCount == 2;
         snapshot.thrustForward = m_frameCount + 12 > endFrame;
     }
@@ -1360,10 +1368,23 @@ void App::UpdateCamera(const core::TimeStep& timeStep)
     const auto& registry = m_scene.GetRegistry();
     if (const auto* ship = registry.TryGet<ecs::Transform>(m_playerShip))
     {
-        const gameplay::ChaseCameraPose pose = gameplay::BuildChaseCameraPose(*ship);
+        const gameplay::ChaseCameraPose target = gameplay::BuildChaseCameraPose(*ship);
+        gameplay::ChaseCameraPose pose = target;
+        if (m_chaseCameraInitialized)
+        {
+            pose = gameplay::SmoothChaseCameraPose(
+                { m_chaseCameraPosition, m_chaseCameraYaw, m_chaseCameraPitch },
+                target, timeStep.dt);
+        }
+        m_chaseCameraPosition = pose.position;
+        m_chaseCameraYaw = pose.yawDegrees;
+        m_chaseCameraPitch = pose.pitchDegrees;
+        m_chaseCameraInitialized = true;
         m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
         return;
     }
+
+    m_chaseCameraInitialized = false;
 
     const auto& input = core::input::GetState();
     float mouseDeltaX = 0.0f;
@@ -1374,12 +1395,19 @@ void App::UpdateCamera(const core::TimeStep& timeStep)
         mouseDeltaY = static_cast<float>(input.mouse.deltaY);
     }
 
+    const gameplay::LocalMovementInput movement =
+        gameplay::ResolveMovementBindings({
+            input.KeyDown('W'), input.KeyDown('S'),
+            input.KeyDown('A'), input.KeyDown('D'),
+            input.KeyDown(VK_UP), input.KeyDown(VK_DOWN),
+            input.KeyDown(VK_LEFT), input.KeyDown(VK_RIGHT),
+            input.KeyDown('E') || input.KeyDown(VK_SPACE),
+            input.KeyDown('Q') || input.KeyDown(VK_CONTROL),
+        });
     m_camera.Update(
         static_cast<float>(timeStep.dt), mouseDeltaX, mouseDeltaY,
-        input.KeyDown('W'), input.KeyDown('S'),
-        input.KeyDown('A'), input.KeyDown('D'),
-        input.KeyDown('E') || input.KeyDown(VK_SPACE),
-        input.KeyDown('Q') || input.KeyDown(VK_CONTROL),
+        movement.forward, movement.backward, movement.left, movement.right,
+        movement.up, movement.down,
         input.KeyDown(VK_SHIFT));
 }
 

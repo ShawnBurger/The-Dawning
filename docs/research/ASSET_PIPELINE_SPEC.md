@@ -1,5 +1,11 @@
 # THE DAWNING ASSET PIPELINE SPECIFICATION
 
+> 2026-07-21 production update: the current Meshy/API research, modular content
+> workflow, and binding interior assembly contract are in
+> `MESHY_PRODUCTION_INTERIORS_2026-07-21.md`. That document supersedes any
+> earlier implication here that a generated GLB can itself define a complete
+> ship or station interior.
+
 Phase 2 of `MASTER_ENGINE_SPEC.md`. Phase 0 (repository, CI, tests) and Phase 1
 (engine correctness) are complete. This is the next pillar and it currently
 blocks every one after it.

@@ -410,6 +410,8 @@ endif()
 # =============================================================================
 enable_testing()
 
+find_package(Python3 COMPONENTS Interpreter)
+
 add_executable(TheDawningTests
     ${TEST_SOURCES}
     ${TEST_HEADERS}
@@ -575,3 +577,24 @@ endif()
 source_group("Tests" FILES ${TEST_SOURCES} ${TEST_HEADERS})
 
 add_test(NAME unit_tests COMMAND TheDawningTests)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME asset_manifest_contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_asset_manifest.py
+    )
+    set_tests_properties(asset_manifest_contract PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    add_test(
+        NAME meshy_client_contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_meshy_client.py
+    )
+    set_tests_properties(meshy_client_contract PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+else()
+    message(WARNING
+        "Python 3 was not found; offline Meshy/assembly contract tests are disabled.")
+endif()

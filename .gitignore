@@ -25,6 +25,8 @@ CTestTestfile.cmake
 *.lib
 *.exp
 *.dll
+__pycache__/
+*.py[cod]
 
 # Handoff/reference payloads kept out of the canonical source tree
 /TheDawning_Codex_Handoff_v3_unpacked/

@@ -296,9 +296,10 @@ The camera basis exists in `CBPerFrame` specifically to close that gap. Toggling
 - `F1`: toggle raster/path tracing.
 - `F2`: toggle path tracing quality.
 - `F3`: toggle the debug overlay.
-- `WASD`: forward/back thrust and left/right strafe.
+- `WASD` or arrow keys: forward/back thrust and left/right strafe.
 - `Space` / `Ctrl`: lift up/down.
-- Mouse or arrow keys: pitch and yaw after clicking into the window.
+- Mouse: pitch and yaw after clicking into the window.
+- `I/J/K/L`: keyboard pitch/yaw fallback.
 - `Q` / `E`: roll left/right.
 - `V`: toggle coupled flight assist / decoupled Newtonian flight.
 - `ESC`: release mouse capture, then quit.

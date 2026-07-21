@@ -574,3 +574,116 @@ TEST_CASE(PlayableShip_ChaseCameraAndExhaustFollowShipPose)
     CHECK_APPROX(clampedHigh.emissiveStrength, 20.0f);
     CHECK_APPROX(clampedHigh.transform.scale.z, 1.5f);
 }
+
+TEST_CASE(PlayableShip_PrimaryAndArrowBindingsResolveToTheSameLocalMovement)
+{
+    gameplay::MovementBindingSnapshot arrowBindings;
+    arrowBindings.alternateForward = true;
+    arrowBindings.alternateLeft = true;
+    arrowBindings.up = true;
+    const gameplay::LocalMovementInput arrows =
+        gameplay::ResolveMovementBindings(arrowBindings);
+
+    gameplay::MovementBindingSnapshot primaryBindings;
+    primaryBindings.primaryForward = true;
+    primaryBindings.primaryLeft = true;
+    primaryBindings.up = true;
+    const gameplay::LocalMovementInput primary =
+        gameplay::ResolveMovementBindings(primaryBindings);
+
+    CHECK_EQ(arrows.forward, primary.forward);
+    CHECK_EQ(arrows.backward, primary.backward);
+    CHECK_EQ(arrows.left, primary.left);
+    CHECK_EQ(arrows.right, primary.right);
+    CHECK_EQ(arrows.up, primary.up);
+    CHECK_EQ(arrows.down, primary.down);
+
+    ecs::FlightControl control;
+    gameplay::PilotInputSnapshot input;
+    input.thrustForward = arrows.forward;
+    input.thrustBackward = arrows.backward;
+    input.strafeLeft = arrows.left;
+    input.strafeRight = arrows.right;
+    input.liftUp = arrows.up;
+    input.liftDown = arrows.down;
+    gameplay::ApplyPilotInput(input, control);
+    CHECK_EQ(control.linearDemand.x, -1.0f);
+    CHECK_EQ(control.linearDemand.y, 1.0f);
+    CHECK_EQ(control.linearDemand.z, 1.0f);
+
+    // Opposed bindings remain visible to the flight law and cancel cleanly.
+    arrowBindings.primaryBackward = true;
+    const gameplay::LocalMovementInput opposed =
+        gameplay::ResolveMovementBindings(arrowBindings);
+    input.thrustForward = opposed.forward;
+    input.thrustBackward = opposed.backward;
+    gameplay::ApplyPilotInput(input, control);
+    CHECK_EQ(control.linearDemand.z, 0.0f);
+}
+
+TEST_CASE(PlayableShip_RawPointerResponseIsPreciseMonotonicAndBounded)
+{
+    CHECK_EQ(gameplay::PointerSteeringDemand(0.0f), 0.0f);
+    CHECK_EQ(gameplay::PointerSteeringDemand(0.5f), 0.0f);
+
+    const float small = gameplay::PointerSteeringDemand(2.0f);
+    const float medium = gameplay::PointerSteeringDemand(10.0f);
+    CHECK(small > 0.0f);
+    CHECK(medium > small);
+    CHECK(medium < 1.0f);
+    CHECK_APPROX(gameplay::PointerSteeringDemand(-10.0f), -medium);
+    CHECK_EQ(gameplay::PointerSteeringDemand(1000.0f), 1.0f);
+    CHECK_EQ(gameplay::PointerSteeringDemand(-1000.0f), -1.0f);
+
+    gameplay::PointerSteeringSettings invalid;
+    invalid.fullDemandPixels = invalid.deadzonePixels;
+    CHECK_EQ(gameplay::PointerSteeringDemand(10.0f, invalid), 0.0f);
+    CHECK_EQ(gameplay::PointerSteeringDemand(
+                 std::numeric_limits<float>::quiet_NaN()), 0.0f);
+}
+
+TEST_CASE(PlayableShip_ChaseCameraDampingUsesShortestYawAndSnapsTeleports)
+{
+    gameplay::ChaseCameraPose current;
+    current.position = { 0.0, 0.0, 0.0 };
+    current.yawDegrees = 179.0f;
+    current.pitchDegrees = 0.0f;
+
+    gameplay::ChaseCameraPose target;
+    target.position = { 10.0, 4.0, -2.0 };
+    target.yawDegrees = -179.0f;
+    target.pitchDegrees = 10.0f;
+
+    const gameplay::ChaseCameraPose half = gameplay::SmoothChaseCameraPose(
+        current, target, 1.0, static_cast<float>(std::log(2.0)), 100.0);
+    CHECK_APPROX_EPS(half.position.x, 5.0, 1e-5);
+    CHECK_APPROX_EPS(half.position.y, 2.0, 1e-5);
+    CHECK_APPROX_EPS(half.position.z, -1.0, 1e-5);
+    CHECK_APPROX(half.yawDegrees, 180.0f);
+    CHECK_APPROX(half.pitchDegrees, 5.0f);
+
+    const gameplay::ChaseCameraPose noTime = gameplay::SmoothChaseCameraPose(
+        current, target, 0.0, 12.0f, 100.0);
+    CHECK_APPROX_EPS(noTime.position.x, current.position.x, 1e-8);
+    CHECK_APPROX(noTime.yawDegrees, current.yawDegrees);
+
+    target.position = { 1000.0, 20.0, -50.0 };
+    const gameplay::ChaseCameraPose teleported =
+        gameplay::SmoothChaseCameraPose(current, target, 1.0 / 60.0, 12.0f, 100.0);
+    CHECK_APPROX_EPS(teleported.position.x, target.position.x, 1e-8);
+    CHECK_APPROX(teleported.yawDegrees, target.yawDegrees);
+}
+
+TEST_CASE(PlayableShip_ChaseCameraHeightDoesNotOrbitWithShipRoll)
+{
+    ecs::Transform ship;
+    ship.rotation = core::Quatf::FromAxisAngle(
+        { 0.0f, 0.0f, 1.0f }, 90.0f * core::DEG_TO_RAD);
+
+    const gameplay::ChaseCameraPose camera = gameplay::BuildChaseCameraPose(ship);
+    CHECK_APPROX_EPS(camera.position.x, 0.0, 1e-6);
+    CHECK_APPROX_EPS(camera.position.y, 2.4, 1e-6);
+    CHECK_APPROX_EPS(camera.position.z, -8.0, 1e-6);
+    CHECK_APPROX(camera.yawDegrees, 0.0f);
+    CHECK_APPROX(camera.pitchDegrees, -8.0f);
+}

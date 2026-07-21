@@ -13,3 +13,20 @@ reviewable. Selected production-ready cooked outputs ship through Git LFS under
 
 Regenerating from a manifest costs credits and is not bit-identical: these models
 are sampled, not deterministic.
+
+Plan a current Meshy 6 preview without credentials or spend:
+
+```powershell
+python tools/meshy/meshy_client.py generate `
+  --prompt "modular spaceship pressure door" `
+  --name pressure_door `
+  --asset-id ship.reference.fighter `
+  --module-id airlock_module `
+  --preview-only --dry-run
+```
+
+Remove `--dry-run` only after reviewing the request and cost. Keep
+`--preview-only` until geometry is approved, then rerun the exact command without
+it to refine the cached preview. Generated art is not production-eligible until
+its assembly manifest passes `tools/validate_asset_manifest.py` and DCC cleanup,
+collision, navigation, pivots, LODs, and runtime acceptance are complete.

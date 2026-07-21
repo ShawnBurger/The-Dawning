@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "asset_id": "ship.reference.fighter",
+  "asset_kind": "ship",
+  "units": "meters",
+  "coordinate_system": {
+    "handedness": "left",
+    "up": "+Y",
+    "forward": "+Z"
+  },
+  "interior_contract": {
+    "continuous_world": true,
+    "loading_screen_free": true,
+    "fully_interactive": true,
+    "minimum_clearance_m": 2.1,
+    "minimum_door_width_m": 0.9
+  },
+  "provenance": {
+    "assembly_revision": "reference-contract-1",
+    "sources": [
+      {
+        "id": "meshy_corridor_wall",
+        "provider": "Meshy",
+        "manifest": "assets/generated/corridor_wall_a_71225a5151f5/manifest.json",
+        "request_hash": "71225a5151f5a83de00a5966b7d593c7e0616a393fd4e03f96ee50ace18a1a1d"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "id": "hull",
+      "role": "exterior",
+      "provenance_ref": "meshy_corridor_wall",
+      "visual_source": "source://reference/hull.glb",
+      "transform": {
+        "position_m": [0, 0, 0],
+        "rotation_euler_degrees": [0, 0, 0],
+        "scale": [1, 1, 1]
+      },
+      "collision": {"type": "compound", "source": "collision://hull"},
+      "lods": [
+        {"level": 0, "source": "visual://hull_lod0", "max_distance_m": 80},
+        {"level": 1, "source": "visual://hull_lod1", "max_distance_m": 300},
+        {"level": 2, "source": "visual://hull_lod2", "max_distance_m": 2000}
+      ]
+    },
+    {
+      "id": "airlock_module",
+      "role": "interior",
+      "provenance_ref": "meshy_corridor_wall",
+      "visual_source": "source://reference/airlock.glb",
+      "transform": {
+        "position_m": [0, 0, -2],
+        "rotation_euler_degrees": [0, 0, 0],
+        "scale": [1, 1, 1]
+      },
+      "collision": {"type": "mesh", "source": "collision://airlock"},
+      "lods": [
+        {"level": 0, "source": "visual://airlock_lod0", "max_distance_m": 30},
+        {"level": 1, "source": "visual://airlock_lod1", "max_distance_m": 100},
+        {"level": 2, "source": "visual://airlock_lod2", "max_distance_m": 500}
+      ]
+    },
+    {
+      "id": "cockpit_module",
+      "role": "interior",
+      "provenance_ref": "meshy_corridor_wall",
+      "visual_source": "source://reference/cockpit.glb",
+      "transform": {
+        "position_m": [0, 0, 1],
+        "rotation_euler_degrees": [0, 0, 0],
+        "scale": [1, 1, 1]
+      },
+      "collision": {"type": "mesh", "source": "collision://cockpit"},
+      "lods": [
+        {"level": 0, "source": "visual://cockpit_lod0", "max_distance_m": 30},
+        {"level": 1, "source": "visual://cockpit_lod1", "max_distance_m": 100},
+        {"level": 2, "source": "visual://cockpit_lod2", "max_distance_m": 500}
+      ]
+    }
+  ],
+  "sockets": [
+    {"id": "hull_entry", "module": "hull", "type": "portal", "position_m": [0, 0, -3], "forward": [0, 0, -1], "up": [0, 1, 0]},
+    {"id": "airlock_outer", "module": "airlock_module", "type": "portal", "position_m": [0, 0, -1], "forward": [0, 0, -1], "up": [0, 1, 0]},
+    {"id": "airlock_inner", "module": "airlock_module", "type": "portal", "position_m": [0, 0, 1], "forward": [0, 0, 1], "up": [0, 1, 0]},
+    {"id": "cockpit_entry", "module": "cockpit_module", "type": "portal", "position_m": [0, 0, -1], "forward": [0, 0, -1], "up": [0, 1, 0]},
+    {"id": "pilot_seat_anchor", "module": "cockpit_module", "type": "interaction", "position_m": [0, 0.6, 1], "forward": [0, 0, 1], "up": [0, 1, 0]}
+  ],
+  "zones": [
+    {"id": "airlock", "module": "airlock_module", "pressure": "airlock", "navmesh_source": "nav://airlock", "walkable_surface": "walk://airlock_floor"},
+    {"id": "cockpit", "module": "cockpit_module", "pressure": "pressurized", "navmesh_source": "nav://cockpit", "walkable_surface": "walk://cockpit_floor"}
+  ],
+  "portals": [
+    {"id": "outer_entry", "a": "outside", "b": "airlock", "socket_a": "hull_entry", "socket_b": "airlock_outer", "closure_interaction": "outer_hatch", "sealable": true, "nav_link": true},
+    {"id": "inner_entry", "a": "airlock", "b": "cockpit", "socket_a": "airlock_inner", "socket_b": "cockpit_entry", "closure_interaction": "inner_door", "sealable": true, "nav_link": true}
+  ],
+  "interactions": [
+    {"id": "outer_hatch", "type": "hatch", "module": "airlock_module", "socket": "airlock_outer", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "outer_hatch_panel", "portal": "outer_entry"},
+    {"id": "inner_door", "type": "door", "module": "airlock_module", "socket": "airlock_inner", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "inner_door_panel", "portal": "inner_entry"},
+    {"id": "pilot_seat", "type": "seat", "module": "cockpit_module", "socket": "pilot_seat_anchor", "states": ["available", "occupied"], "initial_state": "available"}
+  ],
+  "moving_parts": [
+    {"id": "outer_hatch_panel", "module": "airlock_module", "interaction": "outer_hatch", "visual_source": "visual://airlock/outer_hatch_panel", "pivot_m": [0.7, 0, -1], "motion": {"type": "rotational", "axis": [0, 1, 0], "travel": 100}},
+    {"id": "inner_door_panel", "module": "airlock_module", "interaction": "inner_door", "visual_source": "visual://airlock/inner_door_panel", "pivot_m": [0, 0, 1], "motion": {"type": "linear", "axis": [1, 0, 0], "travel": 1.1}}
+  ],
+  "navigation": {
+    "entry_zone": "airlock",
+    "required_reachable_zones": ["airlock", "cockpit"]
+  }
+}

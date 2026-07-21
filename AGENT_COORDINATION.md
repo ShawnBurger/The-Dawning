@@ -1469,7 +1469,7 @@ are now integrated as well. The current order is:
 
 ### WS-021: Modern controls and production Meshy interior contract
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: make keyboard and mouse control behavior match modern space-sim
   expectations, remove camera snapping, and establish a deterministic Meshy
   production pipeline whose engine-owned assembly metadata can support complete
@@ -1479,7 +1479,7 @@ are now integrated as well. The current order is:
 - Branch: `codex/modern-controls-meshy-pipeline`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-modern-controls-meshy-pipeline`
-- Base commit: `a15cfeb`
+- Base commit: `6833101`
 - Owned paths: `src/app.{h,cpp}`, `src/gameplay/playable_ship.h`, focused flight
   tests, `tools/meshy/**`, additive asset-manifest validation/examples,
   `docs/research/**`, `README.md`, and only the build/CI wiring needed to run the
@@ -1504,9 +1504,27 @@ are now integrated as well. The current order is:
   no claim that the current runtime already has an on-foot character, navmesh,
   pressure simulation, or door/elevator systems; no monolithic AI-generated
   exterior-plus-interior asset accepted as gameplay-authoritative topology
-- Next action: complete official-source research, freeze the input and assembly
-  schemas, implement the control/camera and offline validation slices, then ask
-  Claude to review the integrated diff before final validation
+- Completion: arrow/WASD translation aliases, bounded raw-mouse ship steering,
+  keyboard attitude fallbacks, and a frame-rate-independent world-up chase
+  camera are implemented. Official-source research, a current Meshy request
+  client, strict interactive-interior assembly validation, an example ship
+  manifest, and operator documentation are integrated with CTest.
+- Validation: Debug and Release built `TheDawningTests`, `TheDawningV3`,
+  `TheDawningAssetCompiler`, and `TheDawningAssetInspector`; both CPU binaries
+  passed 366 cases / 17,067 checks; the asset-manifest and Meshy-client suites
+  passed 9 and 5 cases; Debug/Release raster, stable DXR, and full DXR smoke
+  modes passed at 1920x1080 with 99.9-100% nonblack captures. A native window
+  check confirmed mouse capture/release, bounded yaw steering, and damped chase
+  settling. The Meshy dry run spent no credits, required no credential, and the
+  repository secret scan was clean.
+- Review: Claude Opus and Fable read-only reviews were attempted after the
+  integrated diff, but both were blocked by the current Claude session quota.
+  Review is deferred under the agreed manual-review fallback; Codex completed
+  the repository, contract, test, render, and live-window audits.
+- Next action: load validated assembly manifests into cooked runtime entities,
+  preserve module identity through import, and connect portals, interactions,
+  navigation, pressure, collision, and local lighting to the simulation/editor
+  layers before accepting production ship or structure interiors.
 
 ## 20. Helper Commands
 

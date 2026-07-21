@@ -39,6 +39,56 @@ struct PilotInputSnapshot
     bool toggleMode = false;
 };
 
+// Platform-neutral movement bindings shared by flight and the player-style
+// free camera. The alternate set is where the Windows host supplies arrows;
+// keeping that policy out of the flight law gives a future on-foot controller
+// the same local-movement contract without importing Win32 key codes.
+struct MovementBindingSnapshot
+{
+    bool primaryForward = false;
+    bool primaryBackward = false;
+    bool primaryLeft = false;
+    bool primaryRight = false;
+    bool alternateForward = false;
+    bool alternateBackward = false;
+    bool alternateLeft = false;
+    bool alternateRight = false;
+    bool up = false;
+    bool down = false;
+};
+
+struct LocalMovementInput
+{
+    bool forward = false;
+    bool backward = false;
+    bool left = false;
+    bool right = false;
+    bool up = false;
+    bool down = false;
+};
+
+inline LocalMovementInput ResolveMovementBindings(
+    const MovementBindingSnapshot& bindings)
+{
+    return {
+        bindings.primaryForward || bindings.alternateForward,
+        bindings.primaryBackward || bindings.alternateBackward,
+        bindings.primaryLeft || bindings.alternateLeft,
+        bindings.primaryRight || bindings.alternateRight,
+        bindings.up,
+        bindings.down,
+    };
+}
+
+struct PointerSteeringSettings
+{
+    // Raw-input deltas are integral pixels on Windows. Half a pixel therefore
+    // removes only numerical residue while preserving the first real count.
+    float deadzonePixels = 0.5f;
+    float fullDemandPixels = 28.0f;
+    float responseExponent = 1.15f;
+};
+
 inline float ClampDemand(float value)
 {
     if (!std::isfinite(value)) return 0.0f;
@@ -58,6 +108,37 @@ inline float DigitalAxis(bool positive, bool negative)
 {
     return static_cast<float>(positive ? 1 : 0) -
            static_cast<float>(negative ? 1 : 0);
+}
+
+// Converts one fixed-step's accumulated raw mouse delta into a bounded angular
+// demand. This is deliberately a rate-style response: when the mouse stops, the
+// command stops. A virtual-stick cursor can be added later with a visible HUD
+// reticle and an explicit mode setting; silently emulating one with a hidden
+// cursor would make recentering impossible to understand.
+inline float PointerSteeringDemand(
+    float deltaPixels,
+    const PointerSteeringSettings& settings = {})
+{
+    if (!std::isfinite(deltaPixels) || !std::isfinite(settings.deadzonePixels) ||
+        !std::isfinite(settings.fullDemandPixels) ||
+        !std::isfinite(settings.responseExponent) ||
+        settings.deadzonePixels < 0.0f ||
+        settings.fullDemandPixels <= settings.deadzonePixels ||
+        settings.responseExponent <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float magnitude = std::fabs(deltaPixels);
+    if (magnitude <= settings.deadzonePixels)
+        return 0.0f;
+
+    float normalized = (magnitude - settings.deadzonePixels) /
+                       (settings.fullDemandPixels - settings.deadzonePixels);
+    if (normalized > 1.0f)
+        normalized = 1.0f;
+    const float curved = std::pow(normalized, settings.responseExponent);
+    return std::copysign(curved, deltaPixels);
 }
 
 inline void ApplyPilotInput(const PilotInputSnapshot& input,
@@ -212,17 +293,82 @@ struct ChaseCameraPose
     float pitchDegrees = 0.0f;
 };
 
+inline bool IsFinite(const ChaseCameraPose& pose)
+{
+    return std::isfinite(pose.position.x) && std::isfinite(pose.position.y) &&
+           std::isfinite(pose.position.z) && std::isfinite(pose.yawDegrees) &&
+           std::isfinite(pose.pitchDegrees);
+}
+
+inline float ShortestAngleDeltaDegrees(float from, float to)
+{
+    if (!std::isfinite(from) || !std::isfinite(to))
+        return 0.0f;
+    float delta = std::fmod(to - from, 360.0f);
+    if (delta > 180.0f) delta -= 360.0f;
+    if (delta < -180.0f) delta += 360.0f;
+    return delta;
+}
+
+inline float WrapDegrees(float angle)
+{
+    if (!std::isfinite(angle))
+        return 0.0f;
+    angle = std::fmod(angle, 360.0f);
+    if (angle > 180.0f) angle -= 360.0f;
+    if (angle < -180.0f) angle += 360.0f;
+    return angle;
+}
+
+// Frame-rate-independent exponential chase response. Large discontinuities are
+// teleports/loads, not camera motion, so they snap instead of dragging the view
+// across interplanetary space. Rotation takes the shortest path across +/-180.
+inline ChaseCameraPose SmoothChaseCameraPose(
+    const ChaseCameraPose& current,
+    const ChaseCameraPose& target,
+    double dt,
+    float responsePerSecond = 12.0f,
+    double teleportSnapDistance = 100.0)
+{
+    if (!IsFinite(target))
+        return current;
+    if (!IsFinite(current))
+        return target;
+    if (!std::isfinite(dt) || dt <= 0.0)
+        return current;
+    if (!std::isfinite(responsePerSecond) || responsePerSecond <= 0.0f ||
+        !std::isfinite(teleportSnapDistance) || teleportSnapDistance < 0.0)
+    {
+        return target;
+    }
+
+    const core::Vec3d positionDelta = target.position - current.position;
+    if (positionDelta.Length() > teleportSnapDistance)
+        return target;
+
+    const double alpha = 1.0 - std::exp(
+        -static_cast<double>(responsePerSecond) * dt);
+    ChaseCameraPose smoothed;
+    smoothed.position = current.position + positionDelta * alpha;
+    smoothed.yawDegrees = WrapDegrees(
+        current.yawDegrees +
+        ShortestAngleDeltaDegrees(current.yawDegrees, target.yawDegrees) *
+            static_cast<float>(alpha));
+    smoothed.pitchDegrees = current.pitchDegrees +
+        (target.pitchDegrees - current.pitchDegrees) * static_cast<float>(alpha);
+    return smoothed;
+}
+
 inline ChaseCameraPose BuildChaseCameraPose(const ecs::Transform& ship,
                                             float distance = 8.0f,
                                             float height = 2.4f,
-                                            float lookDownDegrees = 8.0f)
+    float lookDownDegrees = 8.0f)
 {
     const core::Vec3f forward = ship.rotation.Rotate({ 0.0f, 0.0f, 1.0f }).Normalized();
-    const core::Vec3f up = ship.rotation.Rotate({ 0.0f, 1.0f, 0.0f }).Normalized();
 
     ChaseCameraPose pose;
     pose.position = ship.position - core::Vec3d::FromFloat(forward) * distance +
-                    core::Vec3d::FromFloat(up) * height;
+                    core::Vec3d{ 0.0, static_cast<double>(height), 0.0 };
     pose.yawDegrees = std::atan2(forward.x, forward.z) * core::RAD_TO_DEG;
     const float vertical = ClampDemand(forward.y);
     pose.pitchDegrees = std::asin(vertical) * core::RAD_TO_DEG - lookDownDegrees;

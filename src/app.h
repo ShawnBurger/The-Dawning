@@ -131,8 +131,12 @@ private:
     std::array<ecs::Entity, ecs::ThrusterSet::kMaxThrusters> m_thrusterVisuals = {};
     scene::MeshHandle m_thrusterVisualMesh;
     uint32_t m_thrusterVisualCount = 0;
-    float m_pendingPointerPitch = 0.0f;
-    float m_pendingPointerYaw = 0.0f;
+    float m_pendingPointerDeltaX = 0.0f;
+    float m_pendingPointerDeltaY = 0.0f;
+    core::Vec3d m_chaseCameraPosition = {};
+    float m_chaseCameraYaw = 0.0f;
+    float m_chaseCameraPitch = 0.0f;
+    bool m_chaseCameraInitialized = false;
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
     uint32_t m_smokeSavedNormalTexture = UINT32_MAX;
