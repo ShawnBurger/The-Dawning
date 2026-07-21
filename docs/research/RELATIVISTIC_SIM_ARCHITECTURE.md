@@ -67,13 +67,15 @@ its watched-failure verification:
    near-parabolic and hyperbolic state). *Watched:* Kepler **closure** over one period + **dt-
    convergence** of integrated drift — never exact energy/momentum conservation (Stage 1's
    fantasy-tolerance lesson); `E=M` fails to converge at `e=0.85` where the robust seed succeeds.
-6. **Atomic FTL teleport inside the RULE-6 fixed step** (§7.3). Rotate world-frame `linearVelocity`
-   AND orientation by the mouth-to-mouth rotation, flush `forceAccum`/`torqueAccum`, set
+6. **Atomic FTL teleport inside the RULE-6 fixed step** (§7.3). Rotate world-frame `linearVelocity`,
+   authoritative `RelativisticBody.momentum` when present, AND orientation by the mouth-to-mouth
+   rotation; flush `forceAccum`/`torqueAccum`, set
    `prevPosition`/`prevRotation` to the post-teleport pose (zero interpolation smear), drain the
    fixed-step accumulator, reset `m_accumFrameIndex` but NOT `m_seedFrameCounter`. *Watched:* the
-   round-trip returns bit-exact `{position, linearVelocity, orientation}`; a teleport that forgets
-   to rotate world-frame velocity is watched failing. Warp cruise's only invariant is determinism
-   (same route → hash-identical arrival).
+   identity-mouth round-trip returns bit-exact retained state, while rotated mouths meet the
+   documented quaternion/coordinate tolerance; a teleport that forgets to rotate either
+   world-frame velocity or momentum is watched failing. Warp cruise's invariant is deterministic,
+   bounded stepping (same route → hash-identical arrival).
 7. **Stage 0 is the load-bearing validation, first** (§1, §9). Hierarchical relative-to-parent
    `Vec3d` keeps intra-frame coords under ~1e13 m (~2 mm ULP); every force/separation/relative-
    velocity is computed WITHIN one frame, because catastrophic cancellation — not stored jitter —
@@ -670,6 +672,10 @@ during cruise (the bubble isolates the interior); the ship's real-space position
 bubble-frame origin. So warp is "a separate warp-space frame with external forces suspended,
 local sim live" — not frozen, not force-integrated against the outside.
 
+Each fixed-step origin advance is validated before coordinate arithmetic and is bounded to at
+most one sector per axis. Longer route motion is split into deterministic fixed steps; invalid,
+non-positive, non-finite, or unrepresentable advances are rejected as transactional no-ops.
+
 **Proper time during warp** is defined by convention: the bubble interior is treated as flat,
 `dτ = dt` (the local `beta ≪ 1` and no local potential make this consistent with §2 anyway).
 This convention is flagged for owner sign-off (§11). It does NOT contradict the dilation model:
@@ -687,10 +693,14 @@ teleport state analysis a lens called the most thorough of the three:
   RigidBody.linearVelocity, RigidBody.angularVelocity,
   RigidBody.forceAccum, RigidBody.torqueAccum,
   RigidBody.prevPosition, RigidBody.prevRotation }
+  PLUS RelativisticBody.momentum when that component is present
   PLUS OrbitState.owner and FrameId
 ```
 
-Every field is VERIFIED present in `components.h:149-181`. Step by step:
+The rigid-body fields are VERIFIED present in `components.h:149-181`; the authoritative
+relativistic momentum is present in `RelativisticBody`. The pure FTL module uses `WorldPos` and
+double vectors, so the future engine call site must explicitly adapt ECS local `Vec3d` +
+`FrameId` into `WorldPos` and widen the ECS float angular/torque fields. Step by step:
 
 1. **Runs INSIDE the RULE-6 fixed-step `UpdateSystems` path** (VERIFIED `app.cpp:1047-1048`),
    NEVER the variable-rate camera/render path — else the transit lands at a wall-clock-
@@ -698,11 +708,11 @@ Every field is VERIFIED present in `components.h:149-181`. Step by step:
 2. **Position:** set to the destination mouth, expressed in the destination frame; then
    **rebase the active origin** so the destination sits near a local origin (far-jump
    precision; raw far-absolute `Vec3d` is out of spec, §1).
-3. **linearVelocity** is a WORLD/frame `Vec3d`: **rotate it by the mouth-to-mouth rotation.**
-   A wormhole that only rotates the mouth STILL must rotate `linearVelocity` — it is expressed
-   in the frame the mouth rotation changes (the easy-to-miss hazard). Rotate the orientation
-   quaternion by the same mouth rotation. `angularVelocity` is body-frame and survives a pure
-   translation (rotates only with an oriented mouth).
+3. **linearVelocity** and **RelativisticBody.momentum** are WORLD/frame `Vec3d` values: **rotate
+   both by the mouth-to-mouth rotation.** A wormhole that only rotates the mouth STILL must rotate
+   both values — they are expressed in the frame the mouth rotation changes (the easy-to-miss
+   hazard). Rotate the orientation quaternion by the same mouth rotation. `angularVelocity` is
+   body-frame, so its co-rotating components remain unchanged even through an oriented mouth.
 4. **forceAccum / torqueAccum:** FLUSH to zero — staged pre-jump wrench must not be consumed
    on the first post-jump step (VERIFIED they are consumed then zeroed, `rigid_body.cpp:125,
    164-165`) in the new frame.
@@ -716,12 +726,18 @@ Every field is VERIFIED present in `components.h:149-181`. Step by step:
    existing pattern `while (ConsumeFixedStep()) {}` (VERIFIED `app.cpp:1033,1042`), so arrival
    does not replay a burst of steps. `kMaxDt` is a backstop, not a substitute.
 
+Before any field is changed, validate canonical/addressable coordinates, finite retained state,
+and a finite non-zero mouth quaternion. Normalize finite non-unit mouth rotations once at the
+boundary. Any rejected operation returns the complete pre-jump state unchanged; it must not flush
+the wrench or rewrite interpolation history on a partial failure.
+
 ### 7.4 Determinism across the jump
 
 The teleport is a pure function of `{pre-jump state, mouth-pair transform}` — no wall-clock, no
-RNG. **Round-trip invariant:** A→B→A with mouth transforms composing to identity returns
-**bit-exact** `Transform.position` + `linearVelocity` + orientation. This is well-defined ONLY
-because velocity's *frame* is saved alongside it (§8).
+RNG. **Round-trip invariant:** A→B→A with identity mouth rotations at sector origins returns
+bit-exact position and retained vectors. Rotated mouths are tolerance-bounded by float-quaternion
+and sector-offset ULPs, not bit-exact. This is well-defined ONLY because each world vector's
+*frame* is saved alongside it (§8).
 
 ---
 
@@ -822,9 +838,10 @@ entry, no force step).
 
 **Stage 6 — FTL / warp / wormhole (LAST).** Atomic teleport over the full retained-state set +
 warp-space frame + accumulator drain + accum reset. Reuses Stage 0 rebase, Stage 4 rail
-ownership, the fixed-step drain. GATE: wormhole round-trip returns bit-exact state; teleport
-applied only inside the fixed-step path; `prevPose == postPose` (zero smear); no physics burst
-on arrival.
+ownership, the fixed-step drain. GATE: identity-mouth round-trip returns bit-exact retained state;
+rotated round-trip remains within quaternion/coordinate tolerances; teleport applied only inside
+the fixed-step path; `prevPose == postPose` (zero smear); invalid transforms are transactional;
+no physics burst on arrival.
 
 **Stage 7 — Save/load + deterministic replay.** Frame identity + velocity's frame + clocks +
 orbital state + FrameGraph + master-frame id + epoch. GATE: `load(save(state)) == state`;
@@ -896,14 +913,16 @@ step (C0 continuous entry); `exp` density does not overflow at deep-negative `h`
 denormals above the cutoff (clamped to exact 0.0).
 
 **FTL / wormhole.**
-Invariant: a round-trip returns exact state.
-Assertion: after out-and-back, `{position, linearVelocity, rotation}` are bit-exact and
+Invariant: an identity-mouth round-trip returns exact retained state; rotated mouths are bounded
+by the documented float-quaternion and WorldPos tolerances.
+Assertion: after out-and-back, `{position, linearVelocity, momentum, rotation}` meet that bound and
 `prevPosition == post-teleport pose`; `forceAccum/torqueAccum` flushed; accumulator drained;
 `m_seedFrameCounter` unchanged.
 Negative controls: a jump that leaves `prevPosition` at the pre-jump pose yields a non-zero
 interpolation delta (visible smear); a jump that skips rotating world-frame `linearVelocity`
-yields a velocity discontinuity; a teleport applied in the variable-rate path diverges under
-replay — all watched failing.
+yields a velocity discontinuity; one that skips authoritative momentum makes the next recovered
+velocity disagree; non-finite or zero mouth transforms do not partially mutate state; a teleport
+applied in the variable-rate path diverges under replay — all watched failing.
 
 **Save/load / determinism.**
 Invariant: `load(save(state)) == state`; same inputs → same bytes (same binary).

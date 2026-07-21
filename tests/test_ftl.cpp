@@ -24,6 +24,7 @@
 #include "sim/reference_frame.h"
 
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -39,6 +40,19 @@ void CheckQuatExact(const Quatf& a, const Quatf& b)
     CHECK_EQ(a.x, b.x); CHECK_EQ(a.y, b.y); CHECK_EQ(a.z, b.z); CHECK_EQ(a.w, b.w);
 }
 
+void CheckStateExact(const TeleportState& a, const TeleportState& b)
+{
+    CHECK(a.position == b.position);
+    CheckQuatExact(a.orientation, b.orientation);
+    CHECK(a.linearVelocity == b.linearVelocity);
+    CHECK(a.momentum == b.momentum);
+    CHECK(a.angularVelocity == b.angularVelocity);
+    CHECK(a.forceAccum == b.forceAccum);
+    CHECK(a.torqueAccum == b.torqueAccum);
+    CHECK(a.prevPosition == b.prevPosition);
+    CheckQuatExact(a.prevRotation, b.prevRotation);
+}
+
 // A representative non-trivial pre-jump state near a given mouth.
 TeleportState MakeState(const WorldPos& nearMouth, const Vec3d& offset)
 {
@@ -46,6 +60,7 @@ TeleportState MakeState(const WorldPos& nearMouth, const Vec3d& offset)
     s.position        = Translate(nearMouth, offset);
     s.orientation     = Quatf::Identity();
     s.linearVelocity  = Vec3d{ 12.0, -3.0, 5.0 };
+    s.momentum        = Vec3d{ 1200.0, -300.0, 500.0 };
     s.angularVelocity = Vec3d{ 0.1, 0.2, -0.3 };
     s.forceAccum      = Vec3d{ 100.0, 0.0, -50.0 };
     s.torqueAccum     = Vec3d{ 0.0, 7.0, 0.0 };
@@ -74,6 +89,9 @@ TEST_CASE(Ftl_PureTranslationRoundTrip_IsBitExact)
     CHECK_EQ(back.linearVelocity.x, s0.linearVelocity.x);
     CHECK_EQ(back.linearVelocity.y, s0.linearVelocity.y);
     CHECK_EQ(back.linearVelocity.z, s0.linearVelocity.z);
+    CHECK_EQ(back.momentum.x, s0.momentum.x);
+    CHECK_EQ(back.momentum.y, s0.momentum.y);
+    CHECK_EQ(back.momentum.z, s0.momentum.z);
     CheckQuatExact(back.orientation, s0.orientation);
     CHECK_EQ(back.angularVelocity.x, s0.angularVelocity.x);
     CHECK_EQ(back.angularVelocity.y, s0.angularVelocity.y);
@@ -118,6 +136,108 @@ TEST_CASE(Ftl_RotatedMouth_RotatesVelocityAndOrientation)
     // Orientation is the mouth rotation prepended to identity, i.e. the mouth rotation.
     const Quatf expectedOrient = rot * s0.orientation;
     CheckQuatExact(j.orientation, expectedOrient);
+}
+
+// Independent known-answer coverage for BOTH position and vector rotation. This
+// deliberately does not use RotateVec3d to calculate the expected result.
+TEST_CASE(Ftl_RotatedMouth_SingleLegKnownAnswer)
+{
+    const WorldPos entry(0, 0, 0, Vec3d{ 0, 0, 0 });
+    const WorldPos exit(7, -3, 2, Vec3d{ 0, 0, 0 });
+    const Quatf rot = Quatf::FromAxisAngle(core::Vec3f{ 0, 1, 0 }, 1.5707963267948966f);
+    const MouthTransform m = MouthTransform::Wormhole(entry, exit, rot);
+
+    TeleportState s0 = MakeState(entry, Vec3d{ 2.0, 3.0, 4.0 });
+    s0.linearVelocity = Vec3d{ 10.0, 0.0, 0.0 };
+    s0.momentum = Vec3d{ 30.0, 0.0, 0.0 };
+    const TeleportState j = ApplyTeleport(s0, m);
+
+    const Vec3d offset = Separation(exit, j.position);
+    CHECK_APPROX_EPS(offset.x, 4.0, 1e-5);
+    CHECK_APPROX_EPS(offset.y, 3.0, 1e-5);
+    CHECK_APPROX_EPS(offset.z, -2.0, 1e-5);
+    CHECK_APPROX_EPS(j.linearVelocity.x, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.linearVelocity.y, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.linearVelocity.z, -10.0, 1e-5);
+    CHECK_APPROX_EPS(j.momentum.x, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.momentum.y, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.momentum.z, -30.0, 1e-5);
+}
+
+// Mouth data is an external transform boundary. A finite non-unit quaternion is
+// accepted as the rotation it represents and normalized exactly once.
+TEST_CASE(Ftl_NonUnitMouthRotation_IsNormalized)
+{
+    const WorldPos entry(0, 0, 0, Vec3d{ 0, 0, 0 });
+    const WorldPos exit(3, 0, 0, Vec3d{ 0, 0, 0 });
+    const Quatf unit = Quatf::FromAxisAngle(core::Vec3f{ 0, 1, 0 }, 1.5707963267948966f);
+    const Quatf scaled{ unit.x * 2.0f, unit.y * 2.0f, unit.z * 2.0f, unit.w * 2.0f };
+
+    TeleportState s0 = MakeState(entry, Vec3d{ 2.0, 3.0, 4.0 });
+    s0.linearVelocity = Vec3d{ 10.0, 0.0, 0.0 };
+    s0.momentum = Vec3d{ 30.0, 0.0, 0.0 };
+    const TeleportState j = ApplyTeleport(s0, MouthTransform::Wormhole(entry, exit, scaled));
+
+    const Vec3d offset = Separation(exit, j.position);
+    CHECK_APPROX_EPS(offset.x, 4.0, 1e-5);
+    CHECK_APPROX_EPS(offset.y, 3.0, 1e-5);
+    CHECK_APPROX_EPS(offset.z, -2.0, 1e-5);
+    CHECK_APPROX_EPS(j.linearVelocity.x, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.linearVelocity.z, -10.0, 1e-5);
+    CHECK_APPROX_EPS(j.momentum.x, 0.0, 1e-5);
+    CHECK_APPROX_EPS(j.momentum.z, -30.0, 1e-5);
+    CHECK_APPROX_EPS(j.orientation.LengthSq(), 1.0f, 1e-5f);
+}
+
+// Rejected mouth data is transactional: no position, retained state, wrench, or
+// interpolation history may be partially changed.
+TEST_CASE(Ftl_InvalidMouthRotation_LeavesStateUnchanged)
+{
+    const WorldPos entry(0, 0, 0, Vec3d{ 0, 0, 0 });
+    const WorldPos exit(3, 0, 0, Vec3d{ 0, 0, 0 });
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const MouthTransform m = MouthTransform::Wormhole(entry, exit, Quatf{ nan, 0, 0, 1 });
+    const TeleportState s0 = MakeState(entry, Vec3d{ 2.0, 3.0, 4.0 });
+
+    CheckStateExact(ApplyTeleport(s0, m), s0);
+
+    TeleportState out = MakeState(exit, Vec3d{ 9.0, 8.0, 7.0 });
+    CHECK(!TryApplyTeleport(s0, m, out));
+    CheckStateExact(out, s0);
+
+    const Vec3d zero{};
+    CHECK(RotateVec3d(Quatf{ nan, 0, 0, 1 }, Vec3d{ 1, 2, 3 }) == zero);
+    CHECK(RotateVec3d(Quatf::Identity(),
+                      Vec3d{ std::numeric_limits<double>::infinity(), 0, 0 }) == zero);
+
+    TeleportState corrupt = s0;
+    corrupt.momentum.x = std::numeric_limits<double>::infinity();
+    CHECK(!TryApplyTeleport(corrupt, MouthTransform::Wormhole(entry, exit), out));
+    CheckStateExact(out, corrupt);
+}
+
+TEST_CASE(Ftl_TryTeleport_ReportsSuccessAndRejectsUnsafeCoordinates)
+{
+    const WorldPos entry(0, 0, 0, Vec3d{ 0, 0, 0 });
+    const WorldPos exit(3, 0, 0, Vec3d{ 0, 0, 0 });
+    const TeleportState s0 = MakeState(entry, Vec3d{ 2.0, 3.0, 4.0 });
+
+    TeleportState out;
+    const MouthTransform valid = MouthTransform::Wormhole(entry, exit);
+    CHECK(TryApplyTeleport(s0, valid, out));
+    CheckStateExact(out, ApplyTeleport(s0, valid));
+
+    const MouthTransform zeroRotation =
+        MouthTransform::Wormhole(entry, exit, Quatf{ 0, 0, 0, 0 });
+    CHECK(!TryApplyTeleport(s0, zeroRotation, out));
+    CheckStateExact(out, s0);
+
+    const WorldPos invalidExit(kMaxSectorCoord, 0, 0,
+                               Vec3d{ kSectorSize - 1.0, 0, 0 });
+    TeleportState crossing = MakeState(entry, Vec3d{ 10.0, 0.0, 0.0 });
+    CHECK(!TryApplyTeleport(crossing,
+                            MouthTransform::Wormhole(entry, invalidExit), out));
+    CheckStateExact(out, crossing);
 }
 
 // =============================================================================
@@ -283,4 +403,30 @@ TEST_CASE(Ftl_WarpCruise_DeterministicSuperluminalMovingOrigin)
 
     // Proper-time convention: a warp rider ages by dt (7.2), exactly.
     CHECK_EQ(WarpProperTime(dt), dt);
+}
+
+
+// Invalid or unrepresentable fixed steps are no-ops. This prevents a single bad
+// timer sample or overflowed route speed from corrupting the split coordinate.
+TEST_CASE(Ftl_WarpCruise_RejectsInvalidOrOverflowingSteps)
+{
+    const WorldPos origin(9, -4, 2, Vec3d{ 10.0, 20.0, 30.0 });
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double huge = std::numeric_limits<double>::max();
+
+    CHECK(AdvanceWarpOrigin(origin, Vec3d{ 1.0, 2.0, 3.0 }, -1.0) == origin);
+    CHECK(AdvanceWarpOrigin(origin, Vec3d{ 1.0, 2.0, 3.0 }, nan) == origin);
+    CHECK(AdvanceWarpOrigin(origin, Vec3d{ huge, 0.0, 0.0 }, 2.0) == origin);
+    CHECK(IsCanonical(AdvanceWarpOrigin(origin, Vec3d{ huge, 0.0, 0.0 }, 2.0)));
+
+    CHECK_EQ(WarpProperTime(-1.0), 0.0);
+    CHECK_EQ(WarpProperTime(nan), 0.0);
+
+    WorldPos out;
+    CHECK(!TryAdvanceWarpOrigin(origin, Vec3d{ huge, 0.0, 0.0 }, 2.0, out));
+    CHECK(out == origin);
+
+    const Vec3d validVelocity{ 1000.0, -2000.0, 3000.0 };
+    CHECK(TryAdvanceWarpOrigin(origin, validVelocity, 0.5, out));
+    CHECK(out == AdvanceWarpOrigin(origin, validVelocity, 0.5));
 }
