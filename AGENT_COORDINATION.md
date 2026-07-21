@@ -1592,7 +1592,7 @@ are now integrated as well. The current order is:
 
 ### WS-023: Transactional cooked-assembly resource resolution
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: consume one immutable `CookedAssembly`, resolve every referenced
   visual, collision, LOD, navmesh, walkable-surface, and moving-part locator
   into a typed immutable catalog identity, and publish either a complete binding
@@ -1655,8 +1655,13 @@ are now integrated as well. The current order is:
   configurations. The full combined build/test matrices also pass after the
   clean rebase onto `f81a2e8`.
 - Latest commit: `026b05b`
-- Next action: fast-forward the reviewed branch into `main`, push, require the
-  Windows Debug/Release GitHub CI jobs to pass, then close and retire WS-023
+- Integration: fast-forwarded to `main` at `4b7a0ba`; GitHub CI run
+  `29841066365` passed the Windows/MSVC Debug and Release build/test jobs.
+- Next action: claim a separate transactional runtime-assembly prepare/commit
+  workstream before translating resolved visual identities into scene resources
+  or constructing ECS entities. That lane must define rollback, lifetime/lease,
+  and owning-system handoff rules for visual, collision, navigation, pressure,
+  interaction, portal, and moving-part state without collapsing their ownership.
 
 ## 20. Helper Commands
 
