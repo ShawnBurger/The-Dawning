@@ -276,6 +276,14 @@ TEST_CASE(AssemblyResourceResolver_RejectsMissingStaleAndFailedCatalogQueries)
     CheckFailure(
         asset::ResolveAssemblyResources(assembly, failed),
         asset::AssemblyResourceResolutionStatus::CatalogError);
+
+    FakeCatalog unknownStatus = MakeCatalog();
+    unknownStatus.entries[{
+        asset::AssemblyResourceKind::Visual, "shared://surface"
+    }].status = static_cast<asset::AssemblyCatalogLookupStatus>(127);
+    CheckFailure(
+        asset::ResolveAssemblyResources(assembly, unknownStatus),
+        asset::AssemblyResourceResolutionStatus::CatalogError);
 }
 
 TEST_CASE(AssemblyResourceResolver_RejectsMalformedAndWrongKindIdentities)
@@ -358,6 +366,23 @@ TEST_CASE(AssemblyResourceResolver_BoundsUntrustedCatalogDiagnostics)
         asset::AssemblyResourceResolutionStatus::CatalogNotFound);
     CHECK(result.error.size() < (size_t)256);
     CHECK(result.error.ends_with("xxxxxxx"));
+
+    catalog = MakeCatalog();
+    auto& utf8 = catalog.entries[{
+        asset::AssemblyResourceKind::Visual, "shared://surface"
+    }];
+    utf8.status = asset::AssemblyCatalogLookupStatus::NotFound;
+    utf8.error = "aaaaaa";
+    const unsigned char utf8Lead = 0xc3u;
+    const unsigned char utf8Continuation = 0xa9u;
+    utf8.error.push_back(static_cast<char>(utf8Lead));
+    utf8.error.push_back(static_cast<char>(utf8Continuation));
+    const auto utf8Result =
+        asset::ResolveAssemblyResources(assembly, catalog, limits);
+    CheckFailure(
+        utf8Result,
+        asset::AssemblyResourceResolutionStatus::CatalogNotFound);
+    CHECK(utf8Result.error.ends_with("aaaaaa"));
 }
 
 TEST_CASE(AssemblyResourceResolver_RejectsUnsafeLocatorsAndResourceAmplification)

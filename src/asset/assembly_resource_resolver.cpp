@@ -180,6 +180,27 @@ std::string LocatorPreview(std::string_view locator)
     return result;
 }
 
+std::string ExternalErrorPreview(std::string_view error, uint32_t maxBytes)
+{
+    if (error.empty() || maxBytes == 0)
+        return {};
+    size_t prefixBytes = (std::min)(error.size(), static_cast<size_t>(maxBytes));
+    while (prefixBytes > 0 && prefixBytes < error.size() &&
+           (static_cast<unsigned char>(error[prefixBytes]) & 0xc0u) == 0x80u)
+    {
+        --prefixBytes;
+    }
+    const std::string_view prefix = error.substr(0, prefixBytes);
+    if (!IsValidUtf8(prefix) ||
+        std::any_of(prefix.begin(), prefix.end(), [](unsigned char value) {
+            return value < 0x20 || value == 0x7f;
+        }))
+    {
+        return {};
+    }
+    return std::string(prefix);
+}
+
 std::string LookupFailureMessage(
     std::string_view prefix,
     const Request& request,
@@ -192,12 +213,12 @@ std::string LookupFailureMessage(
     result += " resource '";
     result += LocatorPreview(request.locator);
     result += "'";
-    if (!catalogError.empty() && maxCatalogErrorBytes > 0)
+    const std::string detail =
+        ExternalErrorPreview(catalogError, maxCatalogErrorBytes);
+    if (!detail.empty())
     {
         result += ": ";
-        result.append(
-            catalogError.data(),
-            (std::min)(catalogError.size(), static_cast<size_t>(maxCatalogErrorBytes)));
+        result += detail;
     }
     return result;
 }

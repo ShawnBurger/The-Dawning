@@ -113,8 +113,9 @@ Resolution rejects:
 
 Default limits are one million field bindings, 500,000 unique requests, and one
 MiB per locator. Catalog error copying defaults to 1,024 bytes and has a 64 KiB
-hard ceiling. Locator previews are capped at 128 bytes without splitting a UTF-8
-code point.
+hard ceiling. Catalog error excerpts are included only when they are printable,
+valid UTF-8 and are truncated at a code-point boundary. Locator previews are
+capped at 128 bytes under the same boundary rule.
 
 Allocation failure has a distinct status. Catalog exceptions are contained and
 reported without publication. Internal construction happens in private local
