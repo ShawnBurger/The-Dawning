@@ -575,20 +575,20 @@ assumption. Shared application wiring remains an integration task.
 
 ## 19. Current Priority and Workstreams
 
-The active split deliberately crosses the agents' earlier specialty defaults.
-Claude already owns Stage 0; Codex owns the playable ship and the next sequential
-asset/render lanes. The current order is:
+The first parallel split is complete: Claude's active-system N-body core and
+Codex's playable-ship vertical slice are both on `main`. The current order is:
 
-1. Merge this coordination contract.
-2. In parallel: Claude builds the active-system N-body core on the merged Stage 0
-   foundation while Codex builds the first playable-ship vertical slice.
-3. Codex closes the remaining glTF/content-pipeline gap after the playable ship
-   reaches review; do not run two Codex implementation lanes at once.
-4. Codex takes the next scoped shadow/rendering improvement after the glTF lane.
-5. Claude continues the later relativistic, dilation, atmosphere, and FTL stages
-   after the N-body core reaches review.
-6. Route flight assist through real actuator limits and expose thruster state.
-7. Add collision/close-encounter policy before production N-body activation.
+1. Codex closes the remaining glTF/content-pipeline gap in WS-005; do not run a
+   second Codex implementation lane at the same time.
+2. Claude registers the next relativistic/time-dilation workstream before editing
+   `claude/sim-relativity`, with Codex assigned as reviewer.
+3. Codex takes the next scoped shadow/rendering improvement after WS-005 reaches
+   review.
+4. Route coupled flight assist through real actuator limits so both flight modes
+   expose physical thruster state.
+5. Add collision/close-encounter policy before production N-body activation.
+6. Continue the staged atmosphere and FTL modules only through registered,
+   independently reviewable workstreams.
 
 ### WS-001: Coordination contract
 
@@ -658,7 +658,7 @@ asset/render lanes. The current order is:
 
 ### WS-007: Active-system N-body core
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: conservative active-system N-body gravity with deterministic pair
   order, bounded long-run error, close-encounter detection, and inactive-system
   Kepler LOD boundaries
@@ -680,37 +680,46 @@ asset/render lanes. The current order is:
   timestep convergence, and active/on-rails continuity
 - Negative controls: unstable/naive integration or double-applied primary gravity
   must fail; close encounters must not silently pass through softening
-- Latest commit: branch currently starts at `b2b2976`
-- Next action: Claude scopes and implements the first committed N-body slice;
-  Codex does not enter or edit the worktree
+- Latest commit: `04781a0` on `claude/sim-nbody`, merged to `main` by
+  `277aec3`
+- Next action: retire the clean N-body worktree after audit; register a new
+  workstream before implementation begins on `claude/sim-relativity`
 
 ### WS-004: Playable-ship vertical slice
 
-- Status: PLANNED
+- Status: MERGED
 - Outcome: one production ship entity controlled through the merged six-axis
   flight model, with coupled/decoupled mode and visible real-thruster feedback
 - Primary: Codex
 - Reviewer: Claude
-- Branch: `codex/playable-ship-slice` when created
-- Worktree: dedicated `codex-playable-ship-slice` worktree
-- Base commit: current clean `main` after WS-001 integration
-- Owned paths: new gameplay/input code and focused tests; declared scene/app
-  integration points only
+- Branch: `codex/playable-ship-slice`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-playable-ship-slice`
+- Base commit: `0e33c27`
+- Owned paths: `src/gameplay/playable_ship.h`, `src/app.cpp`, `src/app.h`,
+  `tests/test_flight_control.cpp`, and the controls/smoke sections of `README.md`
 - Excluded paths: `src/sim/reference_frame.*`, Claude's Stage 0 worktree, orbital
   and relativistic internals
-- Shared-file locks: `src/scene/scene.*`, `src/app.*`, and any required
-  `src/ecs/components.h` additions locked to WS-004; `CMakeLists.txt` remains
-  integration-only while WS-003 is active
+- Shared-file locks: released; no `CMakeLists.txt`, `src/ecs/components.h`, or
+  `src/scene/scene.*` change was required
 - Interface contract: consume existing `RigidBody`, `ThrusterSet`, and
   `FlightControl`; do not redesign Claude's coordinate foundation
-- Dependencies: WS-001 merged; existing Flight Stages 1/2 on `main`
+- Dependencies: WS-001 and Flight Stages 1/2 merged; integrated alongside the
+  disjoint WS-007 N-body changes
 - Acceptance gates: input snapshot to six-axis demand, mode toggle, fixed-step
   determinism, actual thruster-state feedback, Debug/Release tests, full smoke
 - Negative controls: no input leaves throttle zero; decoupled coast does not
   receive assist; a rigid body is integrated exactly once
-- Latest commit: none
-- Next action: create the worktree and inspect current input/scene ownership after
-  WS-001 is accepted
+- Latest commit: `624b163` on the task branch, merged to `main` by `af49470`
+- Review note: two local Claude reviews and one Claude `ultrareview` returned no
+  result before their timeouts. Shawn explicitly deferred reciprocal review for
+  later manual completion; this is review debt, not an approval.
+- Acceptance result: Debug and Release builds pass; the combined tree passes 239
+  CPU cases and 9,488 checks plus raster, stable-DXR, and full-DXR smoke. The
+  deterministic flight profile reports decoupled mode, 4.833 m/s, main throttle
+  1.000, and three additional throttle-driven exhaust draws.
+- Next action: perform the deferred manual Claude review when available; WS-005
+  may proceed from current `main` under the owner-approved review exception
 
 ### WS-005: glTF/content-pipeline closure
 
