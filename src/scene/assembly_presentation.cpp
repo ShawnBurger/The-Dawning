@@ -104,6 +104,7 @@ bool Compose(
     const ecs::Transform& local,
     ecs::Transform& world)
 {
+    const core::Quatf rootRotation = root.rotation.Normalized();
     const double scaledX = local.position.x * root.scale.x;
     const double scaledY = local.position.y * root.scale.y;
     const double scaledZ = local.position.z * root.scale.z;
@@ -116,7 +117,7 @@ bool Compose(
         return false;
     }
 
-    const core::Vec3f rotated = root.rotation.Rotate({
+    const core::Vec3f rotated = rootRotation.Rotate({
         static_cast<float>(scaledX),
         static_cast<float>(scaledY),
         static_cast<float>(scaledZ)
@@ -125,7 +126,7 @@ bool Compose(
     if (!Finite(world.position))
         return false;
 
-    world.rotation = (root.rotation * local.rotation).Normalized();
+    world.rotation = (rootRotation * local.rotation).Normalized();
     if (!UnitRotation(world.rotation))
         return false;
 

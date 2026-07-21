@@ -194,24 +194,15 @@ root fields.
 - Debug and Release CPU, CTest, raster, stable-DXR, full-DXR, artifact, and GPU
   validation gates pass.
 
-## Deliberate Limitation And Required Follow-On
+## Resolved Follow-On: Stage 5E
 
-The live player ship is still a prototype cube, while the instantiated module
-and moving-part render entities retain their authored world transforms. Stage
-5D makes possession and camera movement correct around the live logical root;
-it does not falsely claim that the production presentation hierarchy follows
-that root.
-
-The next isolated lane must:
-
-1. make one production assembly root the authoritative ship entity;
-2. preserve immutable module/moving-part local transforms;
-3. compose every presentation transform from the live root each frame or fixed
-   publication point without drift;
-4. connect the rigid body, thrusters, collision, interior, and render hierarchy
-   to that same identity;
-5. remove the prototype cube only after raster and DXR capture gates prove the
-   cooked hierarchy is visible, framed, and moving correctly.
+Stage 5E completed this document's required root/presentation follow-on. The
+committed meshless assembly root is now the sole playable ship entity, prepared
+module and moving-part poses are assembly-local, and the runtime host composes a
+validated complete world-transform batch after every accepted fixed step. The
+interactive prototype cube is removed. See
+`AUTHORITATIVE_ASSEMBLY_ROOT_PRESENTATION_2026-07-21.md` for the live contract,
+failure semantics, and validation surface.
 
 EVA, arbitrary gravity, pressure, navmesh, animation, multiplayer authority,
 and save/load possession remain separate contracts.

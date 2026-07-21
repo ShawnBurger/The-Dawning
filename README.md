@@ -18,6 +18,10 @@ Do not merge old snapshots directly into this source tree.
 - Versioned `.tdcontent` deployment manifests that bind exact cooked assembly
   locators to immutable model/contract owners and publish the complete ECS graph
   transactionally after GPU upload retirement.
+- One meshless committed assembly root is the playable ship identity. Flight,
+  gravity, possession, chase camera, and thruster feedback use that root while
+  immutable local module/moving-part poses are transactionally composed into
+  world render transforms after every accepted fixed step.
 - Deterministic authored interior interactions with reversible moving parts,
   camera-relative nearest use, portal passability, and topology-bound snapshots.
 - Layer 4 material work is partially landed: albedo/normal textures,
@@ -97,11 +101,13 @@ is the expected size, is not essentially black, is not blown out, has a
 reasonable fraction of non-black pixels, and contains more than a handful of
 distinct colours.
 
-For a deterministic playable-ship capture, launch the executable with
-`--smoke --smoke-flight --smoke-capture`. The opt-in profile switches to
-decoupled flight and holds forward thrust over the final twelve fixed steps, so
-the capture and `[SMOKE] playable_ship=ok` marker exercise physical nozzle
-throttle, ship motion, chase-camera ownership, and exhaust feedback together.
+For a deterministic playable-ship motion test, run
+`tools\smoke_test.ps1 -Flight`. The opt-in profile switches to decoupled flight
+and holds forward thrust over the final twelve fixed steps. It requires the
+assembly root and a real module to move together, then checks physical nozzle
+throttle and exhaust feedback. The smoke-only camera remains on its isolated
+center probe so the renderer's cascade negative control keeps a stable signal;
+ordinary interactive chase-camera ownership remains on the assembly root.
 
 In raster mode the harness additionally probes the shadow map itself, reading
 back a 256x256 window from its centre and asserting that the depth pass

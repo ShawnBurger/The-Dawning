@@ -161,6 +161,39 @@ TEST_CASE(AssemblyPresentation_RootMotionNeverAccumulatesChildDrift)
     CheckRotationDirection(movingWorld[0].rotation, firstMoving.rotation);
 }
 
+TEST_CASE(AssemblyPresentation_NormalizesAcceptedRootBeforeComposition)
+{
+    ecs::Transform local;
+    local.position = { 2.0, 1.0, -3.0 };
+    std::vector<scene::PreparedAssemblyModule> modules{ Module(0, local) };
+    std::vector<scene::PreparedAssemblyMovingPart> noParts;
+    std::vector<ecs::Transform> noMoving;
+    std::vector<ecs::Transform> moduleWorld(1);
+    std::vector<ecs::Transform> noMovingWorld;
+
+    ecs::Transform root;
+    const core::Quatf unit =
+        core::Quatf::FromAxisAngle({ 0.0f, 1.0f, 0.0f }, 0.65f);
+    constexpr float acceptedLengthBias = 1.0002f;
+    root.rotation = {
+        unit.x * acceptedLengthBias,
+        unit.y * acceptedLengthBias,
+        unit.z * acceptedLengthBias,
+        unit.w * acceptedLengthBias
+    };
+
+    CHECK(scene::StageAssemblyPresentation(
+        root,
+        modules,
+        noParts,
+        noMoving,
+        moduleWorld,
+        noMovingWorld).Succeeded());
+    const core::Vec3f expected = unit.Rotate(local.position.ToFloat());
+    CheckPosition(moduleWorld[0].position, core::Vec3d::FromFloat(expected));
+    CheckRotationDirection(moduleWorld[0].rotation, unit);
+}
+
 TEST_CASE(AssemblyPresentation_RejectsMalformedRootAndTopology)
 {
     std::vector<scene::PreparedAssemblyModule> modules{
@@ -174,6 +207,18 @@ TEST_CASE(AssemblyPresentation_RejectsMalformedRootAndTopology)
     std::vector<ecs::Transform> movingWorld(1);
 
     ecs::Transform root;
+    root.position.x = (std::numeric_limits<double>::quiet_NaN)();
+    CHECK_EQ(
+        scene::StageAssemblyPresentation(
+            root, modules, parts, movingLocals, moduleWorld, movingWorld).status,
+        scene::AssemblyPresentationStatus::InvalidRoot);
+    root = {};
+    root.scale.x = 0.0f;
+    CHECK_EQ(
+        scene::StageAssemblyPresentation(
+            root, modules, parts, movingLocals, moduleWorld, movingWorld).status,
+        scene::AssemblyPresentationStatus::InvalidRoot);
+    root = {};
     root.scale = { 1.0f, 1.01f, 1.0f };
     CHECK_EQ(
         scene::StageAssemblyPresentation(
@@ -218,6 +263,13 @@ TEST_CASE(AssemblyPresentation_RejectsInvalidLocalAndOverflowWithoutRootNarrowin
     ecs::Transform root;
 
     modules[0].localTransform.position.x = 1.0e8;
+    CHECK_EQ(
+        scene::StageAssemblyPresentation(
+            root, modules, noParts, noMoving, moduleWorld, noMovingWorld).status,
+        scene::AssemblyPresentationStatus::InvalidLocalTransform);
+
+    modules[0].localTransform = {};
+    modules[0].localTransform.rotation.w = 0.5f;
     CHECK_EQ(
         scene::StageAssemblyPresentation(
             root, modules, noParts, noMoving, moduleWorld, noMovingWorld).status,

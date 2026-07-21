@@ -36,6 +36,9 @@ design work. For the user-facing baseline, also read the root `README.md` and
 - **`PILOT_SEAT_POSSESSION_AND_SHIP_ROOT_BOUNDARY_2026-07-21.md`** - current
   Stage 5D seat transaction, exclusive input ownership, live ship-root camera,
   and possession acceptance contract.
+- **`AUTHORITATIVE_ASSEMBLY_ROOT_PRESENTATION_2026-07-21.md`** - current Stage
+  5E playable-root identity, immutable local-pose model, transactional fixed-step
+  child publication, and smoke-probe isolation contract.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
   **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
   and change reviews; useful provenance, not timeless status.
