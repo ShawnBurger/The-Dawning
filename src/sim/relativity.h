@@ -24,10 +24,10 @@
 //     v = p / sqrt(m² + (|p|/c)²)          (exact inverse of p = γ m v)
 // The radicand m² + (|p|/c)² is strictly positive for m > 0 and grows without
 // bound with |p|, so |v| = |p| / sqrt(m² + (|p|/c)²) < |p| / (|p|/c) = c for
-// EVERY finite p — a structural property of the stored state, with NO γ to blow
-// up and NO clamp. γ itself is taken as sqrt(1 + (|p|/(mc))²), which never
-// overflows for finite p (computed via std::hypot to dodge the intermediate
-// square's overflow at absurd |p|). This is the whole reason momentum-space beat
+// EVERY finite p — a structural property of the stored state, with NO γ singularity
+// in the dynamics path. γ itself is taken as sqrt(1 + (|p|/(mc))²); scaled norms
+// avoid intermediate overflow, and an unrepresentable γ saturates at double max.
+// This is the whole reason momentum-space beat
 // the velocity-space form on every review lens: robustness by construction, not
 // by band-aid over a form that can NaN.
 //
@@ -58,33 +58,35 @@ using core::Vec3d;
 // 1. MOMENTUM-SPACE RELATIVISTIC DYNAMICS (§3)
 // =============================================================================
 
-// γ from momentum: γ = sqrt(1 + (|p|/(mc))²). NEVER overflows for finite p
-// (unlike 1/sqrt(1−β²), which divides by zero at v=c). Computed with hypot so
-// the intermediate square cannot overflow even at astronomically large |p|.
-// restMass must be > 0; a non-positive mass returns 1.0 (the house-guard limit).
+// γ from momentum: γ = sqrt(1 + (|p|/(mc))²). The implementation scales all
+// four norm terms before squaring and saturates at double max only when the true
+// γ is itself unrepresentable. Invalid mass or momentum returns the neutral 1.0.
 double GammaFromMomentum(const Vec3d& momentum, double restMass);
 
 // Recover velocity from momentum: v = p / sqrt(m² + (|p|/c)²) = p / (m·γ). The
-// STRUCTURAL sub-c guarantee lives here — |v| < c for every finite p.
+// STRUCTURAL sub-c guarantee lives here — |v| < c for every finite p. A scaled
+// norm avoids Vec3d::Length's raw-square overflow at extreme finite momentum.
 Vec3d VelocityFromMomentum(const Vec3d& momentum, double restMass);
 
 // Momentum from velocity: p = γ m v = m v / sqrt((1−β)(1+β)). The INVERSE
 // direction is NOT structurally bounded (it blows up as |v| → c), so β is
 // clamped to kBetaMax as defense-in-depth for this direction only (used to SEED
-// p from an initial sub-c velocity, never in the dynamics path). 1−β² is formed
-// as (1−β)(1+β) to stay precise near c.
+// p from an initial sub-c velocity, never in the dynamics path). The input is
+// normalized and rescaled to that bounded speed; non-finite input is rejected.
 Vec3d MomentumFromVelocity(const Vec3d& velocity, double restMass);
 
 // Relativistic kinetic energy KE = (γ−1) m c², computed stably as
-// |p|² / (m (γ+1)) so the (γ−1) cancellation near β=0 is avoided. Reduces to the
-// Newtonian ½ m v² = |p|²/(2m) as β → 0.
+// |p|² / (m (γ+1)) so the (γ−1) cancellation near β=0 is avoided. Its scaled
+// form also avoids squaring raw |p| and saturates only if energy is unrepresentable.
 double RelativisticKineticEnergy(const Vec3d& momentum, double restMass);
 
 // Rapidity φ (additive SR convenience, §3 research note): p = m c sinh φ, so
 // φ = asinh(|p|/(mc)); the speed is v = c tanh φ. Momentum stays the state —
 // these are provided because rapidity is the natural additive variable, not
-// because anything advances φ.
+// because anything advances φ. A logarithmic fallback keeps φ finite when the
+// intermediate |p|/(mc) ratio would overflow even though φ remains representable.
 double RapidityFromMomentum(const Vec3d& momentum, double restMass);
+// Signed one-dimensional speed from rapidity; non-finite input is rejected to 0.
 double SpeedFromRapidity(double rapidity);
 
 // One relativistic force step, momentum-space (§3.1, §3.3). Advances momentum by
@@ -92,8 +94,9 @@ double SpeedFromRapidity(double rapidity);
 // Returns the new momentum and writes the recovered velocity into velocityOut;
 // the caller does position += velocityOut·dt (the position update is unchanged
 // in form — this is a thin momentum↔velocity adapter, NOT a new integrator).
-// House guard: dt <= 0 or non-finite is a no-op (momentum unchanged, velocityOut
-// = the current recovered velocity), matching rigid_body.cpp / nbody.cpp.
+// Invalid mass, force, timestep, or an overflowing update is a no-op. A corrupt
+// non-finite incoming momentum is contained as zero momentum and velocity rather
+// than being propagated into persistent state.
 Vec3d RelativisticMomentumStep(const Vec3d& momentum, const Vec3d& force,
                                double restMass, double dt, Vec3d& velocityOut);
 
@@ -122,7 +125,8 @@ inline constexpr double kBetaMax = 1.0 - 1e-12;
 double OneMinusBetaSq(double beta);
 
 // SR factor dτ/dt = sqrt(1 − β²) = sqrt((1−β)(1+β)). β is clamped to kBetaMax
-// defense-in-depth so the sqrt is real even if a caller hands in β ≥ 1.
+// defense-in-depth so the sqrt is real even if a caller hands in β ≥ 1. A
+// non-finite caller value is rejected to the neutral factor 1.
 double SRDilationFactor(double beta);
 
 // (SR factor − 1), cancellation-free: sqrt(1−β²) − 1 = −β² / (1 + sqrt(1−β²)).
@@ -132,19 +136,22 @@ double SRDilationFactorMinusOne(double beta);
 
 // ---- GR gravitational dilation ----------------------------------------------
 
-// Schwarzschild radius r_s = 2μ/c² (μ = GM). Same μ the N-body force uses.
+// Schwarzschild radius r_s = 2μ/c² (μ = GM). The division-first form avoids
+// overflowing 2μ, and invalid/negative μ is rejected to 0.
 double SchwarzschildRadius(double mu);
 
 // r floored at the SHARED softening (nbody.h SofteningLength) so the clock stays
 // finite at/inside the softened radius — no horizon NaN. `softening` MUST be the
 // value the caller got from sim::SofteningLength(mu, radius): gravity and the
-// clock then floor r at exactly the same place (§2.6, §5.4).
+// clock then floor r at exactly the same place (§2.6, §5.4). An invalid
+// softening falls back to the shared base rather than returning NaN.
 double FlooredRadius(double r, double softening);
 
 // GR factor dτ/dt = sqrt(1 − r_s/r), with r floored at `softening`. Because the
 // softening floor is ≥ r_s + kSofteningBase > r_s, the radicand 1 − r_s/r_floored
 // is strictly in (0, 1] — real and finite, the unsoftened horizon NaN designed
-// out. Weak field (r_s ≪ r) it approaches 1.
+// out. Weak field (r_s ≪ r) it approaches 1. Invalid μ/softening is rejected to
+// the neutral factor 1; a caller-supplied sub-horizon floor is bounded at 0.
 double GRDilationFactor(double mu, double r, double softening);
 
 // (GR factor − 1), cancellation-free: sqrt(1 − r_s/r) − 1 = −(r_s/r)/(1+sqrt(...)).
@@ -172,19 +179,22 @@ double CombinedDilationFactorMinusOne(double beta, double mu, double r, double s
 
 // Per-step deviation dτ − dt = dt·(factor − 1). Feed it a *MinusOne quantity
 // (factorMinusOne = factor − 1), NOT a factor, so the tiny residual is exact.
+// Invalid dt or a value outside [-1,0] returns 0.
 double ProperTimeDeviationStep(double factorMinusOne, double dt);
 
 // Advance a clock by one fixed step: coordinateTime += dt and
 // properTimeDeviation += dt·factorMinusOne. NEVER τ += dτ — the deviation is
 // accumulated in isolation so it is not drowned by coordinate-time magnitude
-// over a long trip (the whole point of the sidecar). House guard: dt <= 0 or
-// non-finite, or a non-finite factor, leaves the clock untouched (deficit += 0,
-// §2.6). `factorMinusOne` is (dτ/dt − 1), e.g. from CombinedDilationFactorMinusOne.
+// over a long trip (the whole point of the sidecar). Invalid dt, overflow, or a
+// factorMinusOne outside [-1,0] leaves the clock untouched; a non-finite existing
+// clock is reset to a finite zero sidecar before it can persist further.
+// `factorMinusOne` is (dτ/dt − 1), e.g. from CombinedDilationFactorMinusOne.
 void AdvanceClock(ecs::RelativisticClock& clock, double factorMinusOne, double dt);
 
 // Accumulated proper time τ = coordinateTime + properTimeDeviation. This is a
 // RECONSTRUCTION, not a running τ += dτ, so the deviation kept its precision the
-// whole way and only meets the large magnitude once, here, on demand.
+// whole way and only meets the large magnitude once, here, on demand. Invalid or
+// overflowing clock state is contained as 0.
 double ProperTime(const ecs::RelativisticClock& clock);
 
 // =============================================================================
@@ -217,7 +227,7 @@ double ProperTime(const ecs::RelativisticClock& clock);
 
 // The body's velocity expressed in the master frame (translation-only frames):
 // ResolveWorldVel(body) − masterFrame.velocity. This is the CORRECT velocity for
-// SR dilation.
+// SR dilation. Invalid frame ids or non-finite composed velocity return zero.
 Vec3d VelocityInMasterFrame(const FrameGraph& graph, const Body& body, FrameId masterFrame);
 
 // β = |v_master| / c — the CORRECT, frame-consistent β for SR dilation. Use this

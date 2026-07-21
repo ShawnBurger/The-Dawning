@@ -32,6 +32,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace
 {
@@ -42,6 +43,32 @@ constexpr double c  = kSpeedOfLight;
 constexpr double c2 = kSpeedOfLight * kSpeedOfLight;
 
 double RelErr(double a, double b) { return std::fabs(a - b) / std::fabs(b); }
+
+bool IsFinite(const Vec3d& v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+struct RelativisticTrajectory
+{
+    Vec3d position;
+    Vec3d momentum;
+};
+
+RelativisticTrajectory IntegrateConstantForce(double dt, int steps)
+{
+    constexpr double mass = 1250.0;
+    const Vec3d force{ 8.0e9, -2.0e9, 1.0e9 };
+    RelativisticTrajectory state;
+    Vec3d velocity;
+    for (int i = 0; i < steps; ++i)
+    {
+        state.momentum = sim::RelativisticMomentumStep(
+            state.momentum, force, mass, dt, velocity);
+        state.position += velocity * dt;
+    }
+    return state;
+}
 
 // Closed-form Lorentz γ from β (the textbook 1/√(1−β²)); used as GROUND TRUTH at
 // moderate β where it is well-conditioned.
@@ -119,12 +146,10 @@ TEST_CASE(Relativity_VelocityRecovery_NeverReachesC_EvenAtHugeMomentum)
     }
 
     // At ASTRONOMICAL momentum the rest-mass term underflows relative to (|p|/c)²
-    // and |v| rounds to exactly c (the supremum). The structural guarantee that
-    // floating point can honour is: |v| NEVER EXCEEDS c and NEVER NaNs — never a
-    // >c overshoot, never the γ overflow the naive form produces. (Capped at 1e150:
-    // above ~1e154 the foundation Vec3d::Length itself overflows squaring |p|, a
-    // types.h limit far beyond any physical momentum, not a limit of this formula.)
-    for (double pMag : { 1.0e30, 1.0e150 })
+    // and |v| rounds to the representable value immediately below c. The scaled
+    // recovery never squares the raw momentum, so this remains finite well above
+    // Vec3d::Length's ~1e154 overflow boundary.
+    for (double pMag : { 1.0e30, 1.0e150, 1.0e300 })
     {
         const Vec3d v = sim::VelocityFromMomentum(Vec3d{ pMag, 0.0, 0.0 }, m);
         CHECK(v.Length() <= c);
@@ -509,4 +534,156 @@ TEST_CASE(Relativity_MomentumStep_HouseGuard)
     CHECK(pNan.x == p0.x);
     // velocityOut still holds the recovered velocity of the unchanged momentum.
     CHECK(RelErr(v.Length(), sim::VelocityFromMomentum(p0, m).Length()) < 1e-12);
+}
+
+TEST_CASE(Relativity_FiniteExtremeMomentumRemainsFiniteAndApproachesC)
+{
+    const Vec3d p{ 1.0e200, -2.0e200, 3.0e200 };
+    const double mass = 2.0;
+
+    const Vec3d velocity = sim::VelocityFromMomentum(p, mass);
+    const double gamma = sim::GammaFromMomentum(p, mass);
+    const double energy = sim::RelativisticKineticEnergy(p, mass);
+
+    CHECK(IsFinite(velocity));
+    CHECK(velocity.Length() > 0.999999 * c);
+    CHECK(velocity.Length() <= c);
+    CHECK(std::isfinite(gamma));
+    CHECK(gamma > 1.0e180);
+    CHECK(std::isfinite(energy));
+    CHECK(energy > 1.0e200);
+
+    const double rapidity = sim::RapidityFromMomentum(p, 1.0e-200);
+    CHECK(std::isfinite(rapidity));
+    CHECK(rapidity > 800.0);
+
+    const double huge = std::numeric_limits<double>::max() * 0.75;
+    const Vec3d multiAxis{ huge, -huge, huge };
+    const Vec3d multiVelocity = sim::VelocityFromMomentum(multiAxis, mass);
+    CHECK(IsFinite(multiVelocity));
+    CHECK(multiVelocity.Length() <= c);
+    CHECK(std::isfinite(sim::GammaFromMomentum(multiAxis, mass)));
+    CHECK(std::isfinite(sim::RelativisticKineticEnergy(multiAxis, mass)));
+}
+
+TEST_CASE(Relativity_InvalidAndOverflowingUpdatesAreRejected)
+{
+    const Vec3d p0{ 10.0, -20.0, 30.0 };
+    const Vec3d force{ 4.0, 5.0, 6.0 };
+    Vec3d velocity;
+
+    const Vec3d badMass = sim::RelativisticMomentumStep(p0, force, 0.0, 1.0, velocity);
+    CHECK_EQ(badMass.x, p0.x);
+    CHECK_EQ(badMass.y, p0.y);
+    CHECK_EQ(badMass.z, p0.z);
+    CHECK(IsFinite(velocity));
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const Vec3d badForce = sim::RelativisticMomentumStep(
+        p0, Vec3d{ nan, 0.0, 0.0 }, 1.0, 1.0, velocity);
+    CHECK_EQ(badForce.x, p0.x);
+    CHECK_EQ(badForce.y, p0.y);
+    CHECK_EQ(badForce.z, p0.z);
+    CHECK(IsFinite(velocity));
+
+    const double large = std::numeric_limits<double>::max() * 0.75;
+    const Vec3d pLarge{ large, 0.0, 0.0 };
+    const Vec3d overflow = sim::RelativisticMomentumStep(
+        pLarge, Vec3d{ large, 0.0, 0.0 }, 1.0, 1.0, velocity);
+    CHECK_EQ(overflow.x, pLarge.x);
+    CHECK(IsFinite(overflow));
+    CHECK(IsFinite(velocity));
+
+    const Vec3d corrupt = sim::RelativisticMomentumStep(
+        Vec3d{ nan, 1.0, 2.0 }, force, 1.0, 1.0, velocity);
+    CHECK_EQ(corrupt.x, 0.0);
+    CHECK_EQ(corrupt.y, 0.0);
+    CHECK_EQ(corrupt.z, 0.0);
+    CHECK_EQ(velocity.LengthSq(), 0.0);
+}
+
+TEST_CASE(Relativity_SeedVelocityIsBoundedAndNonFiniteInputIsRejected)
+{
+    const Vec3d superluminal{ 2.0 * c, 0.0, 0.0 };
+    const Vec3d p = sim::MomentumFromVelocity(superluminal, 3.0);
+    const Vec3d recovered = sim::VelocityFromMomentum(p, 3.0);
+    CHECK(IsFinite(p));
+    CHECK(recovered.Length() / c <= sim::kBetaMax);
+
+    const double inf = std::numeric_limits<double>::infinity();
+    const Vec3d invalid = sim::MomentumFromVelocity(Vec3d{ inf, 0.0, 0.0 }, 3.0);
+    CHECK_EQ(invalid.LengthSq(), 0.0);
+    CHECK_EQ(sim::SRDilationFactor(inf), 1.0);
+    CHECK_EQ(sim::SRDilationFactorMinusOne(inf), 0.0);
+    CHECK_EQ(sim::SRDilationFactor(std::numeric_limits<double>::quiet_NaN()), 1.0);
+}
+
+TEST_CASE(Relativity_ClockRejectsFactorsOutsidePhysicalDomain)
+{
+    ecs::RelativisticClock clock;
+    sim::AdvanceClock(clock, 0.1, 2.0);
+    CHECK_EQ(clock.coordinateTime, 0.0);
+    CHECK_EQ(clock.properTimeDeviation, 0.0);
+
+    sim::AdvanceClock(clock, -1.1, 2.0);
+    CHECK_EQ(clock.coordinateTime, 0.0);
+    CHECK_EQ(clock.properTimeDeviation, 0.0);
+
+    sim::AdvanceClock(clock, -0.25, 2.0);
+    CHECK_EQ(clock.coordinateTime, 2.0);
+    CHECK_EQ(clock.properTimeDeviation, -0.5);
+}
+
+TEST_CASE(Relativity_PublicHelpersContainInvalidState)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    CHECK_EQ(sim::SpeedFromRapidity(nan), 0.0);
+    CHECK_EQ(sim::ProperTimeDeviationStep(0.1, 1.0), 0.0);
+    CHECK_EQ(sim::ProperTimeDeviationStep(-1.1, 1.0), 0.0);
+    CHECK_EQ(sim::ProperTimeDeviationStep(-0.25, 2.0), -0.5);
+
+    CHECK_EQ(sim::SchwarzschildRadius(nan), 0.0);
+    CHECK_EQ(sim::SchwarzschildRadius(-1.0), 0.0);
+    CHECK_EQ(sim::GRDilationFactor(1.0, 10.0, nan), 1.0);
+    CHECK_EQ(sim::GRDilationFactorMinusOne(1.0, 10.0, 0.0), 0.0);
+    CHECK_EQ(sim::GRDilationFactorWeak(inf, 10.0, 1.0), 1.0);
+    CHECK_EQ(sim::GRDilationFactorWeakMinusOne(-1.0, 10.0, 1.0), 0.0);
+
+    ecs::RelativisticClock corruptClock;
+    corruptClock.coordinateTime = inf;
+    CHECK_EQ(sim::ProperTime(corruptClock), 0.0);
+    sim::AdvanceClock(corruptClock, -0.25, 1.0);
+    CHECK_EQ(corruptClock.coordinateTime, 0.0);
+    CHECK_EQ(corruptClock.properTimeDeviation, 0.0);
+
+    sim::FrameGraph emptyGraph;
+    sim::Body invalidBody;
+    CHECK_EQ(sim::VelocityInMasterFrame(
+                 emptyGraph, invalidBody, sim::kInvalidFrame).LengthSq(),
+             0.0);
+    CHECK_EQ(sim::BetaInMasterFrame(emptyGraph, invalidBody, sim::kInvalidFrame),
+             0.0);
+}
+
+TEST_CASE(Relativity_DeterministicReplayAndTimestepConvergence)
+{
+    const RelativisticTrajectory replayA = IntegrateConstantForce(1.0 / 128.0, 1280);
+    const RelativisticTrajectory replayB = IntegrateConstantForce(1.0 / 128.0, 1280);
+    CHECK_EQ(replayA.position.x, replayB.position.x);
+    CHECK_EQ(replayA.position.y, replayB.position.y);
+    CHECK_EQ(replayA.position.z, replayB.position.z);
+    CHECK_EQ(replayA.momentum.x, replayB.momentum.x);
+    CHECK_EQ(replayA.momentum.y, replayB.momentum.y);
+    CHECK_EQ(replayA.momentum.z, replayB.momentum.z);
+
+    const RelativisticTrajectory coarse = IntegrateConstantForce(1.0 / 64.0, 640);
+    const RelativisticTrajectory fine = IntegrateConstantForce(1.0 / 128.0, 1280);
+    const RelativisticTrajectory reference = IntegrateConstantForce(1.0 / 4096.0, 40960);
+    const double coarseError = (coarse.position - reference.position).Length();
+    const double fineError = (fine.position - reference.position).Length();
+    CHECK(fineError < coarseError * 0.55);
+    CHECK((coarse.momentum - reference.momentum).Length() < 1.0);
+    CHECK((fine.momentum - reference.momentum).Length() < 1.0);
 }
