@@ -1665,14 +1665,16 @@ are now integrated as well. The current order is:
 
 ### WS-024: Leased runtime assembly resource catalog
 
-- Status: ACTIVE
+- Status: READY_TO_MERGE
 - Outcome: provide the first concrete `AssemblyResourceCatalog` implementation
   and an immutable lease/snapshot that keeps resolver identities and owning-
   system tokens stable across concurrent registration, replacement, removal,
   and later scene preparation. A future assembly transaction can therefore
   resolve and prepare against one catalog epoch without racing asset churn.
 - Primary: Codex
-- Reviewer: Claude read-only asset/runtime review after the feature commit
+- Reviewer: Claude read-only review requested for `833c147..d726cd6`; blocked by
+  the Claude account weekly usage limit. Codex completed the documented manual
+  asset/runtime audit under the agreed review fallback.
 - Branch: `codex/leased-assembly-resource-catalog`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-leased-assembly-resource-catalog`
@@ -1687,15 +1689,16 @@ are now integrated as well. The current order is:
 - Shared-file locks: Codex holds only the additive WS-024 registration blocks in
   `CMakeLists.txt`; all other shared integration files remain unclaimed
 - Interface contract: the mutable store validates and registers `(kind,
-  locator, content SHA-256, owner token)` records, assigns nonzero monotonic
-  catalog values and generations, and never interprets owner tokens. Acquiring a
-  snapshot copies one deterministic immutable epoch that implements the existing
-  const resolver interface and can translate only exact current identities back
-  to their typed owner tokens. Replacement and removal invalidate future live
-  lookups without changing earlier snapshots; stale, missing, wrong-kind,
-  conflicting, exhausted-generation, and limit failures publish no mutation.
-  The store and snapshots perform no file, scene, ECS, GPU, physics, navigation,
-  pressure, interaction, or gameplay work.
+  locator, content SHA-256, owner token, lifetime anchor)` records, assigns
+  nonzero monotonic catalog values and generations, and never interprets owner
+  tokens or anchor targets. Acquiring a snapshot copies one deterministic
+  immutable epoch that implements the existing const resolver interface,
+  retains every active owner anchor, and can translate only exact captured
+  identities back to their typed owner tokens. Replacement and removal
+  invalidate future live lookups without changing earlier snapshots; stale,
+  missing, wrong-kind, conflicting, exhausted-generation, and limit failures
+  publish no mutation. The store and snapshots perform no file, scene, ECS,
+  GPU, physics, navigation, pressure, interaction, or gameplay work.
 - Dependencies: merged WS-023 resource-resolution contract
 - Acceptance gates: deterministic value assignment and snapshot order;
   idempotent identical registration; generation-advancing replacement; explicit
@@ -1705,13 +1708,15 @@ are now integrated as well. The current order is:
   green
 - Negative controls: empty/unsafe/oversized locator, unknown kind, zero digest,
   zero owner token, duplicate incompatible registration, stale generation,
-  wrong kind/content, record/string limits, generation exhaustion, allocation
-  failure, and concurrent mutation cannot expose a partial record or corrupt a
-  prior snapshot
-- Latest commit: pending
-- Next action: implement and adversarially test the isolated store/snapshot,
-  request Claude review, then integrate only after both build matrices and CI
-  pass
+  wrong kind/content, record/string limits, generation/value/epoch exhaustion,
+  and concurrent mutation cannot expose a partial record, stale owner token, or
+  corrupt a prior snapshot
+- Validation: Debug and Release all-target builds pass; Debug and Release CTest
+  each pass 4/4; CPU suite passes 394 cases and 17,374 checks; `git diff
+  --cached --check` passed before the feature commit
+- Latest commit: `d726cd6`
+- Next action: push the feature branch, fast-forward `main`, run integration CI,
+  record the result, and retire the local worktree/branch
 
 ## 20. Helper Commands
 
