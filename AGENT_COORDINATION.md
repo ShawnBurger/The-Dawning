@@ -1302,7 +1302,7 @@ are now integrated as well. The current order is:
 
 ### WS-018: Force-integrated gravity and three-way motion ownership
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: give thrusting, atmospheric, and FTL-capable rigid bodies an explicit
   gravity-fed motion owner that cannot also be advanced by N-body or Kepler rails
 - Primary: Codex
@@ -1310,7 +1310,7 @@ are now integrated as well. The current order is:
 - Branch: `codex/force-integrated-gravity`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-force-integrated-gravity`
-- Base commit: registration commit created from `ba49646`
+- Base commit: `eac7d68`
 - Owned paths: the additive `OrbitOwner::ForceIntegrated` value and its comments
   in `src/ecs/components.h`; `src/sim/physics_system.{h,cpp}`;
   `tests/test_physics_system.cpp`; the exact owner promotions and assertions in
@@ -1320,8 +1320,8 @@ are now integrated as well. The current order is:
   `CMakeLists.txt`, app/input/scene callsites, renderer/shaders/assets, Claude's
   save codec files, networking, and unrelated shared files
 - Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned. Claude's
-  active save/load lane encodes `OrbitOwner` as a byte and must accept the new
-  value 2 when rebased, but Codex will not edit that dirty worktree or its files
+  save/load lane encodes `OrbitOwner` as a byte and must accept the new value 2
+  before integration; it was not edited from this lane
 - Interface contract: `NBodyActive`, `OnRails`, and `ForceIntegrated` are mutually
   exclusive movers. `StepFlightPhysics` skips gravitational entities owned by
   N-body or rails while preserving legacy non-gravitational bodies. A GPU-free
@@ -1339,13 +1339,18 @@ are now integrated as well. The current order is:
   double-advance an N-body/rail fixture; summing sources in ECS insertion order
   must differ in a cancellation-sensitive fixture; atmosphere or FTL promotion
   to `NBodyActive` must fail the one-owner assertions
-- Latest commit: registration pending
+- Latest commits: feature `17e8919`; integrated on `main` as `659267a`
+- Review: bounded Claude CLI review timed out without output, so reciprocal
+  review is recorded as deferred manual debt under the agreed fallback
+- Acceptance result: Debug and Release each pass 320/320 cases and 16,761
+  checks. Debug and Release raster, stable path tracing, and full-quality path
+  tracing smoke modes all pass at 1920x1080 with 99.9-100% nonblack captures
 - Residual risk: this lane supplies the gravity force and ownership boundary but
   deliberately does not gather/step/reconcile the passive N-body set, propagate
   rails, resolve collision entity destruction, or choose scene run order
-- Next action: publish registration, create the isolated worktree, establish the
-  ownership/atomicity negative controls, implement without CMake edits, and run
-  the complete validation matrix
+- Next action: audit the complete runtime wiring, reconcile the save/load enum
+  dependency, and select the smallest isolated orchestration or passive-orbit
+  adapter lane that does not overlap Claude's active asset/render work
 
 ## 20. Helper Commands
 
