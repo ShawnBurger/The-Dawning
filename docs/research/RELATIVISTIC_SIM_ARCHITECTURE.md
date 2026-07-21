@@ -606,9 +606,10 @@ h   = |localPos| − R_planet                         // altitude, floored at th
 rho = rho0 · exp(−h / H)                             // H = scale height per body
 ```
 
-The exponent is **clamped at both ends**: floored at deep-negative `h` to avoid overflow, and
-`rho` is set to **exactly 0.0 above a cutoff altitude** to avoid denormal underflow and to
-make the atmosphere-top boundary exact and C0.
+The exponent is floored at deep-negative `h` to avoid overflow. At the top, density and
+pressure are multiplied by a terminal smoothstep before becoming **exactly 0.0 at and above
+the cutoff**. The taper, rather than the zero branch alone, makes the atmosphere-top force
+boundary genuinely C0.
 
 ### 6.2 Forces (fed via the existing hooks)
 
@@ -632,12 +633,13 @@ the force-integrated regime with extra force terms.
 A body leaves on-rails and enters force-integration when it descends below the atmosphere
 cutoff, because drag makes the trajectory non-Keplerian. This is the SAME on-rails→force seam
 as SOI entry (§4.4), one layer deeper inside the planet's frame, continuous by the identical
-state-vector construction. **Force continuity is automatic**: `rho` ramps FROM EXACTLY 0.0 at
-the cutoff, so drag/lift magnitude starts at zero and grows smoothly — crossing the shell
-produces no force step (C0). Leaving reverses it: once `rho` underflows to 0 and no thrust is
-applied, the body may convert back to on-rails. Atmospheric speeds are deep in a gravity well
-and sub-orbital (`beta ~ 1e-5`), so no relativistic coupling; drag is dissipative, hence
-stable under the shipped Euler at 1/60.
+state-vector construction. **Force continuity is automatic**: the terminal smoothstep makes
+`rho` approach exactly 0.0 from below, so drag/lift magnitude starts at zero and grows smoothly
+— crossing the shell produces no force step (C0). Leaving reverses it: once `rho` reaches 0 and
+no thrust is applied, the body may convert back to on-rails. Atmospheric speeds are deep in a
+gravity well and sub-orbital (`beta ~ 1e-5`), so no relativistic coupling. Drag remains
+dissipative through its dedicated contractive frozen-speed substep even when the ordinary
+fixed timestep exceeds the local drag timescale.
 
 ---
 
@@ -926,7 +928,7 @@ or RNG into the step breaks the replay hash.
 | Single-primary GR truncation | time | labeled as approximation; sum over master-frame bodies if ever needed (§2.4) |
 | FTL state corruption | FTL | atomic teleport over the full retained set, accumulator drain, `accumFrameIndex=0`, `prevPose=postPose`, `seedFrameCounter` preserved |
 | NaN/non-finite `dt` or factor | all | house guard `!(dt>0)\|\|!isfinite(dt)` → no-op (VERIFIED `rigid_body.cpp:118`); non-finite factor → defined no-op |
-| Aerodynamic heating `ρ·\|v\|³` overflow | atmosphere | floor `ρ`, clamp `\|v_rel\|`, guard non-finite `v` before the cube; heating never feeds the integrator |
+| Aerodynamic heating `ρ·\|v\|³` overflow | atmosphere | floor `ρ`, use a scaled finite norm and log-domain finite saturation, reject non-finite `v`; heating never feeds the integrator |
 
 Note: the path-trace history NaN/Inf guard self-heals a corrupt jump in one frame but fails
 **silently** — robustness tests must check the accumulator/positions directly, never wait for a

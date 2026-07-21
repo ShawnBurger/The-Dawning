@@ -14,9 +14,9 @@
 // The one robustness crux is drag STIFFNESS (sec 6.1): quadratic drag done with
 // an explicit Euler update injects energy once dt exceeds the drag time constant
 // tau = 2m/(rho*Cd*A*|v|) - the same failure class as the explicit gyroscopic
-// term Stage 1 hit. This module provides the STABLE update (semi-implicit /
-// analytic-exponential) that is contractive for any dt, and the shipped path uses
-// it. The naive explicit form is only kept as the negative control in the tests.
+// term Stage 1 hit. This module provides a frozen-speed semi-implicit update that
+// is contractive for any dt, and the shipped path uses it. The naive explicit form
+// is only kept as the negative control in the tests.
 
 #include "../core/types.h"
 
@@ -60,9 +60,8 @@ enum class AtmosphereKind : uint32_t
 
 // A body's atmosphere. USSA76 uses the fixed Earth layer table; Exponential is
 // parameterised by (seaLevelDensity, scaleHeight). Both share the ceiling above
-// which density is exactly 0. The ceiling default for Exponential is chosen high
-// enough (>= ~20 scale heights) that the density there is negligible, so the hard
-// cutoff is C0-continuous to any meaningful tolerance (sec 6.4).
+// which density is exactly 0. A smooth terminal fade makes density and pressure
+// approach that exact zero continuously instead of applying a hard force cutoff.
 struct AtmosphereModel
 {
     AtmosphereKind kind = AtmosphereKind::None;
@@ -71,6 +70,7 @@ struct AtmosphereModel
     double gasConstant     = kAirGasConstant;  // for speed of sound
     double gamma           = kAirGamma;
     double ceiling         = 86000.0;          // geopotential m; density 0 above
+    double ceilingFadeWidth = 5000.0;          // final smoothstep interval, m
 
     static AtmosphereModel Vacuum() { return AtmosphereModel{}; }
     static AtmosphereModel EarthUSSA76();
@@ -127,12 +127,13 @@ double DragTimeConstant(double mass, double density, double cd, double area, con
 // Ballistic coefficient beta = m / (Cd*A).
 double BallisticCoefficient(double mass, double cd, double area);
 
-// SEMI-IMPLICIT (backward-Euler) quadratic-drag velocity update:
+// FROZEN-SPEED SEMI-IMPLICIT quadratic-drag velocity update:
 //   v_{n+1} = v_n / (1 + c*|v_rel_n|*dt),  c = rho*Cd*A/(2m).
 // Contractive for any positive dt (0 < 1/(1+positive) < 1), so it can NEVER
-// overshoot or gain energy - the fix for the stiff case. Operates in the wind
-// frame: pass the airspeed component; the co-rotating atmosphere velocity is
-// added back by the caller. Returns the new airspeed vector.
+// overshoot or gain energy. This freezes the quadratic coefficient at |v_n|; it
+// is not the exact nonlinear backward-Euler root. Operates in the wind frame:
+// pass the airspeed component; the co-rotating atmosphere velocity is added back
+// by the caller. Returns the new airspeed vector.
 Vec3d SemiImplicitDragAirspeed(const Vec3d& airspeed, double density, double cd,
                                double area, double mass, double dt);
 
