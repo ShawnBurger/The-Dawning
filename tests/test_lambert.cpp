@@ -65,12 +65,17 @@ TEST_CASE(Lambert_ClosureShortAndLongWayAndOffPlane)
     CheckClosure(Vec3d{ 5.0e6, 1.0e7, 2.1e6 },
                  Vec3d{ -1.46e7, 2.5e6, 7.0e6 }, 3600.0, mu, /*prograde=*/false);
 
-    // A planar geometry with a small tof (short way) and a large tof (long way,
-    // Δν > 180°) about the same endpoints — exercises both transfer-angle branches.
+    // Planar transfers that run BOTH transfer-angle branches. The swept angle is
+    // fixed by geometry + sense, NOT by tof: (a×b).z > 0 is the short way
+    // (Δν = 90°); endpoints with (a×c).z < 0 force the prograde LONG way
+    // (Δν = 270°, the lambert.cpp:46 flip). CheckClosure only proves each produces
+    // a valid transfer — WHICH sense the solver selects is discriminated by the
+    // recovery tests below, because both senses close this loop.
     const Vec3d a{ 1.2e7, 0.0, 0.0 };
-    const Vec3d b{ 0.0, 1.1e7, 0.0 };
-    CheckClosure(a, b, 1500.0, mu, true);   // short arc
-    CheckClosure(a, b, 12000.0, mu, true);  // long arc (slower => sweeps the long way)
+    const Vec3d bShort{ 0.0, 1.1e7, 0.0 };  // (a×bShort).z > 0 -> 90°  (short way)
+    const Vec3d cLong{ 0.0, -1.1e7, 0.0 };  // (a×cLong).z  < 0 -> 270° (long way)
+    CheckClosure(a, bShort, 1500.0, mu, true);
+    CheckClosure(a, cLong, 9000.0, mu, true);
 }
 
 TEST_CASE(Lambert_RecoversAKnownEllipticOrbitVelocities)
@@ -106,6 +111,59 @@ TEST_CASE(Lambert_RecoversAKnownEllipticOrbitVelocities)
         CHECK(Rel(sol.v1, s1.velocity) < 1.0e-7);
         CHECK(Rel(sol.v2, s2.velocity) < 1.0e-7);
     }
+}
+
+TEST_CASE(Lambert_RecoversRetrogradeOrbitAndSensesDiffer)
+{
+    // A RETROGRADE orbit (inclination > 90°, so h_z < 0) must be recovered with
+    // prograde=false. CheckClosure cannot discriminate the sense — BOTH the
+    // prograde and retrograde solutions are genuine Kepler arcs from r1 to r2 in
+    // tof, so both close the loop — which is why the retrograde branch
+    // (lambert.cpp:47) needs a velocity-RECOVERY witness and a senses-differ check.
+    const double mu = 3.986004418e14;
+    ecs::OrbitalElements el;
+    el.semiMajorAxis    = 1.1e7;
+    el.eccentricity     = 0.25;
+    el.inclination      = 2.5;   // ~143° => retrograde (h_z < 0)
+    el.longitudeAscNode = 0.7;
+    el.argPeriapsis     = 0.3;
+    el.trueAnomaly      = 0.15;
+
+    const double period = 2.0 * 3.14159265358979323846 *
+                          std::sqrt(el.semiMajorAxis * el.semiMajorAxis *
+                                    el.semiMajorAxis / mu);
+    const StateVector s1 = ElementsToState(el, mu);
+
+    // The 0.7-period arc sweeps > 180° in-plane -> (r1×r2).z > 0 for a retrograde
+    // orbit, so the line-47 flip is load-bearing; breaking it fails recovery here.
+    for (double frac : { 0.3, 0.7 })
+    {
+        const double tof = frac * period;
+        bool ok = false;
+        const StateVector s2 = PropagateUniversal(s1, mu, tof, &ok);
+        CHECK(ok);
+        const LambertSolution sol =
+            SolveLambert(s1.position, s2.position, tof, mu, /*prograde=*/false);
+        CHECK(sol.converged);
+        if (!sol.converged) continue;
+        CHECK(Rel(sol.v1, s1.velocity) < 1.0e-7); // recovers the RETROGRADE v1
+        CHECK(Rel(sol.v2, s2.velocity) < 1.0e-7);
+    }
+
+    // The two senses are DIFFERENT transfers for identical endpoints + tof. Solving
+    // prograde must NOT collapse onto the retrograde solution — the direct witness
+    // that lambert.cpp:46/47 actually branch on `prograde`.
+    bool ok = false;
+    const StateVector s2 = PropagateUniversal(s1, mu, 0.5 * period, &ok);
+    CHECK(ok);
+    const LambertSolution pro =
+        SolveLambert(s1.position, s2.position, 0.5 * period, mu, true);
+    const LambertSolution ret =
+        SolveLambert(s1.position, s2.position, 0.5 * period, mu, false);
+    CHECK(pro.converged);
+    CHECK(ret.converged);
+    if (pro.converged && ret.converged)
+        CHECK((pro.v1 - ret.v1).Length() > 1.0); // meaningfully different (m/s)
 }
 
 TEST_CASE(Lambert_HyperbolicTransferClosesTheLoop)
