@@ -168,6 +168,7 @@ set(SIM_SOURCES
     src/sim/collision.cpp
     src/sim/sim_serialize.cpp
     src/sim/orbit_system.cpp
+    src/sim/soi.cpp
     src/sim/simulation_system.cpp
     src/sim/snapshot_system.cpp
 )
@@ -189,6 +190,7 @@ set(SIM_HEADERS
     src/sim/collision.h
     src/sim/sim_serialize.h
     src/sim/orbit_system.h
+    src/sim/soi.h
     src/sim/simulation_system.h
     src/sim/snapshot_system.h
 )
@@ -261,6 +263,7 @@ set(TEST_SOURCES
     tests/test_collision.cpp
     tests/test_sim_serialize.cpp
     tests/test_orbit_system.cpp
+    tests/test_soi.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -645,6 +648,10 @@ add_executable(TheDawningTests
     # shipped collision/Kepler kernels and reconciles their real components.
     src/sim/orbit_system.cpp
     src/sim/orbit_system.h
+    # Patched conics: sphere-of-influence radii, deepest-well membership, and the
+    # continuity-preserving repatch about a new primary (Sim Stage 7). Pure math.
+    src/sim/soi.cpp
+    src/sim/soi.h
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
