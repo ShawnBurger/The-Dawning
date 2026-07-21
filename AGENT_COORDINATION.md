@@ -587,6 +587,8 @@ on `main`. The current order is:
 5. Do not start another simulation stage until WS-011 review debt is resolved and
    the next lane is registered before editing.
 
+WS-013 is the active Codex review-fix lane for the concrete WS-011 findings.
+
 ### WS-001: Coordination contract
 
 - Status: MERGED
@@ -1003,6 +1005,39 @@ on `main`. The current order is:
   modifies Earth USSA76 only within its final 5 km simulation boundary interval.
 - Next action: complete WS-011 FTL review; perform the deferred manual Claude
   review later without reopening the already-proven integration gate
+
+### WS-013: FTL and atomic-teleport review hardening
+
+- Status: ACTIVE
+- Outcome: close retained-state, transform-validation, and warp-step numerical
+  gaps found during the independent WS-011 review without adding an engine callsite
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/review-sim-ftl`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-ftl`
+- Base commit: `2e002ba`
+- Owned paths: `src/sim/ftl.h`, `src/sim/ftl.cpp`, `tests/test_ftl.cpp`, and
+  the FTL contract in `docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md`
+- Excluded paths: app/scene callsites, timer/path-trace reset wiring, atmosphere,
+  N-body, relativity implementation, renderer, assets, ECS layout, and CMake
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve pure CPU teleport/warp APIs; make each operation
+  transactional on invalid input, rotate every authoritative world-frame retained
+  vector, and keep ordinary valid results and coordinate precision unchanged
+- Dependencies: merged Stage 0 coordinates, WS-009 relativity ownership, and the
+  reviewed WS-011 implementation
+- Acceptance gates: independent single-leg position/vector rotation, normalized
+  mouth handling, authoritative momentum rotation, exact accumulator/history
+  policy, invalid/extreme transform containment, fixed-step warp guards,
+  deterministic replay, Debug/Release CPU suites, and combined six-mode smoke
+- Negative controls: non-unit or non-finite mouth rotation, omitted momentum
+  rotation, invalid warp dt, and an overflowing per-step warp displacement must
+  fail or be rejected without partially changing state
+- Latest commit: none; tests are written first against the reviewed behavior
+- Review note: request one bounded Claude review after the fix commit; per Shawn's
+  instruction, a failed attempt becomes deferred manual review debt
+- Next action: create the isolated worktree, prove the existing numerical and
+  retained-state gaps, then correct and verify them
 
 ## 20. Helper Commands
 
