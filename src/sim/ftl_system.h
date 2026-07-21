@@ -24,7 +24,7 @@ struct FtlTransitionResult
 // Atomically teleport one frame-aware rigid body. Required components are
 // Transform + SpatialFrame + RigidBody. RelativisticBody and GravitationalBody
 // participate when present; an accepted transition rotates momentum and promotes
-// an on-rails gravitational body to NBodyActive. Rejection is a registry no-op.
+// a valid gravitational body to ForceIntegrated. Rejection is a registry no-op.
 FtlTransitionResult TryTeleportEntity(ecs::Registry& registry,
                                       ecs::Entity entity,
                                       const FrameGraph& frames,

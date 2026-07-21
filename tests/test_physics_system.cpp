@@ -30,6 +30,7 @@
 #include "sim/physics_system.h"
 #include "sim/rigid_body.h"
 #include "sim/flight_control.h"
+#include "sim/nbody.h"
 #include "sim/thrusters.h"
 
 #include <cmath>
@@ -389,4 +390,264 @@ TEST_CASE(PhysicsSystem_ScriptedThrusters_AndPlainBodyCoasts)
     CHECK_APPROX_EPS(reg.Get<ecs::RigidBody>(scripted).linearVelocity.z, 2.5 * kDt, 1e-9);
     // Plain body: unchanged velocity (coasts).
     CHECK_APPROX_EPS(reg.Get<ecs::RigidBody>(plain).linearVelocity.x, 2.0, 1e-12);
+}
+
+namespace
+{
+
+ecs::Entity MakeGravityEntity(ecs::Registry& registry, sim::FrameId frame,
+                              const core::Vec3d& position, uint64_t bodyId,
+                              double mu, double radius, bool isSource,
+                              ecs::OrbitOwner owner, bool withRigidBody)
+{
+    const ecs::Entity entity = registry.Create();
+    ecs::Transform transform;
+    transform.position = position;
+    registry.Assign<ecs::Transform>(entity, transform);
+    registry.Assign<ecs::SpatialFrame>(
+        entity, ecs::SpatialFrame{ static_cast<uint32_t>(frame) });
+
+    ecs::GravitationalBody gravity;
+    gravity.bodyId = bodyId;
+    gravity.mu = mu;
+    gravity.radius = radius;
+    gravity.isSource = isSource;
+    gravity.owner = owner;
+    registry.Assign<ecs::GravitationalBody>(entity, gravity);
+
+    if (withRigidBody)
+    {
+        ecs::RigidBody body;
+        body.invMass = 0.5;
+        body.invInertiaDiag = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+        registry.Assign<ecs::RigidBody>(entity, body);
+    }
+    return entity;
+}
+
+} // namespace
+
+TEST_CASE(PhysicsSystem_GravityBridge_CrossFrameKnownAnswerAndFlightStep)
+{
+    const sim::WorldPos center{
+        1234567, -2345678, 3456789,
+        core::Vec3d{ 4000000.0, 5000000.0, 6000000.0 }
+    };
+    sim::FrameGraph frames;
+    const sim::FrameId sourceFrame = frames.CreateFrame(sim::kInvalidFrame, center);
+    const sim::FrameId targetFrame = frames.CreateFrame(
+        sim::kInvalidFrame, sim::Translate(center, core::Vec3d{ 2000.0, 0.0, 0.0 }));
+
+    ecs::Registry registry;
+    MakeGravityEntity(registry, sourceFrame, core::Vec3d{}, 10, 1.0e9, 10.0,
+                      true, ecs::OrbitOwner::OnRails, false);
+    const ecs::Entity target = MakeGravityEntity(
+        registry, targetFrame, core::Vec3d{}, 20, 0.0, 1.0, false,
+        ecs::OrbitOwner::ForceIntegrated, true);
+    ecs::RigidBody& body = registry.Get<ecs::RigidBody>(target);
+    body.forceAccum = core::Vec3d{ 3.0, 4.0, 5.0 };
+
+    const sim::GravityAccumulationResult result =
+        sim::AccumulateForceIntegratedGravity(registry, frames);
+
+    const double r = 2000.0;
+    const double r2 = r * r + 10.0 * 10.0;
+    const double expectedAx = -1.0e9 * r / (r2 * std::sqrt(r2));
+    CHECK(result.accepted);
+    CHECK_EQ(result.sourceCount, 1u);
+    CHECK_EQ(result.targetCount, 1u);
+    CHECK_APPROX_EPS(body.forceAccum.x, 3.0 + 2.0 * expectedAx, 1e-12);
+    CHECK_EQ(body.forceAccum.y, 4.0);
+    CHECK_EQ(body.forceAccum.z, 5.0);
+
+    const core::Vec3d stagedForce = body.forceAccum;
+    sim::StepFlightPhysics(registry, kDt);
+    CHECK_APPROX_EPS(body.linearVelocity.x, stagedForce.x * 0.5 * kDt, 1e-12);
+    CHECK_APPROX_EPS(body.linearVelocity.y, stagedForce.y * 0.5 * kDt, 1e-12);
+    CHECK_APPROX_EPS(registry.Get<ecs::Transform>(target).position.x,
+                     body.linearVelocity.x * kDt, 1e-12);
+    CHECK(body.forceAccum == core::Vec3d{});
+}
+
+TEST_CASE(PhysicsSystem_MotionOwner_AllowsExactlyOneTranslationIntegrator)
+{
+    ecs::Registry registry;
+
+    auto makeOwned = [&](ecs::OrbitOwner owner) -> ecs::Entity
+    {
+        const ecs::Entity entity = registry.Create();
+        registry.Assign<ecs::Transform>(entity, ecs::Transform{});
+        ecs::RigidBody body;
+        body.invMass = 1.0;
+        body.invInertiaDiag = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+        body.linearVelocity = core::Vec3d{ 1.0, 0.0, 0.0 };
+        body.forceAccum = core::Vec3d{ 2.0, 0.0, 0.0 };
+        registry.Assign<ecs::RigidBody>(entity, body);
+        ecs::GravitationalBody gravity;
+        gravity.bodyId = static_cast<uint64_t>(entity.Index()) + 1;
+        gravity.mu = 1.0;
+        gravity.radius = 1.0;
+        gravity.owner = owner;
+        registry.Assign<ecs::GravitationalBody>(entity, gravity);
+        return entity;
+    };
+
+    const ecs::Entity nbody = makeOwned(ecs::OrbitOwner::NBodyActive);
+    const ecs::Entity rails = makeOwned(ecs::OrbitOwner::OnRails);
+    const ecs::Entity force = makeOwned(ecs::OrbitOwner::ForceIntegrated);
+    const ecs::Entity legacy = registry.Create();
+    registry.Assign<ecs::Transform>(legacy, ecs::Transform{});
+    ecs::RigidBody legacyBody;
+    legacyBody.invMass = 1.0;
+    legacyBody.invInertiaDiag = core::Vec3f{ 1.0f, 1.0f, 1.0f };
+    legacyBody.linearVelocity = core::Vec3d{ 1.0, 0.0, 0.0 };
+    registry.Assign<ecs::RigidBody>(legacy, legacyBody);
+
+    sim::StepFlightPhysics(registry, 0.5);
+
+    CHECK_EQ(registry.Get<ecs::Transform>(nbody).position.x, 0.0);
+    CHECK_EQ(registry.Get<ecs::Transform>(rails).position.x, 0.0);
+    CHECK_EQ(registry.Get<ecs::RigidBody>(nbody).linearVelocity.x, 1.0);
+    CHECK_EQ(registry.Get<ecs::RigidBody>(rails).linearVelocity.x, 1.0);
+    CHECK_EQ(registry.Get<ecs::RigidBody>(nbody).forceAccum.x, 2.0);
+    CHECK_EQ(registry.Get<ecs::RigidBody>(rails).forceAccum.x, 2.0);
+    CHECK_APPROX_EPS(registry.Get<ecs::RigidBody>(force).linearVelocity.x, 2.0, 1e-12);
+    CHECK_APPROX_EPS(registry.Get<ecs::Transform>(force).position.x, 1.0, 1e-12);
+    CHECK_APPROX_EPS(registry.Get<ecs::Transform>(legacy).position.x, 0.5, 1e-12);
+}
+
+TEST_CASE(PhysicsSystem_GravityBridge_SourceOrderIsBitExactAndSelfIsExcluded)
+{
+    sim::FrameGraph frames;
+    const sim::FrameId frame = frames.CreateFrame(
+        sim::kInvalidFrame, sim::WorldPos::FromOffset(core::Vec3d{ 1000.0, 0.0, 0.0 }));
+
+    struct RunResult
+    {
+        core::Vec3d force;
+        double insertionOrderForceX = 0.0;
+    };
+
+    auto run = [&](bool reverse) -> RunResult
+    {
+        ecs::Registry registry;
+        auto sourceA = [&]()
+        {
+            MakeGravityEntity(registry, frame, core::Vec3d{ 1.0, 0.0, 0.0 },
+                              1, 2.8e16, 0.0, true,
+                              ecs::OrbitOwner::NBodyActive, false);
+        };
+        auto sourceB = [&]()
+        {
+            MakeGravityEntity(registry, frame, core::Vec3d{ -1.0, 0.0, 0.0 },
+                              2, 2.8e16, 0.0, true,
+                              ecs::OrbitOwner::OnRails, false);
+        };
+        auto sourceC = [&]()
+        {
+            MakeGravityEntity(registry, frame, core::Vec3d{ 1.0, 0.0, 0.0 },
+                              3, 3.0, 0.0, true,
+                              ecs::OrbitOwner::NBodyActive, false);
+        };
+        if (reverse) { sourceC(); sourceB(); sourceA(); }
+        else         { sourceA(); sourceB(); sourceC(); }
+
+        const ecs::Entity target = MakeGravityEntity(
+            registry, frame, core::Vec3d{}, 99, 5.0, 0.0, true,
+            ecs::OrbitOwner::ForceIntegrated, true);
+        const sim::GravityAccumulationResult result =
+            sim::AccumulateForceIntegratedGravity(registry, frames);
+        CHECK(result.accepted);
+        CHECK_EQ(result.sourceCount, 4u);
+        CHECK_EQ(result.targetCount, 1u);
+
+        auto contribution = [](double sourceX, double mu)
+        {
+            const double eps = sim::SofteningLength(mu, 0.0);
+            const double d = -sourceX;
+            const double r2 = d * d + eps * eps;
+            return -d * mu / (r2 * std::sqrt(r2));
+        };
+        const double a = contribution(1.0, 2.8e16);
+        const double b = contribution(-1.0, 2.8e16);
+        const double c = contribution(1.0, 3.0);
+        const double naiveAcceleration = reverse
+            ? (c + b) + a
+            : (a + b) + c;
+        return RunResult{
+            registry.Get<ecs::RigidBody>(target).forceAccum,
+            naiveAcceleration * 2.0
+        };
+    };
+
+    const RunResult forward = run(false);
+    const RunResult reverse = run(true);
+    CHECK(forward.force == reverse.force);
+    CHECK(forward.force.x > 0.0);
+    CHECK_EQ(forward.force.y, 0.0);
+    CHECK_EQ(forward.force.z, 0.0);
+    CHECK(forward.insertionOrderForceX != reverse.insertionOrderForceX);
+
+    ecs::Registry selfOnly;
+    const ecs::Entity self = MakeGravityEntity(
+        selfOnly, frame, core::Vec3d{}, 7, 1.0e6, 1.0, true,
+        ecs::OrbitOwner::ForceIntegrated, true);
+    const sim::GravityAccumulationResult selfResult =
+        sim::AccumulateForceIntegratedGravity(selfOnly, frames);
+    CHECK(selfResult.accepted);
+    CHECK_EQ(selfResult.sourceCount, 1u);
+    CHECK_EQ(selfResult.targetCount, 1u);
+    CHECK(selfOnly.Get<ecs::RigidBody>(self).forceAccum == core::Vec3d{});
+}
+
+TEST_CASE(PhysicsSystem_GravityBridge_InvalidRegistryIsAtomic)
+{
+    sim::FrameGraph frames;
+    const sim::FrameId frame = frames.CreateFrame(
+        sim::kInvalidFrame, sim::WorldPos::FromOffset(core::Vec3d{ 5000.0, 0.0, 0.0 }));
+    ecs::Registry registry;
+    MakeGravityEntity(registry, frame, core::Vec3d{ 100.0, 0.0, 0.0 },
+                      1, 1.0e6, 1.0, true,
+                      ecs::OrbitOwner::NBodyActive, false);
+    const ecs::Entity first = MakeGravityEntity(
+        registry, frame, core::Vec3d{}, 2, 0.0, 1.0, false,
+        ecs::OrbitOwner::ForceIntegrated, true);
+    const ecs::Entity invalid = MakeGravityEntity(
+        registry, frame, core::Vec3d{ 0.0, 10.0, 0.0 }, 3, 0.0, 1.0, false,
+        ecs::OrbitOwner::ForceIntegrated, true);
+    registry.Get<ecs::RigidBody>(first).forceAccum = core::Vec3d{ 1.0, 2.0, 3.0 };
+    registry.Get<ecs::RigidBody>(invalid).forceAccum = core::Vec3d{ 4.0, 5.0, 6.0 };
+    registry.Get<ecs::RigidBody>(invalid).invMass = 0.0;
+
+    const core::Vec3d firstBefore = registry.Get<ecs::RigidBody>(first).forceAccum;
+    const core::Vec3d invalidBefore = registry.Get<ecs::RigidBody>(invalid).forceAccum;
+    CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
+    CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
+
+    registry.Get<ecs::RigidBody>(invalid).invMass = 0.5;
+    registry.Get<ecs::GravitationalBody>(invalid).bodyId = 2;
+    CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
+    CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
+
+    registry.Get<ecs::GravitationalBody>(invalid).bodyId = 3;
+    registry.Get<ecs::SpatialFrame>(invalid).frameId = sim::kInvalidFrame;
+    CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
+    CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
+
+    registry.Get<ecs::SpatialFrame>(invalid).frameId = frame;
+    registry.Get<ecs::GravitationalBody>(invalid).owner =
+        static_cast<ecs::OrbitOwner>(99);
+    CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
+    CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
+
+    registry.Get<ecs::GravitationalBody>(invalid).owner =
+        ecs::OrbitOwner::ForceIntegrated;
+    registry.Get<ecs::RigidBody>(first).invMass = 1.0e-308;
+    CHECK(!sim::AccumulateForceIntegratedGravity(registry, frames).accepted);
+    CHECK(registry.Get<ecs::RigidBody>(first).forceAccum == firstBefore);
+    CHECK(registry.Get<ecs::RigidBody>(invalid).forceAccum == invalidBefore);
 }

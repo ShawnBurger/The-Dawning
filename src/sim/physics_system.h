@@ -7,7 +7,7 @@
 // `while (m_timer.ConsumeFixedStep()) m_scene.UpdateSystems(m_timer.GetFixedDt())`,
 // so it advances by a CONSTANT dt per call, decoupled from the render frame).
 //
-// Per entity with Transform + RigidBody it runs the Stage-2 pipeline
+// Per eligible entity with Transform + RigidBody it runs the Stage-2 pipeline
 // (FLIGHT_PHYSICS_DESIGN §6):
 //     control demand  ->  allocation / flight-assist  ->  wrench
 //                     ->  IntegrateRigidBody          ->  write Transform
@@ -34,12 +34,33 @@
 #include "../ecs/registry.h"
 #include "../ecs/components.h"
 #include "flight_control.h"
+#include "reference_frame.h"
+
+#include <cstdint>
 
 namespace sim
 {
 
+struct GravityAccumulationResult
+{
+    bool accepted = false;
+    uint32_t sourceCount = 0;
+    uint32_t targetCount = 0;
+};
+
+// Stage the softened gravity of every valid massive source into every
+// ForceIntegrated body's world-force accumulator. Source and target positions
+// are expressed in each target's frame before calling GravityAccelerationAt.
+// Validation is whole-system atomic: any malformed gravitational entity rejects
+// without changing any accumulator. NBodyActive and OnRails bodies are sources
+// only here; their motion remains owned by their respective integrators.
+GravityAccumulationResult AccumulateForceIntegratedGravity(
+    ecs::Registry& registry, const FrameGraph& frames);
+
 // Advance every RigidBody entity in `registry` by one fixed step `dt`.
 // dt <= 0 or non-finite is a whole-system no-op (matches IntegrateRigidBody).
+// Gravitational bodies advance here only when owner == ForceIntegrated; the
+// other ownership states are exact no-ops so two movers cannot update one pose.
 void StepFlightPhysics(ecs::Registry& registry,
                        double dt,
                        const FlightAssistParams& params = FlightAssistParams{});

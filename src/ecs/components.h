@@ -247,16 +247,15 @@ struct FlightControl
 // gravitational parameters, the LOD owner token, and the analytic rails.
 // =============================================================================
 
-// The level-of-detail owner of a body's motion THIS step. Exactly one owner per
-// body per step (RELATIVISTIC_SIM_ARCHITECTURE.md §5.1, revised): a body is
-// either integrated by the N-body Forest-Ruth stepper OR advanced on analytic
-// Kepler rails, never both. Debug-asserted in the stepper. An OnRails body must
-// receive NO separate N-body force (the pull is already in its ellipse) — the
-// double-count negative control the design demands.
+// The exclusive owner of a body's translation THIS step. Passive orbital bodies
+// use Forest-Ruth or analytic rails; thrusting/atmospheric bodies use the rigid-
+// body integrator with gravity accumulated as an external force. A body must
+// never be advanced by more than one of these movers in the same fixed step.
 enum class OrbitOwner : uint32_t
 {
-    NBodyActive = 0, // full N-body gravity this step (the active-system default)
-    OnRails     = 1, // analytic Kepler propagation around its primary this step
+    NBodyActive     = 0, // passive full N-body gravity this step
+    OnRails         = 1, // analytic Kepler propagation around its primary
+    ForceIntegrated = 2, // rigid-body step; gravity is an accumulated force
 };
 
 // -----------------------------------------------------------------------------
@@ -307,7 +306,7 @@ struct GravitationalBody
     //          it goes through the rigid-body lane (see sim/nbody.h operator split).
     bool isSource = true;
 
-    // LOD owner THIS step. See OrbitOwner.
+    // Exclusive translation owner THIS step. See OrbitOwner.
     OrbitOwner owner = OrbitOwner::NBodyActive;
 };
 

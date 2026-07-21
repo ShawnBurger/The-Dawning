@@ -33,6 +33,13 @@ bool IsUsableFrame(const Frame& frame)
            IsFinite(frame.velocity);
 }
 
+bool IsKnownOwner(ecs::OrbitOwner owner)
+{
+    return owner == ecs::OrbitOwner::NBodyActive ||
+           owner == ecs::OrbitOwner::OnRails ||
+           owner == ecs::OrbitOwner::ForceIntegrated;
+}
+
 bool TryNarrow(const Vec3d& value, core::Vec3f& out)
 {
     constexpr double kFloatMax =
@@ -67,7 +74,10 @@ FtlTransitionResult TryTeleportEntity(ecs::Registry& registry,
     ecs::Transform* transform = registry.TryGet<ecs::Transform>(entity);
     ecs::SpatialFrame* spatialFrame = registry.TryGet<ecs::SpatialFrame>(entity);
     ecs::RigidBody* rigidBody = registry.TryGet<ecs::RigidBody>(entity);
-    if (!transform || !spatialFrame || !rigidBody)
+    ecs::GravitationalBody* gravitational =
+        registry.TryGet<ecs::GravitationalBody>(entity);
+    if (!transform || !spatialFrame || !rigidBody ||
+        (gravitational && !IsKnownOwner(gravitational->owner)))
         return result;
 
     const FrameId sourceFrame = static_cast<FrameId>(spatialFrame->frameId);
@@ -140,13 +150,11 @@ FtlTransitionResult TryTeleportEntity(ecs::Registry& registry,
         nextRelativistic.momentum = output.momentum;
     }
 
-    ecs::GravitationalBody* gravitational =
-        registry.TryGet<ecs::GravitationalBody>(entity);
     ecs::GravitationalBody nextGravitational;
     if (gravitational)
     {
         nextGravitational = *gravitational;
-        nextGravitational.owner = ecs::OrbitOwner::NBodyActive;
+        nextGravitational.owner = ecs::OrbitOwner::ForceIntegrated;
     }
 
     *transform = nextTransform;
