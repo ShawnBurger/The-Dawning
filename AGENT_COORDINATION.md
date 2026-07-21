@@ -1528,7 +1528,7 @@ are now integrated as well. The current order is:
 
 ### WS-022: Deterministic cooked-assembly runtime contract
 
-- Status: ACTIVE
+- Status: REVIEW
 - Outcome: compile a validated `.tdasset.json` assembly manifest into a compact,
   versioned runtime artifact and load it fail-closed while preserving stable
   module, zone, portal, socket, interaction, and moving-part identity. This is
@@ -1539,7 +1539,7 @@ are now integrated as well. The current order is:
 - Branch: `codex/cooked-assembly-runtime-contract`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-cooked-assembly-runtime-contract`
-- Base commit: `2046fc8`
+- Base commit: `dc55abf`
 - Owned paths: new `src/asset/cooked_assembly.{h,cpp}`, new focused C++ tests,
   `tools/compile_asset_manifest.py`, new read-only
   `tools/assembly_inspector.cpp`, focused Python tests, additive assembly
@@ -1565,10 +1565,19 @@ are now integrated as well. The current order is:
 - Negative controls: no source URL or credential persisted; no runtime JSON
   dependency; no monolithic exterior/interior promotion; no entity creation or
   interaction simulation hidden inside the loader
-- Latest commit: none
-- Next action: create the isolated worktree, study the existing cooked-model
-  conventions, freeze the binary layout, and implement the compiler/loader with
-  adversarial round-trip tests before requesting review
+- Validation: all Debug and Release targets build, including the game, existing
+  asset compiler/inspector, new assembly inspector, and tests. Both four-test
+  CTest matrices pass; the CPU binary passes 370 cases / 17,098 checks. The
+  Python compiler suite passes eight cases under CTest, including a real
+  Python-to-C++ reference-ship round trip and native corruption rejection.
+  Determinism, source/output aliasing, temporary-write verification, strict
+  text, integrity, version, truncation, aggregate allocation, duplicate-ID,
+  dangling-reference, and disconnected-wiring controls are covered. Diff,
+  Python syntax, scope, path, and credential scans are clean.
+- Latest commit: `f29626f`
+- Next action: request Claude's read-only review of `dc55abf..f29626f`; correct
+  any actionable findings in this worktree, rerun both configurations, then
+  move the workstream to `READY_TO_MERGE`
 
 ## 20. Helper Commands
 
