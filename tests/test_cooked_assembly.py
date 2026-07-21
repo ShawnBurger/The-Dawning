@@ -143,6 +143,7 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
             self.assertEqual(inspected.returncode, 0, inspected.stderr)
             self.assertIn("asset_id=ship.reference.fighter", inspected.stdout)
             self.assertIn("modules=3", inspected.stdout)
+            self.assertIn("sockets=6", inspected.stdout)
             self.assertIn("zones=2", inspected.stdout)
             self.assertIn("interactions=3", inspected.stdout)
             self.assertIn("entry_zone=airlock", inspected.stdout)

@@ -14,10 +14,49 @@ void Camera::Init(const core::Vec3d& position, float yawDeg, float pitchDeg)
     m_position = position;
     m_yaw = yawDeg;
     m_pitch = pitchDeg;
+    m_hasExplicitBasis = false;
+}
+
+bool Camera::InitBasis(const core::Vec3d& position,
+                       const core::Vec3f& forward,
+                       const core::Vec3f& up)
+{
+    const bool finite =
+        std::isfinite(position.x) && std::isfinite(position.y) &&
+        std::isfinite(position.z) && std::isfinite(forward.x) &&
+        std::isfinite(forward.y) && std::isfinite(forward.z) &&
+        std::isfinite(up.x) && std::isfinite(up.y) && std::isfinite(up.z);
+    if (!finite || forward.LengthSq() < 1.0e-8f ||
+        up.LengthSq() < 1.0e-8f)
+    {
+        return false;
+    }
+
+    const core::Vec3f normalizedForward = forward.Normalized();
+    const core::Vec3f right =
+        up.Normalized().Cross(normalizedForward).Normalized();
+    if (right.LengthSq() < 1.0e-8f)
+        return false;
+    const core::Vec3f normalizedUp =
+        normalizedForward.Cross(right).Normalized();
+    if (normalizedUp.LengthSq() < 1.0e-8f)
+        return false;
+
+    m_position = position;
+    m_explicitForward = normalizedForward;
+    m_explicitUp = normalizedUp;
+    m_yaw = std::atan2(normalizedForward.x, normalizedForward.z) *
+        core::RAD_TO_DEG;
+    m_pitch = std::asin((std::max)(
+        -1.0f, (std::min)(1.0f, normalizedForward.y))) * core::RAD_TO_DEG;
+    m_hasExplicitBasis = true;
+    return true;
 }
 
 core::Vec3f Camera::Forward() const
 {
+    if (m_hasExplicitBasis)
+        return m_explicitForward;
     float yawRad   = m_yaw * core::DEG_TO_RAD;
     float pitchRad = m_pitch * core::DEG_TO_RAD;
     float cosPitch = std::cos(pitchRad);
@@ -31,8 +70,14 @@ core::Vec3f Camera::Forward() const
 core::Vec3f Camera::Right() const
 {
     // Right = Up x Forward (LH cross product)
-    core::Vec3f up(0.0f, 1.0f, 0.0f);
-    return up.Cross(Forward()).Normalized();
+    return Up().Cross(Forward()).Normalized();
+}
+
+core::Vec3f Camera::Up() const
+{
+    return m_hasExplicitBasis
+        ? m_explicitUp
+        : core::Vec3f{ 0.0f, 1.0f, 0.0f };
 }
 
 void Camera::Update(float dt,
@@ -42,6 +87,8 @@ void Camera::Update(float dt,
                     bool up, bool down,
                     bool sprint)
 {
+    m_hasExplicitBasis = false;
+
     // Mouse look
     m_yaw   += mouseDeltaX * m_sensitivity;
     m_pitch -= mouseDeltaY * m_sensitivity;  // Invert Y: moving mouse up looks up
@@ -58,7 +105,7 @@ void Camera::Update(float dt,
 
     core::Vec3f fwd = Forward();
     core::Vec3f rt  = Right();
-    core::Vec3f worldUp(0.0f, 1.0f, 0.0f);
+    const core::Vec3f worldUp(0.0f, 1.0f, 0.0f);
 
     core::Vec3f moveDir(0.0f, 0.0f, 0.0f);
     if (forward)  moveDir += fwd;
@@ -79,7 +126,7 @@ core::Mat4x4 Camera::ViewMatrix() const
     // Scene transforms are camera-relative before narrowing to float, so the
     // GPU camera always sits at the local origin.
     const core::Vec3f origin = { 0.0f, 0.0f, 0.0f };
-    return core::Mat4x4::LookAt(origin, Forward(), { 0.0f, 1.0f, 0.0f });
+    return core::Mat4x4::LookAt(origin, Forward(), Up());
 }
 
 core::Mat4x4 Camera::ProjectionMatrix(float aspectRatio) const

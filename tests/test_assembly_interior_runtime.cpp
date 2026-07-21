@@ -285,6 +285,12 @@ TEST_CASE(AssemblyInterior_NearestQueryUsesRangeViewAndStableOrder)
     query.worldPosition = { 10.0, 0.0, 0.0 };
     query.worldForward = { 0.0f, 0.0f, 1.0f };
     query.maxDistanceMeters = 1.5;
+    const auto found = runtime.FindNearest(query);
+    CHECK(found.Succeeded());
+    CHECK_EQ(found.stableIndex, 0u);
+    CHECK(!found.changed);
+    CHECK_EQ(runtime.InteractionStateName(0), std::string_view("closed"));
+
     const auto activated = runtime.ActivateNearest(query);
     CHECK(activated.Succeeded());
     CHECK_EQ(activated.stableIndex, 0u);
@@ -298,6 +304,22 @@ TEST_CASE(AssemblyInterior_NearestQueryUsesRangeViewAndStableOrder)
     CHECK_EQ(
         runtime.ActivateNearest(query).status,
         scene::AssemblyInteriorStatus::InvalidArgument);
+
+    query.worldForward = { 0.0f, 0.0f, 1.0f };
+    query.maxDistanceMeters = (std::numeric_limits<double>::max)();
+    CHECK_EQ(
+        runtime.FindNearest(query).status,
+        scene::AssemblyInteriorStatus::InvalidArgument);
+    query.maxDistanceMeters = 1.5;
+    query.worldForward = {
+        (std::numeric_limits<float>::max)(),
+        (std::numeric_limits<float>::max)(),
+        (std::numeric_limits<float>::max)()
+    };
+    CHECK_EQ(
+        runtime.FindNearest(query).status,
+        scene::AssemblyInteriorStatus::InvalidArgument);
+    CHECK_EQ(runtime.InteractionStateName(0), std::string_view("opening"));
 }
 
 TEST_CASE(AssemblyInterior_NonmovingStatesCycleAndLockedMovingStateRejectsUse)

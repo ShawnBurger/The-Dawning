@@ -25,9 +25,10 @@ maps every typed locator in `reference_ship.tdassembly` to an owner record. Its
 visual records deliberately reuse the corridor prototype while final exterior,
 airlock, cockpit, LOD, and moving-part art is still unbuilt. Each collision
 record resolves to an authenticated `.tdcollision` package and publishes into
-the immutable assembly-local interior collision world. Navigation and walkable
-records remain contract-only preflight witnesses; they do not claim that
-pathfinding or the complete on-foot controller is live.
+the assembly-local interior collision world. Stateful moving blockers, pilot
+seat possession, and the fixed-step on-foot controller are live. Navigation and
+walkable records remain contract-only preflight witnesses; they do not yet claim
+pathfinding or navmesh traversal.
 
 The executable reads the generic `.tdcontent` manifest and therefore needs no
 asset-specific C++ change when a binding moves to a new cooked model. Runtime

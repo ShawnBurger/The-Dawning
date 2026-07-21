@@ -18,6 +18,11 @@ schema and workflow example, not a shipped visual asset. Each moving rigid part
 also names its visual node and shares module ownership with its interaction, so
 the cooker can bind animation to geometry without name guessing.
 
+Boardable assemblies also author locomotion spawns independently from seats.
+The reference ship's `pilot_exit_spawn` is a floor anchor owned by the cockpit
+module; runtime possession derives the full capsule from that anchor and rejects
+an exit when the live assembly-local collision snapshot obstructs it.
+
 Do not weaken this contract to admit a generated monolithic mesh. Additive schema
 changes increment `schema_version`; runtime/cooker support must land before a
 new version can be promoted.

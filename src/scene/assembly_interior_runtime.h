@@ -107,6 +107,8 @@ public:
 
     AssemblyInteriorResult ActivateInteraction(uint32_t stableIndex);
     AssemblyInteriorResult ActivateInteraction(std::string_view id);
+    AssemblyInteriorResult FindNearest(
+        const AssemblyInteractionQuery& query) const;
     AssemblyInteriorResult ActivateNearest(
         const AssemblyInteractionQuery& query);
     AssemblyInteriorResult Advance(

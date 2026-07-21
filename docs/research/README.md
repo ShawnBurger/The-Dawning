@@ -29,6 +29,13 @@ design work. For the user-facing baseline, also read the root `README.md` and
 - **`INTERACTIVE_INTERIOR_RUNTIME_CONTRACT_2026-07-21.md`** - current Stage 5A
   interaction states, nearest-use query, moving transforms, portal gating,
   snapshot atomicity, production wiring, and follow-on boundaries.
+- **`INTERIOR_COLLISION_AND_LOCOMOTION_CONTRACT_2026-07-21.md`** and
+  **`STATEFUL_INTERIOR_BLOCKERS_AND_ON_FOOT_CONTROLLER_2026-07-21.md`** - current
+  Stage 5B/5C assembly-local collision, moving blocker, and fixed-step movement
+  contracts.
+- **`PILOT_SEAT_POSSESSION_AND_SHIP_ROOT_BOUNDARY_2026-07-21.md`** - current
+  Stage 5D seat transaction, exclusive input ownership, live ship-root camera,
+  and possession acceptance contract.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
   **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
   and change reviews; useful provenance, not timeless status.

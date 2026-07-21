@@ -140,10 +140,12 @@ set(ECS_HEADERS
 # collision/simulation contracts but never read Win32 input or renderer state.
 set(GAMEPLAY_SOURCES
     src/gameplay/on_foot_controller.cpp
+    src/gameplay/pilot_possession.cpp
 )
 
 set(GAMEPLAY_HEADERS
     src/gameplay/on_foot_controller.h
+    src/gameplay/pilot_possession.h
     src/gameplay/playable_ship.h
 )
 
@@ -252,6 +254,7 @@ set(TEST_SOURCES
     tests/test_rigid_body.cpp
     tests/test_flight_control.cpp
     tests/test_on_foot_controller.cpp
+    tests/test_pilot_possession.cpp
     tests/test_physics_system.cpp
     tests/test_reference_frame.cpp
     tests/test_kepler.cpp
@@ -548,6 +551,14 @@ add_executable(TheDawningTests
     # collision snapshot as production. GPU- and platform-free.
     src/gameplay/on_foot_controller.cpp
     src/gameplay/on_foot_controller.h
+    # Explicit ship/on-foot possession, authored seat/spawn binding, and the
+    # assembly-local/world transform boundary. GPU- and platform-free.
+    src/gameplay/pilot_possession.cpp
+    src/gameplay/pilot_possession.h
+    # Camera basis only: no D3D dependency. Tests pin local-up propagation for
+    # rolled ship interiors through the same implementation the App calls.
+    src/render/camera.cpp
+    src/render/camera.h
     src/scene/assembly_runtime_resources.cpp
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h

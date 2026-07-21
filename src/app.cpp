@@ -4,6 +4,7 @@
 #include "core/input.h"
 #include "core/log.h"
 #include "gameplay/on_foot_controller.h"
+#include "gameplay/pilot_possession.h"
 #include "gameplay/playable_ship.h"
 #include "render/mesh.h"
 #include "render/texture.h"
@@ -659,11 +660,27 @@ bool App::InitializeScene()
     ecs::Material playerMaterial = m_smokeGrowthMaterial;
     playerMaterial.albedo = { 0.18f, 0.32f, 0.58f, 1.0f };
     playerMaterial.emissiveStrength = 0.45f;
+    ecs::Transform playerShipTransform{
+        { 0, 1.2, -2.0 }, core::Quatf::Identity(), { 3.0f, 0.9f, 4.4f }
+    };
+    // The rendering smoke oracle intentionally owns the legacy center-stage
+    // transform: its cascade-transition probe depends on that fixed witness.
+    // Interactive runs align the prototype ship entity with the authored
+    // assembly root until the production hierarchy replaces the cube.
+    if (!m_options.smoke)
+    {
+        if (const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
+            instance && instance->Plan())
+        {
+            const ecs::Transform& authoredRoot = instance->Plan()->RootTransform();
+            playerShipTransform.position = authoredRoot.position;
+            playerShipTransform.rotation = authoredRoot.rotation;
+        }
+    }
     m_playerShip = m_scene.CreateRenderable(
         "PlayerShip", cube,
         playerMaterial,
-        ecs::Transform{ { 0, 1.2, -2.0 }, core::Quatf::Identity(),
-                        { 3.0f, 0.9f, 4.4f } });
+        playerShipTransform);
     if (m_playerShip.IsNull())
         return false;
 
@@ -712,6 +729,10 @@ bool App::InitializeScene()
 
     core::Log::Infof("Playable ship ready: entity=%u thrusters=%u mode=COUPLED",
                      m_playerShip.id, m_thrusterVisualCount);
+    if (!InitializePlayerPossession())
+        return false;
+    if (m_options.smoke && !ValidateSmokePossessionRoundTrip())
+        return false;
 
     m_scene.CreateRenderable(
         "RedSphere", sphere,
@@ -769,6 +790,124 @@ bool App::InitializeScene()
     }
 
     core::Log::Infof("Scene populated: %u entities", m_scene.EntityCount());
+    return true;
+}
+
+bool App::InitializePlayerPossession()
+{
+    const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
+    if (!instance || !instance->IsAlive() || !instance->Plan() ||
+        !instance->Plan()->Resources() ||
+        !instance->Plan()->Resources()->assembly)
+    {
+        core::Log::Error("Player possession has no live assembly topology");
+        return false;
+    }
+
+    const gameplay::PilotSeatBindingResult resolved =
+        gameplay::ResolvePilotSeatBinding(
+            *instance->Plan()->Resources()->assembly);
+    if (!resolved.Succeeded())
+    {
+        core::Log::Errorf(
+            "Pilot-seat binding failed [%s]: %s",
+            gameplay::PilotPossessionStatusName(resolved.status),
+            resolved.error.c_str());
+        return false;
+    }
+    m_pilotSeat = resolved.binding;
+
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    if (interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+        m_pilotSeat.availableStateIndex)
+    {
+        core::Log::Error("Pilot seat did not begin in its authored available state");
+        return false;
+    }
+
+    const gameplay::PilotPossessionResult initialized =
+        gameplay::InitializeShipPossession(
+            m_pilotSeat,
+            m_pilotSeat.occupiedStateIndex,
+            m_possessionConfig);
+    if (!initialized.Succeeded())
+    {
+        core::Log::Errorf(
+            "Ship possession staging failed [%s]: %s",
+            gameplay::PilotPossessionStatusName(initialized.status),
+            initialized.error.c_str());
+        return false;
+    }
+
+    const scene::AssemblyInteriorResult occupied =
+        m_runtimeAssembly.ActivateInteraction(
+            m_scene, m_pilotSeat.interactionIndex);
+    if (!occupied.Succeeded() ||
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+            m_pilotSeat.occupiedStateIndex)
+    {
+        core::Log::Errorf(
+            "Pilot seat could not enter occupied state [%s]: %s",
+            scene::AssemblyInteriorStatusName(occupied.status),
+            occupied.error.c_str());
+        return false;
+    }
+    m_playerPossession = initialized.state;
+    m_possessionReady = true;
+    core::Log::Info(
+        "[SMOKE] pilot_possession_ready=ok context=ship seat=occupied spawn=pilot_exit_spawn");
+    return true;
+}
+
+bool App::ValidateSmokePossessionRoundTrip()
+{
+    if (!m_possessionReady || !gameplay::OwnsShipInput(m_playerPossession))
+        return false;
+
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    const gameplay::PilotPossessionStatus exit = TryExitPilotSeat();
+    if (exit != gameplay::PilotPossessionStatus::Success ||
+        !gameplay::OwnsOnFootInput(m_playerPossession) ||
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+            m_pilotSeat.availableStateIndex)
+    {
+        core::Log::Errorf(
+            "Smoke pilot exit failed [%s]",
+            gameplay::PilotPossessionStatusName(exit));
+        return false;
+    }
+
+    ecs::Transform root;
+    const gameplay::OnFootCameraResult camera = BuildPlayerShipRoot(root)
+        ? gameplay::BuildOnFootCameraPose(
+              m_playerPossession, root, m_possessionConfig)
+        : gameplay::OnFootCameraResult{};
+    if (!camera.Succeeded() ||
+        !m_camera.InitBasis(
+            camera.pose.position, camera.pose.forward, camera.pose.up))
+    {
+        core::Log::Errorf(
+            "Smoke on-foot camera root composition failed [%s]: %s",
+            gameplay::PilotPossessionStatusName(camera.status),
+            camera.error.c_str());
+        return false;
+    }
+
+    const gameplay::PilotPossessionStatus entry = TryEnterPilotSeat();
+    if (entry != gameplay::PilotPossessionStatus::Success ||
+        !gameplay::OwnsShipInput(m_playerPossession) ||
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+            m_pilotSeat.occupiedStateIndex)
+    {
+        core::Log::Errorf(
+            "Smoke pilot re-entry failed [%s]",
+            gameplay::PilotPossessionStatusName(entry));
+        return false;
+    }
+    core::Log::Info(
+        "[SMOKE] pilot_possession=ok exit=on_foot reentry=ship seat=occupied root=composed");
     return true;
 }
 
@@ -955,36 +1094,11 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_F1))
             TogglePathTracing();
 
-        if (!m_options.smoke && input.KeyPressed('F'))
+        if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
         {
-            scene::AssemblyInteractionQuery query;
-            query.worldPosition = m_camera.Position();
-            query.worldForward = m_camera.Forward();
-            const scene::AssemblyInteriorResult interaction =
-                m_runtimeAssembly.ActivateNearestInteraction(m_scene, query);
-            if (interaction.Succeeded())
-            {
-                core::Log::Infof(
-                    "Interaction %u entered state '%.*s'",
-                    interaction.stableIndex,
-                    static_cast<int>(m_runtimeAssembly.Interior()
-                        .InteractionStateName(interaction.stableIndex).size()),
-                    m_runtimeAssembly.Interior()
-                        .InteractionStateName(interaction.stableIndex).data());
-            }
-            else if (interaction.status ==
-                     scene::AssemblyInteriorStatus::Locked)
-            {
-                core::Log::Warn("The selected interaction is locked");
-            }
-            else if (interaction.status !=
-                     scene::AssemblyInteriorStatus::NotFound)
-            {
-                core::Log::Errorf(
-                    "Interaction failed [%s]: %s",
-                    scene::AssemblyInteriorStatusName(interaction.status),
-                    interaction.error.c_str());
-            }
+            m_exitCode = 12;
+            m_running = false;
+            break;
         }
 
         core::TimeStep timeStep = m_timer.Tick();
@@ -1240,7 +1354,7 @@ int App::RunMainLoop()
             }
         }
 
-        UpdatePlayerShipInput();
+        UpdatePlayerInput();
 
         if (!HandleResize())
             continue;
@@ -1287,7 +1401,12 @@ int App::RunMainLoop()
         }
 
         UpdatePlayerShipVisuals();
-        UpdateCamera(timeStep);
+        if (!UpdateCamera(timeStep))
+        {
+            m_exitCode = 12;
+            m_running = false;
+            break;
+        }
         UpdateWindowTitle(timeStep);
 
         if (!RenderFrame(timeStep))
@@ -1333,6 +1452,13 @@ bool App::AdvanceSimulation(double dt)
         }
         if (interior.changed)
             m_scene.InvalidatePathTraceHistory();
+    }
+
+    if (!UpdateOnFootSimulation(dt))
+    {
+        m_exitCode = 12;
+        m_running = false;
+        return false;
     }
 
     if (m_options.smoke && !m_smokeSnapshotVerified)
@@ -1394,16 +1520,20 @@ void App::UpdateWindowTitle(const core::TimeStep& timeStep)
     const char* flightMode = control && control->mode == ecs::FlightMode::Decoupled
         ? "DECOUPLED"
         : "COUPLED";
+    const char* controlContext = gameplay::OwnsOnFootInput(m_playerPossession)
+        ? "ON FOOT"
+        : "PILOT";
     const double speed = body ? body->linearVelocity.Length() : 0.0;
 
     char title[224] = {};
     std::snprintf(title, sizeof(title),
-                  "The Dawning V3 | %.1f fps | %u entities | %s | FLIGHT %s %.1f m/s [V mode | F1 render | F2 quality]",
-                  timeStep.fps, m_scene.EntityCount(), modeText, flightMode, speed);
+                  "The Dawning V3 | %.1f fps | %u entities | %s | %s | FLIGHT %s %.1f m/s [F use | V mode | F1 render | F2 quality]",
+                  timeStep.fps, m_scene.EntityCount(), modeText, controlContext,
+                  flightMode, speed);
     SetWindowTextA(m_window.GetHWND(), title);
 }
 
-void App::UpdatePlayerShipInput()
+void App::UpdatePlayerInput()
 {
     auto& registry = m_scene.GetRegistry();
     auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
@@ -1412,7 +1542,6 @@ void App::UpdatePlayerShipInput()
         return;
 
     const auto& input = core::input::GetState();
-    gameplay::PilotInputSnapshot snapshot;
     const gameplay::LocalMovementInput movement =
         gameplay::ResolveMovementBindings({
             input.KeyDown('W'), input.KeyDown('S'),
@@ -1421,19 +1550,6 @@ void App::UpdatePlayerShipInput()
             input.KeyDown(VK_LEFT), input.KeyDown(VK_RIGHT),
             input.KeyDown(VK_SPACE), input.KeyDown(VK_CONTROL),
         });
-    snapshot.thrustForward = movement.forward;
-    snapshot.thrustBackward = movement.backward;
-    snapshot.strafeLeft = movement.left;
-    snapshot.strafeRight = movement.right;
-    snapshot.liftUp = movement.up;
-    snapshot.liftDown = movement.down;
-    snapshot.pitchUp = input.KeyDown('I');
-    snapshot.pitchDown = input.KeyDown('K');
-    snapshot.yawLeft = input.KeyDown('J');
-    snapshot.yawRight = input.KeyDown('L');
-    snapshot.rollLeft = input.KeyDown('Q');
-    snapshot.rollRight = input.KeyDown('E');
-    snapshot.toggleMode = input.KeyPressed('V');
 
     if (m_window.IsCaptured())
     {
@@ -1450,8 +1566,45 @@ void App::UpdatePlayerShipInput()
         m_pendingPointerDeltaX = 0.0f;
         m_pendingPointerDeltaY = 0.0f;
     }
-    snapshot.pointerPitch = gameplay::PointerSteeringDemand(m_pendingPointerDeltaY);
-    snapshot.pointerYaw = gameplay::PointerSteeringDemand(m_pendingPointerDeltaX);
+
+    if (gameplay::OwnsOnFootInput(m_playerPossession))
+    {
+        ClearPlayerShipInput();
+        m_onFootCommand = {};
+        m_onFootCommand.moveForward = static_cast<double>(
+            gameplay::DigitalAxis(movement.forward, movement.backward));
+        m_onFootCommand.moveRight = static_cast<double>(
+            gameplay::DigitalAxis(movement.right, movement.left));
+        m_onFootCommand.sprint = input.KeyDown(VK_SHIFT);
+        m_onFootCommand.jumpDown = input.KeyDown(VK_SPACE);
+        return;
+    }
+
+    m_onFootCommand = {};
+    if (!gameplay::OwnsShipInput(m_playerPossession))
+    {
+        ClearPlayerShipInput();
+        return;
+    }
+
+    gameplay::PilotInputSnapshot snapshot;
+    snapshot.thrustForward = movement.forward;
+    snapshot.thrustBackward = movement.backward;
+    snapshot.strafeLeft = movement.left;
+    snapshot.strafeRight = movement.right;
+    snapshot.liftUp = movement.up;
+    snapshot.liftDown = movement.down;
+    snapshot.pitchUp = input.KeyDown('I');
+    snapshot.pitchDown = input.KeyDown('K');
+    snapshot.yawLeft = input.KeyDown('J');
+    snapshot.yawRight = input.KeyDown('L');
+    snapshot.rollLeft = input.KeyDown('Q');
+    snapshot.rollRight = input.KeyDown('E');
+    snapshot.toggleMode = input.KeyPressed('V');
+    snapshot.pointerPitch =
+        gameplay::PointerSteeringDemand(m_pendingPointerDeltaY);
+    snapshot.pointerYaw =
+        gameplay::PointerSteeringDemand(m_pendingPointerDeltaX);
 
     if (m_options.smokeFlight)
     {
@@ -1480,6 +1633,306 @@ void App::UpdatePlayerShipInput()
                              ? "COUPLED"
                              : "DECOUPLED");
     }
+}
+
+void App::ClearPlayerShipInput()
+{
+    auto& registry = m_scene.GetRegistry();
+    if (auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip))
+    {
+        control->linearDemand = {};
+        control->angularDemand = {};
+    }
+    if (auto* thrusters = registry.TryGet<ecs::ThrusterSet>(m_playerShip))
+        gameplay::ClearThrusterThrottles(*thrusters);
+}
+
+bool App::BuildPlayerShipRoot(ecs::Transform& root)
+{
+    if (!m_possessionReady || m_playerShip.IsNull())
+        return false;
+    const auto* ship =
+        m_scene.GetRegistry().TryGet<ecs::Transform>(m_playerShip);
+    if (!ship)
+        return false;
+    ecs::Transform candidate = *ship;
+    // The prototype cube's nonuniform scale is render geometry, not ship-root
+    // scale. Interior meters stay unscaled while position and orientation follow
+    // the same simulated entity.
+    candidate.scale = { 1.0f, 1.0f, 1.0f };
+    if (!gameplay::IsValidPossessionRoot(
+            candidate, m_possessionConfig.uniformRootScaleTolerance))
+    {
+        return false;
+    }
+    root = candidate;
+    return true;
+}
+
+bool App::BuildAssemblyInteractionQuery(
+    scene::AssemblyInteractionQuery& query)
+{
+    ecs::Transform liveRoot;
+    const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
+    if (!gameplay::OwnsOnFootInput(m_playerPossession) ||
+        !BuildPlayerShipRoot(liveRoot) || !instance || !instance->IsAlive() ||
+        !instance->Plan())
+    {
+        return false;
+    }
+
+    core::Vec3d localPosition;
+    core::Vec3d localForward;
+    if (!gameplay::WorldPointToAssemblyLocal(
+            liveRoot,
+            m_camera.Position(),
+            localPosition,
+            m_possessionConfig.uniformRootScaleTolerance) ||
+        !gameplay::WorldDirectionToAssemblyLocal(
+            liveRoot,
+            m_camera.Forward(),
+            localForward,
+            m_possessionConfig.uniformRootScaleTolerance))
+    {
+        return false;
+    }
+
+    const ecs::Transform& authoredRoot = instance->Plan()->RootTransform();
+    scene::AssemblyInteractionQuery candidate;
+    if (!gameplay::AssemblyLocalPointToWorld(
+            authoredRoot,
+            localPosition,
+            candidate.worldPosition,
+            m_possessionConfig.uniformRootScaleTolerance) ||
+        !gameplay::AssemblyLocalDirectionToWorld(
+            authoredRoot,
+            localForward,
+            candidate.worldForward,
+            m_possessionConfig.uniformRootScaleTolerance))
+    {
+        return false;
+    }
+    candidate.maxDistanceMeters =
+        m_possessionConfig.maximumSeatUseDistanceMeters;
+    candidate.minimumForwardDot =
+        m_possessionConfig.minimumSeatFacingDot;
+    query = candidate;
+    return true;
+}
+
+gameplay::PilotPossessionStatus App::TryExitPilotSeat()
+{
+    if (!m_possessionReady)
+        return gameplay::PilotPossessionStatus::NotInitialized;
+    const auto collision = m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!collision)
+        return gameplay::PilotPossessionStatus::CollisionFailure;
+
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    const gameplay::PilotPossessionResult staged = gameplay::StagePilotExit(
+        m_pilotSeat,
+        m_playerPossession,
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex),
+        *collision,
+        m_possessionConfig);
+    if (!staged.Succeeded())
+        return staged.status;
+
+    const scene::AssemblyInteriorResult released =
+        m_runtimeAssembly.ActivateInteraction(
+            m_scene, m_pilotSeat.interactionIndex);
+    if (!released.Succeeded() ||
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+            m_pilotSeat.availableStateIndex)
+    {
+        return gameplay::PilotPossessionStatus::InternalError;
+    }
+
+    m_playerPossession = staged.state;
+    ClearPlayerShipInput();
+    m_onFootCommand = {};
+    m_pendingPointerDeltaX = 0.0f;
+    m_pendingPointerDeltaY = 0.0f;
+    m_chaseCameraInitialized = false;
+    core::Log::Info("Control context: ON FOOT");
+    return gameplay::PilotPossessionStatus::Success;
+}
+
+gameplay::PilotPossessionStatus App::TryEnterPilotSeat()
+{
+    if (!m_possessionReady)
+        return gameplay::PilotPossessionStatus::NotInitialized;
+    const auto collision = m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!collision)
+        return gameplay::PilotPossessionStatus::CollisionFailure;
+
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    const gameplay::PilotPossessionResult staged = gameplay::StagePilotEntry(
+        m_pilotSeat,
+        m_playerPossession,
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex),
+        *collision,
+        m_possessionConfig);
+    if (!staged.Succeeded())
+        return staged.status;
+
+    const scene::AssemblyInteriorResult occupied =
+        m_runtimeAssembly.ActivateInteraction(
+            m_scene, m_pilotSeat.interactionIndex);
+    if (!occupied.Succeeded() ||
+        interior.InteractionStateIndex(m_pilotSeat.interactionIndex) !=
+            m_pilotSeat.occupiedStateIndex)
+    {
+        return gameplay::PilotPossessionStatus::InternalError;
+    }
+
+    m_playerPossession = staged.state;
+    m_onFootCommand = {};
+    m_pendingPointerDeltaX = 0.0f;
+    m_pendingPointerDeltaY = 0.0f;
+    m_chaseCameraInitialized = false;
+    core::Log::Info("Control context: PILOT");
+    return gameplay::PilotPossessionStatus::Success;
+}
+
+bool App::HandleUseAction()
+{
+    if (gameplay::OwnsShipInput(m_playerPossession))
+    {
+        const gameplay::PilotPossessionStatus status = TryExitPilotSeat();
+        if (status == gameplay::PilotPossessionStatus::Success)
+            return true;
+        if (status == gameplay::PilotPossessionStatus::SpawnBlocked ||
+            status == gameplay::PilotPossessionStatus::SeatUnavailable)
+        {
+            core::Log::Warnf(
+                "Pilot exit rejected [%s]",
+                gameplay::PilotPossessionStatusName(status));
+            return true;
+        }
+        core::Log::Errorf(
+            "Pilot exit failed [%s]",
+            gameplay::PilotPossessionStatusName(status));
+        return false;
+    }
+
+    if (!gameplay::OwnsOnFootInput(m_playerPossession))
+        return false;
+
+    scene::AssemblyInteractionQuery query;
+    if (!BuildAssemblyInteractionQuery(query))
+    {
+        core::Log::Error("Interaction query could not cross the ship-root boundary");
+        return false;
+    }
+    const scene::AssemblyInteriorResult found =
+        m_runtimeAssembly.Interior().FindNearest(query);
+    if (found.status == scene::AssemblyInteriorStatus::NotFound)
+        return true;
+    if (!found.Succeeded())
+    {
+        core::Log::Errorf(
+            "Interaction query failed [%s]: %s",
+            scene::AssemblyInteriorStatusName(found.status),
+            found.error.c_str());
+        return false;
+    }
+    if (found.stableIndex == m_pilotSeat.interactionIndex)
+    {
+        const gameplay::PilotPossessionStatus entry = TryEnterPilotSeat();
+        if (entry == gameplay::PilotPossessionStatus::Success)
+            return true;
+        if (entry == gameplay::PilotPossessionStatus::SeatUnavailable ||
+            entry == gameplay::PilotPossessionStatus::OutOfRange ||
+            entry == gameplay::PilotPossessionStatus::NotFacing)
+        {
+            core::Log::Warnf(
+                "Pilot entry rejected [%s]",
+                gameplay::PilotPossessionStatusName(entry));
+            return true;
+        }
+        core::Log::Errorf(
+            "Pilot entry failed [%s]",
+            gameplay::PilotPossessionStatusName(entry));
+        return false;
+    }
+
+    const scene::AssemblyInteriorResult interaction =
+        m_runtimeAssembly.ActivateInteraction(m_scene, found.stableIndex);
+    if (interaction.Succeeded())
+    {
+        const std::string_view state = m_runtimeAssembly.Interior()
+            .InteractionStateName(interaction.stableIndex);
+        core::Log::Infof(
+            "Interaction %u entered state '%.*s'",
+            interaction.stableIndex,
+            static_cast<int>(state.size()),
+            state.data());
+        return true;
+    }
+    if (interaction.status == scene::AssemblyInteriorStatus::Locked)
+    {
+        core::Log::Warn("The selected interaction is locked");
+        return true;
+    }
+    core::Log::Errorf(
+        "Interaction failed [%s]: %s",
+        scene::AssemblyInteriorStatusName(interaction.status),
+        interaction.error.c_str());
+    return false;
+}
+
+bool App::UpdateOnFootSimulation(double dt)
+{
+    if (!gameplay::OwnsOnFootInput(m_playerPossession))
+        return true;
+    const auto collision = m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!collision)
+    {
+        core::Log::Error("On-foot simulation has no live collision snapshot");
+        return false;
+    }
+
+    const gameplay::PilotPossessionResult looked = gameplay::ApplyOnFootLook(
+        m_playerPossession,
+        m_pendingPointerDeltaX,
+        m_pendingPointerDeltaY,
+        m_possessionConfig);
+    if (!looked.Succeeded())
+    {
+        core::Log::Errorf(
+            "On-foot look step failed [%s]: %s",
+            gameplay::PilotPossessionStatusName(looked.status),
+            looked.error.c_str());
+        return false;
+    }
+
+    gameplay::OnFootCommand command = m_onFootCommand;
+    command.viewForward = gameplay::OnFootViewForward(looked.state);
+    const gameplay::OnFootStepResult stepped = gameplay::StepOnFootController(
+        *collision,
+        looked.state.onFoot,
+        command,
+        dt);
+    if (!stepped.Succeeded())
+    {
+        core::Log::Errorf(
+            "On-foot fixed step failed [%s/%s]",
+            gameplay::OnFootControllerStatusName(stepped.status),
+            scene::InteriorCollisionStatusName(stepped.collisionStatus));
+        return false;
+    }
+
+    m_playerPossession = looked.state;
+    m_playerPossession.onFoot = stepped.state;
+    // One raw-input batch belongs to one accepted fixed step. A catch-up loop
+    // may execute more steps immediately, but those steps receive zero look
+    // delta rather than replaying the same mouse counts.
+    m_pendingPointerDeltaX = 0.0f;
+    m_pendingPointerDeltaY = 0.0f;
+    return true;
 }
 
 void App::UpdatePlayerShipVisuals()
@@ -1539,8 +1992,33 @@ void App::UpdatePlayerShipVisuals()
     }
 }
 
-void App::UpdateCamera(const core::TimeStep& timeStep)
+bool App::UpdateCamera(const core::TimeStep& timeStep)
 {
+    if (gameplay::OwnsOnFootInput(m_playerPossession))
+    {
+        ecs::Transform root;
+        if (!BuildPlayerShipRoot(root))
+        {
+            core::Log::Error("On-foot camera lost the player ship root");
+            return false;
+        }
+        const gameplay::OnFootCameraResult pose =
+            gameplay::BuildOnFootCameraPose(
+                m_playerPossession, root, m_possessionConfig);
+        if (!pose.Succeeded() ||
+            !m_camera.InitBasis(
+                pose.pose.position, pose.pose.forward, pose.pose.up))
+        {
+            core::Log::Errorf(
+                "On-foot camera pose failed [%s]: %s",
+                gameplay::PilotPossessionStatusName(pose.status),
+                pose.error.c_str());
+            return false;
+        }
+        m_chaseCameraInitialized = false;
+        return true;
+    }
+
     const auto& registry = m_scene.GetRegistry();
     if (const auto* ship = registry.TryGet<ecs::Transform>(m_playerShip))
     {
@@ -1557,7 +2035,7 @@ void App::UpdateCamera(const core::TimeStep& timeStep)
         m_chaseCameraPitch = pose.pitchDegrees;
         m_chaseCameraInitialized = true;
         m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
-        return;
+        return true;
     }
 
     m_chaseCameraInitialized = false;
@@ -1585,6 +2063,7 @@ void App::UpdateCamera(const core::TimeStep& timeStep)
         movement.forward, movement.backward, movement.left, movement.right,
         movement.up, movement.down,
         input.KeyDown(VK_SHIFT));
+    return true;
 }
 
 bool App::HandleResize()

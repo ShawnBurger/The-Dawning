@@ -479,8 +479,8 @@ AssemblyInteriorResult AssemblyInteriorRuntime::ActivateInteraction(
     return ActivateInteraction(it->second);
 }
 
-AssemblyInteriorResult AssemblyInteriorRuntime::ActivateNearest(
-    const AssemblyInteractionQuery& query)
+AssemblyInteriorResult AssemblyInteriorRuntime::FindNearest(
+    const AssemblyInteractionQuery& query) const
 {
     if (!m_assembly)
     {
@@ -488,12 +488,15 @@ AssemblyInteriorResult AssemblyInteriorRuntime::ActivateNearest(
             AssemblyInteriorStatus::NotInitialized,
             "interior runtime is not initialized");
     }
+    const float forwardLengthSq = query.worldForward.LengthSq();
     if (!IsFinite(query.worldPosition) || !IsFinite(query.worldForward) ||
         !std::isfinite(query.maxDistanceMeters) ||
         !std::isfinite(query.minimumForwardDot) ||
-        query.maxDistanceMeters <= 0.0 || query.minimumForwardDot < -1.0f ||
-        query.minimumForwardDot > 1.0f ||
-        query.worldForward.LengthSq() < 1.0e-8f)
+        !std::isfinite(forwardLengthSq) ||
+        query.maxDistanceMeters <= 0.0 ||
+        query.maxDistanceMeters > 1.0e6 ||
+        query.minimumForwardDot < -1.0f ||
+        query.minimumForwardDot > 1.0f || forwardLengthSq < 1.0e-8f)
     {
         return Failure(
             AssemblyInteriorStatus::InvalidArgument,
@@ -538,7 +541,19 @@ AssemblyInteriorResult AssemblyInteriorRuntime::ActivateNearest(
             AssemblyInteriorStatus::NotFound,
             "no interaction is within the query volume");
     }
-    return ActivateInteraction(bestIndex);
+    AssemblyInteriorResult result;
+    result.status = AssemblyInteriorStatus::Success;
+    result.stableIndex = bestIndex;
+    return result;
+}
+
+AssemblyInteriorResult AssemblyInteriorRuntime::ActivateNearest(
+    const AssemblyInteractionQuery& query)
+{
+    const AssemblyInteriorResult found = FindNearest(query);
+    return found.Succeeded()
+        ? ActivateInteraction(found.stableIndex)
+        : found;
 }
 
 AssemblyInteriorResult AssemblyInteriorRuntime::Advance(

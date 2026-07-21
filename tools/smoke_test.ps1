@@ -193,6 +193,12 @@ Assert-Marker "on_foot_controller" "ok"
 Assert-Marker "closed" "blocked"
 Assert-Marker "open" "traversable"
 Assert-Marker "blockers" "2"
+Assert-Marker "pilot_possession_ready" "ok"
+Assert-Marker "pilot_possession" "ok"
+Assert-Marker "exit" "on_foot"
+Assert-Marker "reentry" "ship"
+Assert-Marker "seat" "occupied"
+Assert-Marker "root" "composed"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never

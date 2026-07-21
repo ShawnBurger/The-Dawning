@@ -17,6 +17,13 @@ class Camera
 public:
     void Init(const core::Vec3d& position, float yawDeg, float pitchDeg);
 
+    // Sets a complete camera basis for contexts whose local up is not world
+    // +Y, such as walking inside a rolled ship. Returns false without changing
+    // the camera when the supplied basis is non-finite or degenerate.
+    bool InitBasis(const core::Vec3d& position,
+                   const core::Vec3f& forward,
+                   const core::Vec3f& up);
+
     // Call once per frame with input deltas
     void Update(float dt,
                 float mouseDeltaX, float mouseDeltaY,
@@ -34,7 +41,7 @@ public:
     const core::Vec3d& Position() const { return m_position; }
     core::Vec3f Forward() const;
     core::Vec3f Right() const;
-    core::Vec3f Up() const { return { 0.0f, 1.0f, 0.0f }; }
+    core::Vec3f Up() const;
 
     float Yaw() const { return m_yaw; }
     float Pitch() const { return m_pitch; }
@@ -61,6 +68,10 @@ private:
     float m_fovDeg = 70.0f;
     float m_nearZ = 0.1f;
     float m_farZ = 10000.0f;
+
+    core::Vec3f m_explicitForward = { 0.0f, 0.0f, 1.0f };
+    core::Vec3f m_explicitUp = { 0.0f, 1.0f, 0.0f };
+    bool m_hasExplicitBasis = false;
 };
 
 } // namespace render

@@ -84,6 +84,7 @@
     {"id": "airlock_outer", "module": "airlock_module", "type": "portal", "position_m": [0, 0, -1], "forward": [0, 0, -1], "up": [0, 1, 0]},
     {"id": "airlock_inner", "module": "airlock_module", "type": "portal", "position_m": [0, 0, 1], "forward": [0, 0, 1], "up": [0, 1, 0]},
     {"id": "cockpit_entry", "module": "cockpit_module", "type": "portal", "position_m": [0, 0, -1], "forward": [0, 0, -1], "up": [0, 1, 0]},
+    {"id": "pilot_exit_spawn", "module": "cockpit_module", "type": "spawn", "position_m": [0, -0.5, 0], "forward": [0, 0, 1], "up": [0, 1, 0]},
     {"id": "pilot_seat_anchor", "module": "cockpit_module", "type": "interaction", "position_m": [0, 0.6, 1], "forward": [0, 0, 1], "up": [0, 1, 0]}
   ],
   "zones": [

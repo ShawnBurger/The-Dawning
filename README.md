@@ -301,10 +301,14 @@ The camera basis exists in `CBPerFrame` specifically to close that gap. Toggling
 - `F1`: toggle raster/path tracing.
 - `F2`: toggle path tracing quality.
 - `F3`: toggle the debug overlay.
-- `F`: use the nearest authored interaction in the camera view cone.
-- `WASD` or arrow keys: forward/back thrust and left/right strafe.
-- `Space` / `Ctrl`: lift up/down.
-- Mouse: pitch and yaw after clicking into the window.
+- `F`: exit the occupied pilot seat, or use the nearest authored on-foot
+  interaction and re-enter the available pilot seat.
+- `WASD` or arrow keys: ship thrust/strafe while piloting; view-relative walk
+  while on foot.
+- `Space` / `Ctrl`: ship lift up/down; `Space` jumps while on foot.
+- `Shift`: sprint while on foot.
+- Mouse: ship pitch/yaw while piloting; local camera look while on foot after
+  clicking into the window.
 - `I/J/K/L`: keyboard pitch/yaw fallback.
 - `Q` / `E`: roll left/right.
 - `V`: toggle coupled flight assist / decoupled Newtonian flight.

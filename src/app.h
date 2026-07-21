@@ -2,6 +2,7 @@
 
 #include "core/timer.h"
 #include "core/window.h"
+#include "gameplay/pilot_possession.h"
 #include "render/camera.h"
 #include "render/d3d12_device.h"
 #include "render/debug_overlay.h"
@@ -45,6 +46,8 @@ public:
 private:
     bool Initialize();
     bool InitializeScene();
+    bool InitializePlayerPossession();
+    bool ValidateSmokePossessionRoundTrip();
     void InitializePathTracingState();
     int RunMainLoop();
     void Shutdown();
@@ -60,9 +63,17 @@ private:
     // reallocate with frames in flight, which is a raster-path hazard.
     void ApplySmokeGrowthStress();
     void UpdateWindowTitle(const core::TimeStep& timeStep);
-    void UpdatePlayerShipInput();
+    void UpdatePlayerInput();
+    void ClearPlayerShipInput();
+    bool HandleUseAction();
+    gameplay::PilotPossessionStatus TryExitPilotSeat();
+    gameplay::PilotPossessionStatus TryEnterPilotSeat();
+    bool BuildPlayerShipRoot(ecs::Transform& root);
+    bool BuildAssemblyInteractionQuery(
+        scene::AssemblyInteractionQuery& query);
+    bool UpdateOnFootSimulation(double dt);
     void UpdatePlayerShipVisuals();
-    void UpdateCamera(const core::TimeStep& timeStep);
+    bool UpdateCamera(const core::TimeStep& timeStep);
     bool AdvanceSimulation(double dt);
     bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
@@ -130,6 +141,11 @@ private:
     scene::MeshHandle m_smokeGrowthMesh;
     ecs::Entity m_smokeTextureEntity;
     ecs::Entity m_playerShip;
+    gameplay::PilotSeatBinding m_pilotSeat;
+    gameplay::PlayerPossessionState m_playerPossession;
+    gameplay::PilotPossessionConfig m_possessionConfig;
+    gameplay::OnFootCommand m_onFootCommand;
+    bool m_possessionReady = false;
     std::array<ecs::Entity, ecs::ThrusterSet::kMaxThrusters> m_thrusterVisuals = {};
     scene::MeshHandle m_thrusterVisualMesh;
     uint32_t m_thrusterVisualCount = 0;
