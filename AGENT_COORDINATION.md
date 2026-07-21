@@ -584,10 +584,12 @@ are now integrated as well. The current order is:
    do not reopen already-proven integration gates.
 2. Preserve the one-owner simulation contracts established by WS-014 through
    WS-017 while Claude's save/load, asset, and render work remains isolated.
-3. Add the fixed-step orchestration layer that orders gravity, atmosphere,
+3. Reconcile the three motion owners (N-body, rails, and force-integrated rigid
+   bodies) and add the frame-aware gravity force bridge required by the ship.
+4. Add the fixed-step orchestration layer that orders gravity, atmosphere,
    flight control, collision, and frame transitions without moving those pure
    kernels into application or rendering code.
-4. Register any app/scene wiring only after the active Claude render and asset
+5. Register any app/scene wiring only after the active Claude render and asset
    worktrees are reconciled, because those paths currently overlap.
 
 ### Live collision review handoff (2026-07-20)
@@ -1294,9 +1296,56 @@ are now integrated as well. The current order is:
   once before `StepFlightPhysics` for each atmospheric body, must not apply
   another drag term, and must substep when a fixed step crosses a material
   fraction of atmospheric scale height.
-- Next action: retire the clean feature worktree after pushing `main`; register a
-  GPU-free fixed-step simulation orchestration lane while Claude's app, asset, and
-  rendering paths remain active
+- Next action: retire the clean feature worktree after pushing `main`; register
+  the GPU-free force-integrated gravity prerequisite while Claude's app, asset,
+  and rendering paths remain active
+
+### WS-018: Force-integrated gravity and three-way motion ownership
+
+- Status: ACTIVE
+- Outcome: give thrusting, atmospheric, and FTL-capable rigid bodies an explicit
+  gravity-fed motion owner that cannot also be advanced by N-body or Kepler rails
+- Primary: Codex
+- Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
+- Branch: `codex/force-integrated-gravity`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-force-integrated-gravity`
+- Base commit: registration commit created from `ba49646`
+- Owned paths: the additive `OrbitOwner::ForceIntegrated` value and its comments
+  in `src/ecs/components.h`; `src/sim/physics_system.{h,cpp}`;
+  `tests/test_physics_system.cpp`; the exact owner promotions and assertions in
+  `src/sim/{atmosphere_system,ftl_system}.cpp` and their tests; and the motion
+  ownership/gravity-adapter contracts in existing research documentation
+- Excluded paths: N-body/collision/reference-frame/atmosphere/FTL math kernels,
+  `CMakeLists.txt`, app/input/scene callsites, renderer/shaders/assets, Claude's
+  save codec files, networking, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned. Claude's
+  active save/load lane encodes `OrbitOwner` as a byte and must accept the new
+  value 2 when rebased, but Codex will not edit that dirty worktree or its files
+- Interface contract: `NBodyActive`, `OnRails`, and `ForceIntegrated` are mutually
+  exclusive movers. `StepFlightPhysics` skips gravitational entities owned by
+  N-body or rails while preserving legacy non-gravitational bodies. A GPU-free
+  pre-step gathers valid massive sources, expresses them in each force-integrated
+  target's frame, calls the reviewed deterministic `GravityAccelerationAt`, and
+  atomically stages `mass * acceleration` into each target's force accumulator.
+  Atmosphere entry and rigid-body FTL arrival promote to `ForceIntegrated`
+- Acceptance gates: two-body analytic gravity through the real registry and
+  subsequent rigid-body step; cross-frame known answer; deterministic source
+  ordering; self-source exclusion; exact no-op for N-body and rail owners; legacy
+  flight behavior unchanged; malformed frames, duplicate IDs, invalid source or
+  target state, and force overflow reject without any partial accumulator write;
+  Debug/Release CPU suites and combined six-mode smoke
+- Negative controls: treating every `GravitationalBody` as a flight target must
+  double-advance an N-body/rail fixture; summing sources in ECS insertion order
+  must differ in a cancellation-sensitive fixture; atmosphere or FTL promotion
+  to `NBodyActive` must fail the one-owner assertions
+- Latest commit: registration pending
+- Residual risk: this lane supplies the gravity force and ownership boundary but
+  deliberately does not gather/step/reconcile the passive N-body set, propagate
+  rails, resolve collision entity destruction, or choose scene run order
+- Next action: publish registration, create the isolated worktree, establish the
+  ownership/atomicity negative controls, implement without CMake edits, and run
+  the complete validation matrix
 
 ## 20. Helper Commands
 
