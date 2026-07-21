@@ -181,6 +181,7 @@ set(SIM_HEADERS
 )
 
 set(SCENE_SOURCES
+    src/scene/assembly_interior_runtime.cpp
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_runtime_host.cpp
     src/scene/assembly_runtime_resources.cpp
@@ -190,6 +191,7 @@ set(SCENE_SOURCES
 )
 
 set(SCENE_HEADERS
+    src/scene/assembly_interior_runtime.h
     src/scene/assembly_instantiator.h
     src/scene/assembly_runtime_host.h
     src/scene/assembly_runtime_resources.h
@@ -208,6 +210,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_assembly_interior_runtime.cpp
     tests/test_assembly_instantiator.cpp
     tests/test_assembly_runtime_resources.cpp
     tests/test_assembly_resource_catalog.cpp
@@ -484,6 +487,10 @@ add_executable(TheDawningTests
     # Registry target and fault-injected test target both remain GPU-free.
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_instantiator.h
+    # Deterministic authored-interior state machine and moving-part transform
+    # reconstruction. GPU-free: it owns no ECS entities or render resources.
+    src/scene/assembly_interior_runtime.cpp
+    src/scene/assembly_interior_runtime.h
     src/scene/assembly_runtime_resources.cpp
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h

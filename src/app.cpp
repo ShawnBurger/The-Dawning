@@ -481,6 +481,31 @@ bool App::InitializeScene()
                           runtimeCommitted.error.c_str());
         return false;
     }
+    if (m_options.smoke)
+    {
+        const scene::AssemblyInteriorResult activated =
+            m_runtimeAssembly.ActivateInteraction(m_scene, "outer_hatch");
+        const scene::AssemblyInteriorResult advanced = activated.Succeeded()
+            ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
+            : activated;
+        const scene::AssemblyInteriorRuntime& interior =
+            m_runtimeAssembly.Interior();
+        const uint32_t portalIndex = interior.InteractionPortalIndex(
+            activated.stableIndex);
+        if (!activated.Succeeded() || !advanced.Succeeded() ||
+            interior.InteractionStateName(activated.stableIndex) != "open" ||
+            portalIndex == asset::kAssemblyNoIndex ||
+            !interior.IsPortalTraversable(portalIndex))
+        {
+            core::Log::Errorf(
+                "Interior smoke interaction failed [%s]: %s",
+                scene::AssemblyInteriorStatusName(advanced.status),
+                advanced.error.c_str());
+            return false;
+        }
+        core::Log::Info(
+            "[SMOKE] interior_interaction=ok interaction=outer_hatch state=open portal=outer_entry traversable=yes");
+    }
 
     auto& resources = m_scene.GetResources();
     const auto cube = resources.AddMesh(std::move(cubeMesh), "Cube");
@@ -667,6 +692,7 @@ void App::InitializePathTracingState()
                      m_rtQualityInfo.maxBounces,
                      m_rtQualityInfo.maxBounces == 1 ? "" : "s");
     core::Log::Info("Flight controls: WASD/arrows translate, Space/Ctrl lift, captured mouse steers, IJKL attitude, Q/E roll, V coupled/decoupled");
+    core::Log::Info("Interaction controls: F uses the nearest authored control in view");
     core::Log::Info("Render controls: F1 toggles raster/path tracing, F2 toggles RT quality, F3 toggles overlay");
 }
 
@@ -831,6 +857,38 @@ int App::RunMainLoop()
 
         if (input.KeyPressed(VK_F1))
             TogglePathTracing();
+
+        if (!m_options.smoke && input.KeyPressed('F'))
+        {
+            scene::AssemblyInteractionQuery query;
+            query.worldPosition = m_camera.Position();
+            query.worldForward = m_camera.Forward();
+            const scene::AssemblyInteriorResult interaction =
+                m_runtimeAssembly.ActivateNearestInteraction(m_scene, query);
+            if (interaction.Succeeded())
+            {
+                core::Log::Infof(
+                    "Interaction %u entered state '%.*s'",
+                    interaction.stableIndex,
+                    static_cast<int>(m_runtimeAssembly.Interior()
+                        .InteractionStateName(interaction.stableIndex).size()),
+                    m_runtimeAssembly.Interior()
+                        .InteractionStateName(interaction.stableIndex).data());
+            }
+            else if (interaction.status ==
+                     scene::AssemblyInteriorStatus::Locked)
+            {
+                core::Log::Warn("The selected interaction is locked");
+            }
+            else if (interaction.status !=
+                     scene::AssemblyInteriorStatus::NotFound)
+            {
+                core::Log::Errorf(
+                    "Interaction failed [%s]: %s",
+                    scene::AssemblyInteriorStatusName(interaction.status),
+                    interaction.error.c_str());
+            }
+        }
 
         core::TimeStep timeStep = m_timer.Tick();
         bool advancedFlightStep = false;
@@ -1161,6 +1219,24 @@ bool App::AdvanceSimulation(double dt)
         m_scene.InvalidatePathTraceHistory();
     if (result.drainFixedAccumulator)
         m_timer.DiscardFixedSteps();
+
+    if (m_runtimeAssembly.IsLive())
+    {
+        const scene::AssemblyInteriorResult interior =
+            m_runtimeAssembly.AdvanceInterior(m_scene, dt);
+        if (!interior.Succeeded())
+        {
+            core::Log::Errorf(
+                "Interior fixed step rejected [%s]: %s",
+                scene::AssemblyInteriorStatusName(interior.status),
+                interior.error.c_str());
+            m_exitCode = 11;
+            m_running = false;
+            return false;
+        }
+        if (interior.changed)
+            m_scene.InvalidatePathTraceHistory();
+    }
 
     if (m_options.smoke && !m_smokeSnapshotVerified)
     {

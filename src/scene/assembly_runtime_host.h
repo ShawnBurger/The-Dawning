@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assembly_interior_runtime.h"
 #include "assembly_runtime_resources.h"
 #include "model_loader.h"
 #include "../asset/runtime_content_manifest.h"
@@ -25,6 +26,7 @@ enum class AssemblyRuntimeHostStatus : uint8_t
     CatalogFailure,
     PreparationFailure,
     CommitFailure,
+    InteriorFailure,
     AllocationFailure,
     InternalError
 };
@@ -61,6 +63,24 @@ public:
 
     AssemblyRuntimeHostResult CommitAfterUploadRetirement(Scene& scene);
 
+    AssemblyInteriorResult ActivateInteraction(
+        Scene& scene,
+        uint32_t stableIndex);
+    AssemblyInteriorResult ActivateInteraction(
+        Scene& scene,
+        std::string_view id);
+    AssemblyInteriorResult ActivateNearestInteraction(
+        Scene& scene,
+        const AssemblyInteractionQuery& query);
+    AssemblyInteriorResult AdvanceInterior(
+        Scene& scene,
+        double dt,
+        const AssemblyInteriorConfig& config = {});
+    AssemblyInteriorSnapshot CaptureInteriorSnapshot() const;
+    AssemblyInteriorResult ApplyInteriorSnapshot(
+        Scene& scene,
+        const AssemblyInteriorSnapshot& snapshot);
+
     bool Shutdown(
         Scene& scene,
         render::D3D12Device& device,
@@ -69,9 +89,13 @@ public:
     bool IsPending() const { return m_pending; }
     bool IsLive() const { return m_instance && m_instance->IsAlive(); }
     const AssemblyInstance* Instance() const { return m_instance.get(); }
+    const AssemblyInteriorRuntime& Interior() const { return m_interior; }
     const asset::RuntimeContentManifest& Manifest() const { return m_manifest; }
 
 private:
+    AssemblyInteriorResult ValidateInteriorEntities(Scene& scene) const;
+    AssemblyInteriorResult ApplyInteriorTransforms(Scene& scene) const;
+
     void ReleaseState(
         Scene& scene,
         render::D3D12Device& device,
@@ -84,6 +108,7 @@ private:
     std::unique_ptr<asset::AssemblyResourceCatalogStore> m_catalog;
     std::shared_ptr<const PreparedAssemblyPlan> m_plan;
     std::shared_ptr<AssemblyInstance> m_instance;
+    AssemblyInteriorRuntime m_interior;
     bool m_pending = false;
 };
 

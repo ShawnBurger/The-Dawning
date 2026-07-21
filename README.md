@@ -18,6 +18,8 @@ Do not merge old snapshots directly into this source tree.
 - Versioned `.tdcontent` deployment manifests that bind exact cooked assembly
   locators to immutable model/contract owners and publish the complete ECS graph
   transactionally after GPU upload retirement.
+- Deterministic authored interior interactions with reversible moving parts,
+  camera-relative nearest use, portal passability, and topology-bound snapshots.
 - Layer 4 material work is partially landed: albedo/normal textures,
   Cook-Torrance GGX shading, packed ORM (occlusion/roughness/metallic) maps, a
   linear HDR scene target, bloom, and a separate tone-map resolve pass exist;
@@ -299,6 +301,7 @@ The camera basis exists in `CBPerFrame` specifically to close that gap. Toggling
 - `F1`: toggle raster/path tracing.
 - `F2`: toggle path tracing quality.
 - `F3`: toggle the debug overlay.
+- `F`: use the nearest authored interaction in the camera view cone.
 - `WASD` or arrow keys: forward/back thrust and left/right strafe.
 - `Space` / `Ctrl`: lift up/down.
 - Mouse: pitch and yaw after clicking into the window.

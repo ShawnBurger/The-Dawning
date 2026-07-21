@@ -168,16 +168,20 @@ Available now:
   ingestion, source snapshots, limits, and deterministic `.tdmodel` cooking;
 - runtime mesh/material/texture loading;
 - a credential-safe, content-addressed Meshy text client;
-- the versioned interior assembly contract and CI validator added by WS-021.
+- the versioned interior assembly contract and CI validator added by WS-021;
+- deterministic cooked assembly loading, typed resource resolution, immutable
+  catalog leases, transactional ECS instantiation, and data-driven runtime
+  ownership from WS-022 through WS-026;
+- the WS-027 Stage 5A interaction runtime for nearest use, reversible authored
+  moving parts, exact-open portal passability, and save-ready interior state.
 
 Still absent:
 
-- runtime `.tdasset.json` loading and entity/module instantiation;
 - preservation of authored nodes/pivots/sockets in `.tdmodel`;
 - collision mesh cooking and scene queries;
 - navmesh generation/streaming and dynamic portal links;
 - player/EVA controllers and boarding/seat possession;
-- interaction/state-machine framework for doors, lifts, consoles, ladders;
+- persistent game-save envelopes containing interior state;
 - pressure zones, atmosphere exchange, seals, and decompression;
 - interior local lights, clustered light culling, local shadows, and portal/PVS
   occlusion;
@@ -186,16 +190,16 @@ Still absent:
 
 ## Prioritized implementation roadmap
 
-1. Add a C++ assembly-manifest loader and preserve module/node/pivot identity in
-   a versioned cooked package.
-2. Add collision sources, player capsule queries, and walkable/nav data.
-3. Add portal-aware interactions and save/load state for doors/hatches/lifts.
-4. Add pressure zones and couple seals to the existing atmosphere simulation.
-5. Add cockpit possession, on-foot/EVA movement, and boarding transitions.
-6. Add clustered local lighting, local shadows, and portal/PVS interior culling.
-7. Add deterministic Blender import/cleanup/export scripts and multi-image Meshy
+1. Add collision sources, player capsule queries, and walkable/nav data; consume
+   WS-027 portal passability as dynamic nav-link state.
+2. Add pressure zones and couple WS-027 closure state to atmosphere simulation.
+3. Add cockpit possession, on-foot/EVA movement, and boarding transitions.
+4. Add a game-save envelope that atomically contains simulation and interior
+   snapshots plus world/gameplay identity.
+5. Add clustered local lighting, local shadows, and portal/PVS interior culling.
+6. Add deterministic Blender import/cleanup/export scripts and multi-image Meshy
    ingestion after approved reference sheets exist.
-8. Build an assembly/editor view only after the data contracts above stabilize;
+7. Build an assembly/editor view only after the data contracts above stabilize;
    the editor should edit authoritative manifests, not invent a second format.
 
 ## Credential and cost policy

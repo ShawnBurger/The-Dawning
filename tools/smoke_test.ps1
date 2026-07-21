@@ -173,6 +173,14 @@ Assert-Marker "asset" "ship.reference.fighter"
 Assert-Marker "modules" "3"
 Assert-Marker "moving_parts" "2"
 Assert-Marker "entities" "6"
+Assert-Marker "interior_runtime_ready" "ok"
+Assert-Marker "interactions" "3"
+Assert-Marker "portals" "2"
+Assert-Marker "interior_interaction" "ok"
+Assert-Marker "interaction" "outer_hatch"
+Assert-Marker "state" "open"
+Assert-Marker "portal" "outer_entry"
+Assert-Marker "traversable" "yes"
 # Four cascades on ONE Texture2DArray. The slice count is asserted separately
 # from the slot because they fail independently: the array can lose a slice
 # without the descriptor moving, and vice versa. %u on the C++ side, never

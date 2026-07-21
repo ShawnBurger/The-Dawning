@@ -30,6 +30,18 @@ AssemblyRuntimeHostResult Failure(
     return result;
 }
 
+AssemblyInteriorResult InteriorFailure(
+    AssemblyInteriorStatus status,
+    std::string error,
+    uint32_t stableIndex = asset::kAssemblyNoIndex)
+{
+    AssemblyInteriorResult result;
+    result.status = status;
+    result.stableIndex = stableIndex;
+    result.error = std::move(error);
+    return result;
+}
+
 bool IsNonZero(const asset::Sha256Digest& digest)
 {
     for (uint8_t byte : digest.bytes)
@@ -151,6 +163,7 @@ const char* AssemblyRuntimeHostStatusName(AssemblyRuntimeHostStatus status)
     case AssemblyRuntimeHostStatus::CatalogFailure: return "catalog failure";
     case AssemblyRuntimeHostStatus::PreparationFailure: return "preparation failure";
     case AssemblyRuntimeHostStatus::CommitFailure: return "commit failure";
+    case AssemblyRuntimeHostStatus::InteriorFailure: return "interior failure";
     case AssemblyRuntimeHostStatus::AllocationFailure: return "allocation failure";
     case AssemblyRuntimeHostStatus::InternalError: return "internal error";
     default: return "unknown";
@@ -164,7 +177,7 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
     const std::filesystem::path& manifestPath)
 {
     if (m_pending || m_instance || m_plan || m_catalog || m_owners ||
-        !m_models.empty())
+        m_interior.IsInitialized() || !m_models.empty())
     {
         return Failure(
             AssemblyRuntimeHostStatus::InvalidState,
@@ -440,7 +453,39 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
                 AssemblyInstantiationStatusName(committed.status));
     }
 
+    const AssemblyInteriorResult interiorInitialized = m_interior.Initialize(
+        m_assembly, m_plan->Modules(), m_plan->MovingParts());
+    if (!interiorInitialized.Succeeded())
+    {
+        DestroyAssemblyInstance(target, *committed.instance);
+        m_interior.Shutdown();
+        m_plan.reset();
+        m_pending = false;
+        return Failure(
+            AssemblyRuntimeHostStatus::InteriorFailure,
+            std::string("interior runtime initialization failed: ") +
+                AssemblyInteriorStatusName(interiorInitialized.status) +
+                (interiorInitialized.error.empty()
+                    ? std::string{}
+                    : std::string(" (") + interiorInitialized.error + ")"));
+    }
+
     m_instance = committed.instance;
+    const AssemblyInteriorResult initialTransforms =
+        ApplyInteriorTransforms(scene);
+    if (!initialTransforms.Succeeded())
+    {
+        DestroyAssemblyInstance(target, *m_instance);
+        m_instance.reset();
+        m_interior.Shutdown();
+        m_plan.reset();
+        m_pending = false;
+        return Failure(
+            AssemblyRuntimeHostStatus::InteriorFailure,
+            std::string("interior ECS publication failed: ") +
+                initialTransforms.error);
+    }
+
     m_plan.reset();
     m_pending = false;
     core::Log::Infof(
@@ -449,7 +494,138 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
         m_assembly->modules.size(),
         m_assembly->movingParts.size(),
         static_cast<unsigned long long>(committed.stagedEntityCount));
+    core::Log::Infof(
+        "[SMOKE] interior_runtime_ready=ok interactions=%zu portals=%zu moving_parts=%zu",
+        m_interior.InteractionCount(),
+        m_interior.PortalCount(),
+        m_interior.MovingPartCount());
     return { AssemblyRuntimeHostStatus::Success, {} };
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ValidateInteriorEntities(
+    Scene& scene) const
+{
+    if (!m_instance || !m_instance->IsAlive() || !m_interior.IsInitialized())
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::NotInitialized,
+            "interior host is not live");
+    }
+    const std::span<const ecs::Entity> entities =
+        m_instance->MovingPartEntities();
+    if (entities.size() != m_interior.MovingPartCount())
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::InvalidTopology,
+            "interior moving-part entity count does not match runtime topology");
+    }
+
+    ecs::Registry& registry = scene.GetRegistry();
+    for (size_t i = 0; i < entities.size(); ++i)
+    {
+        if (!registry.IsAlive(entities[i]) ||
+            registry.TryGet<ecs::Transform>(entities[i]) == nullptr)
+        {
+            return InteriorFailure(
+                AssemblyInteriorStatus::InvalidTopology,
+                "interior moving-part entity or transform is unavailable",
+                static_cast<uint32_t>(i));
+        }
+        if (m_interior.MovingPartTransform(static_cast<uint32_t>(i)) == nullptr)
+        {
+            return InteriorFailure(
+                AssemblyInteriorStatus::InvalidTopology,
+                "interior moving-part transform is unavailable",
+                static_cast<uint32_t>(i));
+        }
+    }
+    return { AssemblyInteriorStatus::Success };
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorTransforms(
+    Scene& scene) const
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    if (!validated.Succeeded())
+        return validated;
+
+    ecs::Registry& registry = scene.GetRegistry();
+    const std::span<const ecs::Entity> entities =
+        m_instance->MovingPartEntities();
+    for (size_t i = 0; i < entities.size(); ++i)
+    {
+        *registry.TryGet<ecs::Transform>(entities[i]) =
+            *m_interior.MovingPartTransform(static_cast<uint32_t>(i));
+    }
+    return { AssemblyInteriorStatus::Success };
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
+    Scene& scene,
+    uint32_t stableIndex)
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    return validated.Succeeded()
+        ? m_interior.ActivateInteraction(stableIndex)
+        : validated;
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
+    Scene& scene,
+    std::string_view id)
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    return validated.Succeeded()
+        ? m_interior.ActivateInteraction(id)
+        : validated;
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ActivateNearestInteraction(
+    Scene& scene,
+    const AssemblyInteractionQuery& query)
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    return validated.Succeeded()
+        ? m_interior.ActivateNearest(query)
+        : validated;
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::AdvanceInterior(
+    Scene& scene,
+    double dt,
+    const AssemblyInteriorConfig& config)
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    if (!validated.Succeeded())
+        return validated;
+    const AssemblyInteriorResult advanced = m_interior.Advance(dt, config);
+    if (!advanced.Succeeded() || !advanced.changed)
+        return advanced;
+    const AssemblyInteriorResult applied = ApplyInteriorTransforms(scene);
+    if (!applied.Succeeded())
+        return applied;
+    return advanced;
+}
+
+AssemblyInteriorSnapshot AssemblyRuntimeHost::CaptureInteriorSnapshot() const
+{
+    return m_interior.CaptureSnapshot();
+}
+
+AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorSnapshot(
+    Scene& scene,
+    const AssemblyInteriorSnapshot& snapshot)
+{
+    const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
+    if (!validated.Succeeded())
+        return validated;
+    const AssemblyInteriorResult applied = m_interior.ApplySnapshot(snapshot);
+    if (!applied.Succeeded() || !applied.changed)
+        return applied;
+    const AssemblyInteriorResult transformed = ApplyInteriorTransforms(scene);
+    if (!transformed.Succeeded())
+        return transformed;
+    return applied;
 }
 
 bool AssemblyRuntimeHost::Shutdown(
@@ -458,6 +634,7 @@ bool AssemblyRuntimeHost::Shutdown(
     render::Renderer& renderer) noexcept
 {
     bool ok = true;
+    m_interior.Shutdown();
     if (m_instance && m_instance->IsAlive())
     {
         RegistryAssemblyEntityTarget target(scene.GetRegistry());
@@ -473,6 +650,7 @@ void AssemblyRuntimeHost::ReleaseState(
     render::D3D12Device& device,
     render::Renderer& renderer) noexcept
 {
+    m_interior.Shutdown();
     m_instance.reset();
     m_plan.reset();
     m_catalog.reset();

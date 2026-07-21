@@ -26,6 +26,9 @@ design work. For the user-facing baseline, also read the root `README.md` and
 - **`RUNTIME_CONTENT_ASSEMBLY_CONTRACT_2026-07-21.md`** - current Stage 4
   manifest grammar, admission rules, immutable ownership, GPU-retirement
   boundary, transactional publication, and explicit limitations.
+- **`INTERACTIVE_INTERIOR_RUNTIME_CONTRACT_2026-07-21.md`** - current Stage 5A
+  interaction states, nearest-use query, moving transforms, portal gating,
+  snapshot atomicity, production wiring, and follow-on boundaries.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
   **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
   and change reviews; useful provenance, not timeless status.

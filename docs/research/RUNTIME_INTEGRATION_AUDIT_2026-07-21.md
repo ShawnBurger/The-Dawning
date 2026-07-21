@@ -33,6 +33,9 @@ WS-021 through WS-026 also complete the first production assembly path. A
 reviewed source manifest cooks to an immutable assembly, its locators resolve
 through a leased catalog, WS-025 stages an all-or-nothing ECS graph, and the
 WS-026 runtime host publishes that graph only after cooked model uploads retire.
+WS-027 executes the cooked interaction topology on the production fixed step,
+publishes moving-part poses into that committed graph, gates portals on exact
+open state, and exposes topology-bound interior snapshots.
 
 ## Production Call Graph
 
@@ -52,6 +55,11 @@ App fixed-step accumulator
         -> legacy non-rigid Velocity/RotationSpeed props
      -> render-history invalidation when requested
      -> fixed-accumulator drain when requested
+     -> AssemblyRuntimeHost::AdvanceInterior(fixedDt)
+        -> deterministic interaction state and motion progress
+        -> immutable-closed-pose transform reconstruction
+        -> committed moving-part ECS transforms
+        -> render-history invalidation only when a pose changes
 ```
 
 The order is load-bearing. Atmosphere and FTL can promote a body to
@@ -77,6 +85,7 @@ the final velocity for the coordinate-time step.
 | Raster rendering | Existing | Scene traversal | N/A | Connected | Raster smoke |
 | DXR rendering | Existing | Scene/path tracer | N/A | Connected | Stable/full smoke |
 | Asset cooking/loading | Cooked model + assembly + `.tdcontent` | `AssemblyRuntimeHost` | WS-025 transaction | Connected | CPU contracts + runtime prepare/commit smoke markers |
+| Interior interactions | `AssemblyInteriorRuntime` | `AssemblyRuntimeHost` | App fixed step | Connected | 10 CPU cases + authored hatch/portal smoke |
 
 ## Correctness Findings And Corrections
 
@@ -230,6 +239,21 @@ owner/catalog identity, prepares through WS-025, and commits only after startup
 GPU uploads retire. Shutdown destroys entities before their model resources.
 Smoke now requires the exact 21-binding preparation and six-entity commit.
 
+### 14. Authored interaction topology had no executor
+
+Cooked assemblies preserved sockets, interactions, portals, moving-part pivots,
+axes, and travel, but the production host treated those records as passive
+metadata. Doors could not move, portals could not report passability, and no
+interior state could participate in a future save.
+
+Correction: `AssemblyInteriorRuntime` validates and executes that topology with
+reversible deterministic transitions. It reconstructs every pose from the
+immutable closed transform, exposes bounded nearest-use queries, permits portal
+traversal only at exact open state, and validates complete snapshots before
+atomic application. The runtime host publishes poses into committed ECS entities
+and clears state before entity teardown. Smoke activates the authored outer
+hatch by ID and proves its owned portal opens.
+
 ## Determinism And Atomicity Boundaries
 
 - Duplicate FTL, atmosphere, or clock bindings for one entity reject before the
@@ -242,6 +266,8 @@ Smoke now requires the exact 21-binding preparation and six-entity commit.
 - `ForceIntegrated`, `NBodyActive`, and `OnRails` are mutually exclusive movers.
 - FTL reset-history and fixed-accumulator-drain obligations are returned to the
   host; they are not hidden global side effects.
+- Interior transforms are rebuilt from immutable closed poses; activation and
+  snapshots are stable-indexed and topology-bound rather than array-order based.
 
 `StepSimulation` is phase-atomic only within each subsystem. A later subsystem
 failure can occur after an earlier accepted subsystem committed. That is an
@@ -256,7 +282,7 @@ snapshot transaction, not scattered reverse mutations.
 - CTest registers `TheDawningTests`; CI now builds and tests both Debug and
   Release rather than Debug alone.
 - Debug and Release app, tests, asset compiler, and asset inspector build.
-- Debug and Release CPU suites pass 411 cases and 17,608 checks.
+- Debug and Release CPU suites pass 421 cases and 17,735 checks.
 - Debug raster, stable DXR, and full-quality DXR smoke pass.
 - Release raster, stable DXR, and full-quality DXR smoke pass.
 - Debug stable DXR also passes with D3D12 GPU validation enabled.
@@ -275,10 +301,9 @@ snapshot transaction, not scattered reverse mutations.
    define when the active integration frame diverges from the master clock frame.
 4. Build gameplay-facing FTL command authoring only after destination frame and
    world-stream ownership rules are fixed.
-5. Replace the Stage 4 corridor-based assembly witness with the Stage 5 modular
-   production ship kit, then publish real collision, navigation, pressure,
-   interaction, moving-part, and runtime LOD systems against the existing typed
-   identities.
+5. Replace the corridor-based assembly witness with the modular production ship
+   kit, then publish real collision, navigation, pressure, and runtime LOD
+   systems against the existing typed identities and Stage 5A interactions.
 
 ## Residual Risks
 
