@@ -14,8 +14,9 @@
 // Mode selection (FlightControl.mode):
 //   - Decoupled: pilot demand -> AllocateThrusters -> ComputeWrench ->
 //     AccumulateBodyWrench. Direct thrust; zero demand -> zero throttle -> coast.
-//   - Coupled:   ComputeFlightAssist (proportional velocity controller) applied
-//     as an idealised reaction wrench; zero demand -> damps to rest.
+//   - Coupled:   ComputeFlightAssist produces the desired wrench, then bounded
+//     allocation through ThrusterSet realizes it. No bank -> no assist force;
+//     zero demand brakes only within installed actuator authority.
 // An entity with a ThrusterSet but no FlightControl fires whatever throttles are
 // already set (scripted thrusters). Bodies with neither just integrate.
 //

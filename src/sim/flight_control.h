@@ -2,9 +2,9 @@
 // =============================================================================
 // sim/flight_control.h — Control allocation + flight-assist law (GPU-free)
 // =============================================================================
-// Flight Stage 2 (FLIGHT_PHYSICS_DESIGN.md §8.2 stages 2-3): the two PURE control
-// laws that sit between the pilot's six-axis FlightControl demand and the rigid-
-// body wrench the integrator consumes.
+// Flight Stage 2 (FLIGHT_PHYSICS_DESIGN.md §8.2 stages 2-3): the pure control
+// laws and deterministic bounded allocator between six-axis FlightControl demand
+// and the physical thruster wrench the integrator consumes.
 //
 //   1. AllocateThrusters — DIRECT/greedy control allocation. Maps the six-axis
 //      demand to a per-thruster throttle in [0,1] so the produced net BODY wrench
@@ -15,6 +15,9 @@
 //      §8.2 Stage 3). This is a well-defined LAW with an exact closed form, not a
 //      feel knob — see tests/test_flight_control.cpp for the geometric-decay
 //      ground truth it is checked against.
+//   3. AllocateThrustersForWrench — maps that desired physical wrench onto the
+//      installed nozzle bank. ComputeWrench remains the sole source of realized
+//      force/torque, so physics, exhaust feedback, and damage share actuator state.
 //
 // GPU-free for the same reason rigid_body.h / thrusters.h are: includes only
 // core/types.h and ecs/components.h, so it links into TheDawningTests and the
@@ -25,9 +28,9 @@
 //     (strafe X / lift Y / thrust Z, and pitch X / yaw Y / roll Z).
 //   - AllocateThrusters works entirely in the BODY frame (thruster geometry is
 //     body-local); ComputeWrench then produces a body-frame wrench.
-//   - ComputeFlightAssist returns force in the WORLD frame and torque in the BODY
-//     frame — exactly the accumulator conventions ecs::RigidBody documents — so
-//     the caller can add them straight onto forceAccum / torqueAccum.
+//   - ComputeFlightAssist returns desired force in the WORLD frame and desired
+//     torque in the BODY frame. Coupled simulation allocates that target through
+//     ThrusterSet before applying the wrench; it is not a reactionless force path.
 // =============================================================================
 
 #include "../core/types.h"
@@ -54,12 +57,12 @@ namespace sim
 //     symmetric about the CoM the off-axis torques cancel, so the net wrench is a
 //     pure force (or, for an angular demand, a pure torque).
 //
-// LIMITATIONS (this is the first slice, stated so no one mistakes it for more):
+// LIMITATIONS OF THIS DIRECT DEMAND ALLOCATOR:
 //   - Directional, not magnitude-calibrated: throttle is a cosine alignment, so
 //     the produced wrench MAGNITUDE depends on the layout (lever arms, maxForce),
-//     not solved to equal the demand. A least-squares / pseudo-inverse allocator
-//     that hits an exact target wrench and balances redundant thrusters is later
-//     scope (§1, Ship deep-dive PART 2's per-nozzle IFCS).
+//     not solved to equal the demand. Coupled flight uses the separate bounded
+//     physical-wrench allocator below; a globally optimal constrained allocator
+//     with explicit redundancy policy remains later IFCS scope.
 //   - Greedy per-axis: a thruster serving both a linear and an angular axis sums
 //     the two alignments and may saturate, under-serving one. No cross-axis
 //     cancellation of oblique thrusters.
@@ -93,6 +96,23 @@ struct AssistWrench
     core::Vec3d worldForce = { 0.0, 0.0, 0.0 }; // WORLD frame, newtons
     core::Vec3f bodyTorque = { 0.0f, 0.0f, 0.0f }; // BODY frame, newton-metres
 };
+
+// Allocate a desired physical wrench through the installed nozzle bank. Force is
+// supplied in WORLD space to match AssistWrench/RigidBody and is transformed into
+// BODY space before allocation; torque and thruster geometry are already BODY
+// space. The bounded projected solve writes only throttle_i in [0,1]. Callers must
+// realize the result through ComputeWrench so physics and visual feedback consume
+// the exact same actuator state.
+//
+// Each force/torque axis is normalized by installed authority before solving, so
+// newtons and newton-metres have comparable influence. Missing, weak, asymmetric,
+// and saturated banks naturally leave residual error. Invalid targets or
+// orientation clear all live throttles rather than emitting a corrupt wrench.
+void AllocateThrustersForWrench(ecs::ThrusterSet& set,
+                                const core::Vec3d& desiredWorldForce,
+                                const core::Vec3f& desiredBodyTorque,
+                                const core::Quatf& orientation,
+                                const core::Vec3f& centreOfMass);
 
 // -----------------------------------------------------------------------------
 // COUPLED-mode proportional velocity controller.

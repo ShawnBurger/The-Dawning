@@ -39,16 +39,22 @@ void StepFlightPhysics(ecs::Registry& registry, double dt, const FlightAssistPar
 
                 if (fc.mode == ecs::FlightMode::Coupled)
                 {
-                    // Flight assist: proportional velocity controller applied as an
-                    // idealised reaction wrench (world force + body torque). Kept a
-                    // direct wrench rather than re-quantised through the clamped
-                    // thruster bank precisely so it has the exact closed form the
-                    // tests check (flight_control.h). Thruster-limited coupled mode
-                    // is a follow-on.
-                    const AssistWrench a = ComputeFlightAssist(
-                        body, transform.rotation, fc.linearDemand, fc.angularDemand, params);
-                    body.forceAccum  += a.worldForce;
-                    body.torqueAccum += a.bodyTorque;
+                    // Flight assist has no reactionless fallback. Its desired
+                    // wrench is realized only through installed nozzles, and those
+                    // throttles are also the exhaust/damage feedback state.
+                    if (hasThrusters)
+                    {
+                        ecs::ThrusterSet& ts =
+                            registry.GetByIndex<ecs::ThrusterSet>(entityIndex);
+                        const AssistWrench desired = ComputeFlightAssist(
+                            body, transform.rotation, fc.linearDemand,
+                            fc.angularDemand, params);
+                        AllocateThrustersForWrench(
+                            ts, desired.worldForce, desired.bodyTorque,
+                            transform.rotation, kCoM);
+                        const Wrench realized = ComputeWrench(ts, kCoM);
+                        AccumulateBodyWrench(body, transform.rotation, realized);
+                    }
                 }
                 else if (hasThrusters)
                 {

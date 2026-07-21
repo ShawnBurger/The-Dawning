@@ -533,10 +533,13 @@ advance **drag with an unconditionally-stable update**. Two standard options:
   `exp(−dt/tau) ∈ (0,1]`. This is the exponential-integrator idea (the linear part
   is solved exactly); it is the drag analogue of the on-rails Kepler propagator
   that "cannot drift."
-- **Semi-implicit (backward-Euler) update.** `v_{n+1} = v_n / (1 + (b/m)·dt)` for
-  the linear law, or the quadratic variant `v_{n+1} = v_n / (1 + c·|v_n|·dt)`,
-  `c = rho·Cd·A/(2m)`. Always contractive (`0 < 1/(1+positive) < 1`), never
-  overshoots. Cheaper than the `exp`, slightly less accurate.
+- **Semi-implicit frozen-speed update.** `v_{n+1} = v_n / (1 + (b/m)·dt)` is
+  backward Euler for the linear law. For quadratic drag, freezing the coefficient
+  at the start-of-step speed gives
+  `v_{n+1} = v_n / (1 + c·|v_n|·dt)`, `c = rho·Cd·A/(2m)`. That quadratic form is
+  linearly implicit, not the exact nonlinear backward-Euler root
+  `s_{n+1} + c·dt·s_{n+1}² = s_n`. It is nevertheless always contractive
+  (`0 < 1/(1+positive) < 1`), never overshoots, and is cheaper than the `exp`.
 
 Either removes the `dt < tau_drag` constraint. Where the coefficient itself varies
 fast within a step (deep periapsis, §6.3), **substep** the drag update
@@ -556,13 +559,18 @@ architecture already flags for orbits.
 
 ### 6.4 Soft boundary, not a hard cutoff — the gravity-softening lesson, repeated
 
-Set `rho` to **exactly 0.0 above a cutoff altitude** so the atmosphere top is
-**exact and C0**, and clamp the exponent so `exp(−h/H)` neither overflows at
-deep-negative `h` (below the surface) nor produces denormals just under the
-cutoff. Because `rho` **ramps from exactly 0.0** at the cutoff, drag and lift
-magnitudes start at zero and grow smoothly — crossing the shell produces **no
-force step**. A **hard** cutoff (a discontinuous `rho` jump at the boundary) would
-inject a force impulse at the crossing, the identical defect to the deep-dive's
+Set `rho` to **exactly 0.0 at and above a cutoff altitude**, but do not branch from
+the unmodified positive profile directly to zero. Over a terminal fade interval
+`w`, multiply density and pressure by `smoothstep(0, 1, (ceiling-h)/w)`. This
+factor is one below the fade, approaches zero with zero slope from below, and is
+exactly zero at the ceiling, making aerodynamic force C0 (and slope-continuous)
+at the shell. The shipped defaults use 5 km for Earth USSA76 and one scale height
+for an exponential body. This taper is a simulation boundary extension; USSA76
+table values remain authoritative below its final fade interval.
+
+Also floor deep-negative `h` at the surface so `exp(−h/H)` cannot overflow. A
+**hard** cutoff (a discontinuous `rho` jump at the boundary) injects a force
+impulse at the crossing, the identical defect to the deep-dive's
 `if(dist<1) continue` gravity cutoff that the architecture rejects. The rule is
 the same in both places: **soften the boundary; never step-discontinue a force.**
 
@@ -571,7 +579,8 @@ the same in both places: **soften the boundary; never step-discontinue a force.*
 Aerodynamic heating (§4) drives a cosmetic/gameplay scalar (skin temperature,
 damage), accumulated like proper time. The `V^3` (convective) and `V^~8`
 (radiative) terms can overflow for a non-finite or huge `|v_rel|`, so **floor
-`rho`, clamp `|v_rel|`, and guard non-finite `v` before the cube/eighth-power**.
+`rho`, compute a scaled finite norm, reject non-finite `v`, and evaluate the
+power in the log domain with finite saturation**.
 Because heating is never summed back into `externalForce`/`externalTorque`, a
 bad heating value can corrupt a HUD number but **cannot destabilise the
 trajectory** — an important firewall (RELATIVISTIC_SIM_ARCHITECTURE named-blowups
@@ -720,14 +729,16 @@ special-case stability code.
 
 **9.7 Density model is total and non-overflowing.**
 **Assert** `exp` density neither overflows at deep-negative `h` (sub-surface) nor
-produces denormals just under the cutoff (clamped to exact 0.0), and that the
-USSA76 branches agree at every layer boundary (C0, §1.3). *Negative control:*
-remove the deep-`h` clamp and watch `rho` overflow to `inf`, then propagate a NaN
-force — watched failing.
+retains a finite jump at the cutoff, and that the USSA76 branches agree at every
+layer boundary (C0, §1.3). Sample the ceiling limit from below and require the
+terminal smoothstep to approach exact zero. *Negative control:* remove the
+deep-`h` clamp and watch `rho` overflow to `inf`, or replace the taper with a hard
+cut and watch a nonzero force step — both are watched failures.
 
 **9.8 Heating cannot destabilise the trajectory (firewall).**
 Force a huge/non-finite `|v_rel|` into the heating term. **Assert** the heating
-scalar is guarded (floored `rho`, clamped `|v|`, non-finite rejected) **and** that
+scalar is guarded (floored `rho`, scaled norm, non-finite rejected, finite
+saturation) **and** that
 `externalForce`/`externalTorque` are byte-unchanged by the heating computation —
 heating never feeds the integrator. *Negative control:* wire the heating value
 into `externalForce` and watch the trajectory blow up — proving the firewall is

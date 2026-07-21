@@ -36,11 +36,9 @@ namespace sim
 
 using core::Quatf;
 
-// Rotate a DOUBLE world vector by a (float) unit quaternion, doing the arithmetic
-// in double from the promoted components. Same q*v*q^-1 identity as Quatf::Rotate,
-// but it never narrows the Vec3d to float - a ship's world velocity keeps its
-// double precision through a mouth rotation. (The quaternion itself is only
-// float-precise, so the ROTATION is float-precise; the VECTOR is not truncated.)
+// Rotate a DOUBLE world vector by a finite quaternion, normalizing the quaternion
+// at this public boundary. Invalid input returns the neutral zero vector. The
+// arithmetic promotes the quaternion to double and never narrows the Vec3d.
 Vec3d RotateVec3d(const Quatf& q, const Vec3d& v);
 
 // -----------------------------------------------------------------------------
@@ -56,7 +54,7 @@ struct MouthTransform
 {
     WorldPos entry;                    // source mouth, global coords
     WorldPos exit;                     // destination mouth, global coords
-    Quatf    rotation = Quatf::Identity(); // mouth-to-mouth world rotation (assumed unit)
+    Quatf    rotation = Quatf::Identity(); // mouth-to-mouth world rotation (normalized on use)
 
     static MouthTransform Wormhole(const WorldPos& entry, const WorldPos& exit,
                                    const Quatf& rotation = Quatf::Identity())
@@ -75,17 +73,18 @@ struct MouthTransform
 
 // -----------------------------------------------------------------------------
 // TeleportState - the complete retained-state set (architecture 7.3), in
-// sim-native types. The ship-lane call site maps ECS components <-> this struct
-// (Transform.position<->position, RigidBody.linearVelocity<->linearVelocity, etc.)
-// and narrows orientation to the ECS Quatf at the boundary. OrbitState.owner and
-// FrameId are the caller's to flip; this struct carries the numeric state whose
-// correctness across the discontinuity is the whole point.
+// sim-native types. A future ship-lane adapter must combine the ECS local Vec3d
+// position with its FrameId to form WorldPos, and widen the ECS Vec3f angular
+// velocity/torque fields. OrbitState.owner and FrameId are the caller's to flip;
+// this struct carries the numeric state whose correctness across the discontinuity
+// is the whole point.
 // -----------------------------------------------------------------------------
 struct TeleportState
 {
     WorldPos position;                              // Transform.position
     Quatf    orientation   = Quatf::Identity();     // Transform.rotation
     Vec3d    linearVelocity{ 0.0, 0.0, 0.0 };       // RigidBody.linearVelocity (WORLD/frame)
+    Vec3d    momentum{ 0.0, 0.0, 0.0 };             // RelativisticBody.momentum (WORLD/frame)
     Vec3d    angularVelocity{ 0.0, 0.0, 0.0 };      // RigidBody.angularVelocity (BODY frame)
     Vec3d    forceAccum{ 0.0, 0.0, 0.0 };           // RigidBody.forceAccum
     Vec3d    torqueAccum{ 0.0, 0.0, 0.0 };          // RigidBody.torqueAccum
@@ -112,6 +111,12 @@ struct TeleportState
 // NOT the RNG seed counter) and 7 (drain the timestep accumulator) are engine /
 // call-site concerns outside this pure module; they are documented at the call
 // site, not simulated here.
+//
+// TryApplyTeleport reports whether the complete operation was accepted. On
+// rejection, out receives s unchanged. ApplyTeleport is the compatibility
+// wrapper with the same transactional behavior.
+bool TryApplyTeleport(const TeleportState& s, const MouthTransform& m,
+                      TeleportState& out);
 TeleportState ApplyTeleport(const TeleportState& s, const MouthTransform& m);
 
 // -----------------------------------------------------------------------------
@@ -128,6 +133,12 @@ TeleportState ApplyTeleport(const TeleportState& s, const MouthTransform& m);
 // the growth into the integer sector). coordVelocity MAY exceed c: it is a
 // coordinate speed of the bubble, not a local velocity, so nothing inside ever
 // locally exceeds c. Pure and deterministic.
+//
+// One call may move by at most one sector per axis. Larger route advances must be
+// split into fixed steps by the caller. TryAdvanceWarpOrigin reports rejection;
+// its wrapper returns origin unchanged for an invalid or unrepresentable step.
+bool TryAdvanceWarpOrigin(const WorldPos& origin, const Vec3d& coordVelocity,
+                          double dt, WorldPos& out);
 WorldPos AdvanceWarpOrigin(const WorldPos& origin, const Vec3d& coordVelocity, double dt);
 
 // Proper time elapsed for a warp rider over coordinate dt. CONVENTION (7.2,
@@ -135,6 +146,7 @@ WorldPos AdvanceWarpOrigin(const WorldPos& origin, const Vec3d& coordVelocity, d
 // dtau == dt - a warp rider ages normally. This does NOT contradict the section-2
 // dilation model: a near-c SUBLIGHT traveler still ages less; warp is a different
 // worldline. Kept as a named function so the convention lives in exactly one place.
-inline double WarpProperTime(double dt) { return dt; }
+// Invalid or non-positive intervals contribute no proper time.
+double WarpProperTime(double dt);
 
 } // namespace sim

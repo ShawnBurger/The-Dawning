@@ -579,17 +579,37 @@ The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. The current order is:
 
-1. WS-006 is merged, published, and retired.
-2. Claude's atmosphere implementation `45cf4db` reached `main` through
-   `fa4f983` without a registered workstream or independent review; reconcile
-   that review debt after WS-009.
-3. Codex completes WS-009, the deferred numerical review and finite-domain
-   hardening of merged WS-008, before another dependent simulation stage.
-4. Route coupled flight assist through real actuator limits so both flight modes
-   expose physical thruster state.
-5. Add collision/close-encounter policy before production N-body activation.
-6. Continue the staged atmosphere and FTL modules only through registered,
-   independently reviewable workstreams.
+1. WS-012 and WS-013 closed the atmosphere and FTL review findings; both are
+   published and retired.
+2. Keep the timed-out reciprocal Claude reviews as explicit manual review debt;
+   they do not reopen the proven integration gates.
+3. WS-014 routed coupled flight assist through real actuator limits so both
+   flight modes expose physical thruster state; it is verified and merged.
+4. Add collision/close-encounter policy before production N-body activation.
+5. Register that lane only after verifying its paths do not overlap Claude.
+
+WS-013 completed the concrete WS-011 review findings, and WS-014 completed the
+physical-actuator flight-control bridge. Collision/close-encounter policy is the
+next candidate lane; Claude's collision worktree must be re-audited before it is
+registered or edited.
+
+### Live collision review handoff (2026-07-20)
+
+- Owner remains Claude in `D:\The Dawning (new)\.agents\worktrees\collide`;
+  Codex observed active file changes and will not edit or checkpoint that worktree.
+- Current read-only Debug run: 283 cases, 282 passed, 1 failed; all three failed
+  checks are `Collision_Merge_ConservesMomentumAndMass` momentum components.
+- Required watched gap: a high-restitution body that fully crosses the contact
+  shell within one micro-step must bounce. The current swept predicate detects the
+  crossing but classifies approach from the end-of-step normal/velocity, which can
+  see the body as separating and silently accept the tunnel.
+- Required public-input guards: prove non-finite/non-positive `eta` and
+  `etaContact`, out-of-range restitution/contact parameters, negative `maxLevel`,
+  and the hard level-30 backstop cannot cause undefined casts, energy injection,
+  impractical stepping, or a false `hitDepthCap` diagnostic.
+- Claude stabilized and committed the slice as `1749f74`; its clean branch is
+  backed up at `origin/claude/sim-collision`. WS-015 owns the independent
+  integration review from that immutable checkpoint.
 
 ### WS-001: Coordination contract
 
@@ -713,10 +733,13 @@ on `main`. The current order is:
 - Negative controls: superluminal velocity, invalid mass, and non-finite state
   must be rejected rather than contaminating simulation state
 - Latest commit: `6b32caa` on the task branch, merged to `main` by `aafdcad`
-- Review note: the feature reached `main` before Codex completed the independent
-  numerical/ownership review; that review remains explicit integration debt.
-- Next action: Codex reviews `6b32caa` and records findings before a dependent
-  simulation stage is integrated
+- Review note: Codex completed the independent `277aec3..6b32caa` review in
+  WS-009. It found raw-vector norm overflow, invalid updates that still mutated
+  state, an ineffective superluminal seed ceiling, physical clock-domain gaps,
+  and missing registered replay/convergence coverage. Those findings are fixed
+  by `04470b0`.
+- Next action: preserve the momentum/rest-mass ownership invariant when a
+  production system callsite is introduced; see WS-009 residual risk
 
 ### WS-004: Playable-ship vertical slice
 
@@ -852,7 +875,7 @@ on `main`. The current order is:
 
 ### WS-009: Relativity review hardening
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: close the concrete finite-domain and verification gaps found in the
   independent review of WS-008 without changing its public module boundary
 - Primary: Codex
@@ -865,8 +888,8 @@ on `main`. The current order is:
   `tests/test_relativity.cpp`
 - Excluded paths: atmosphere, N-body and reference-frame implementation,
   gameplay/scene wiring, renderer, assets, ECS layout, and `CMakeLists.txt`
-- Shared-file locks: the three owned relativity files locked to WS-009;
-  `AGENT_COORDINATION.md` remains integration-owned
+- Shared-file locks: released; `AGENT_COORDINATION.md` remained
+  integration-owned
 - Interface contract: preserve the shipped function signatures and
   momentum-authoritative ownership; reject invalid updates without emitting a
   non-finite state, and keep valid low-speed behavior unchanged
@@ -877,9 +900,271 @@ on `main`. The current order is:
 - Negative controls: the added finite-momentum, invalid-update, clock-domain,
   replay, and convergence tests must fail against the reviewed WS-008 behavior
   where applicable before the implementation is corrected
-- Latest commit: none; review range `277aec3..6b32caa`
-- Next action: create the isolated review worktree, land the missing adversarial
-  tests first, record their baseline failures, then implement the bounded fix
+- Latest commit: `04470b0` on the review branch, merged to `main` by `caa604e`
+- Review note: the bounded Claude review attempt timed out after three minutes
+  without output. Shawn explicitly allowed this step to be deferred; this is
+  reciprocal review debt rather than approval.
+- Acceptance result: the added tests first produced 26 failed checks across four
+  cases against the reviewed implementation. The corrected branch passes 273
+  cases and 15,620 checks plus full Debug/Release builds. Combined `main`, also
+  containing atmosphere and FTL, passes 281 cases and 15,673 checks plus raster,
+  stable-DXR, and full-DXR smoke in both configurations.
+- Residual risk: `RelativisticBody::restMass` and `RigidBody::invMass` remain a
+  documented but unenforced duplication until the production system callsite is
+  built; that wiring must establish one synchronization owner.
+- Next action: the Git worktree registration and local branch are retired. A
+  host-blocked inert directory remains as cleanup residue from the timed-out
+  Claude process; it is not a registered worktree and owns no branch.
+
+### WS-010: Atmospheric-flight implementation review
+
+- Status: MERGED
+- Outcome: CPU-only USSA76/exponential density, aerodynamic force/torque,
+  contractive stiff-drag update, and firewalled reentry heating
+- Primary: Claude
+- Reviewer: Codex
+- Branch: `claude/sim-atmosphere`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\atmo2`
+- Base commit: `aafdcad`
+- Owned paths: `src/sim/atmosphere.h`, `src/sim/atmosphere.cpp`, and
+  `tests/test_atmosphere.cpp`; `CMakeLists.txt` was integration-required
+- Excluded paths: scene/gameplay wiring, renderer, assets, relativity, FTL, and
+  unrelated simulation modules
+- Shared-file locks: none; the implementation is already on `main`
+- Interface contract: atmosphere remains an external-force provider rather than
+  a second pose integrator; heating cannot feed trajectory state
+- Acceptance gates: published-atmosphere anchors and seam continuity, exact-zero
+  ceiling, force/torque signs, stiff-drag contraction, terminal convergence,
+  heating firewall, finite-domain guards, and Debug/Release CPU suites
+- Negative controls: explicit stiff drag, exponent sign, ceiling leakage,
+  cross-product order, and base-pressure precompute mutations must fail
+- Latest commit: `45cf4db`, integrated through `fa4f983`
+- Review note: the feature reached `main` without the required pre-registration
+  or independent Codex review. The completed review found that the exact-zero
+  branch hard-cut a still-positive density at the ceiling, raw vector norms and
+  aerodynamic products could emit NaN/Inf, invalid coefficients could reverse
+  drag into acceleration, and the quadratic update was mislabeled as nonlinear
+  backward Euler. WS-012 fixes and watches each finding.
+- Next action: preserve the reviewed external-force ownership when the first
+  production atmosphere callsite is registered; do not apply drag both as force
+  and as the contractive airspeed substep
+
+### WS-011: FTL and atomic-teleport implementation review
+
+- Status: MERGED
+- Outcome: deterministic atomic teleport plus warp moving-origin operations over
+  retained pose, velocity, accumulator, and interpolation state
+- Primary: Claude
+- Reviewer: Codex
+- Branch: `claude/sim-ftl`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\ftl`
+- Base commit: `fa4f983`
+- Owned paths: `src/sim/ftl.h`, `src/sim/ftl.cpp`, and `tests/test_ftl.cpp`;
+  `CMakeLists.txt` was integration-required
+- Excluded paths: engine callsite/reset wiring, renderer, assets, atmosphere,
+  relativity, and unrelated simulation modules
+- Shared-file locks: none; the implementation is already on `main`
+- Interface contract: teleport is pure and atomic over the retained state;
+  engine-level fixed-step placement, path-history reset, and accumulator drain
+  remain explicit callsite obligations
+- Acceptance gates: translation and rotated round trips, velocity/orientation
+  transform, accumulator flush, previous-pose reset, far-distance rider
+  separation, deterministic/canonical warp advance, and Debug/Release CPU suites
+- Negative controls: destination placement, velocity rotation, accumulator flush,
+  previous-pose reset, and warp-dt mutations must fail
+- Latest commit: `fd84629`, integrated through `1e6f03e`
+- Review note: the feature reached `main` while WS-009's prerequisite review gate
+  was active. Its commit message claims ten added cases, while the source defines
+  eight `TEST_CASE` blocks; reconcile the evidence during review.
+- Next action: Codex reviews this after WS-010 and before any engine callsite is
+  integrated
+
+### WS-012: Atmospheric-flight review hardening
+
+- Status: MERGED
+- Outcome: close the ceiling-continuity, finite-domain, and public-contract gaps
+  found during the independent WS-010 review without adding a production callsite
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/review-sim-atmosphere`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-atmosphere`
+- Base commit: `347d5a3`
+- Owned paths: `src/sim/atmosphere.h`, `src/sim/atmosphere.cpp`,
+  `tests/test_atmosphere.cpp`, `docs/research/ATMOSPHERIC_FLIGHT.md`, and the
+  atmosphere contract in `docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md`
+- Excluded paths: FTL, N-body, relativity, scene/gameplay wiring, renderer,
+  assets, ECS layout, and `CMakeLists.txt`
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve the shipped atmosphere API and external-force
+  ownership; make the configured ceiling genuinely C0 in density/force and keep
+  valid ordinary-flight results unchanged
+- Dependencies: merged WS-010 implementation and WS-009 finite-domain policy
+- Acceptance gates: watched baseline failures for the hard cutoff and invalid or
+  extreme inputs; monotone soft-ceiling taper; finite/neutral public outputs;
+  contractive stiff-drag update; published USSA anchors; Debug/Release CPU suites;
+  combined raster, stable-DXR, and full-DXR smoke after integration
+- Negative controls: the reviewed hard-cut implementation must fail the new
+  ceiling-continuity test, and invalid model/force/heating inputs must not emit
+  NaN/Inf or reverse aerodynamic dissipation
+- Latest commit: `d46b54c` on the review branch, merged to `main` by `31e5416`
+- Review note: the bounded read-only Claude review produced no output and was
+  terminated with its child tree after 120 seconds. Shawn explicitly allowed
+  this step to be deferred; it remains manual reciprocal-review debt rather than
+  reviewer approval.
+- Acceptance result: the three watched tests first produced 35 failed checks
+  against the reviewed implementation while all 281 prior cases stayed green.
+  The corrected branch and combined `main` pass 284 cases and 15,726 checks in
+  Debug and Release plus raster, stable-DXR, and full-DXR smoke in both builds.
+  The raster witness still observes 73,708 shadow fade pixels, pair mask 7, and
+  nonzero adjacent-cascade signal. The feature commit and merge are reachable
+  from `origin/main`; the clean worktree and local branch are retired, while the
+  remote review branch remains for audit.
+- Residual risk: atmosphere still has no production callsite. That future lane
+  must apply the contractive airspeed update exactly once, restore the rotating
+  atmosphere velocity in the correct frame, and serialize `ceilingFadeWidth`
+  when atmosphere models become persistent. The terminal taper intentionally
+  modifies Earth USSA76 only within its final 5 km simulation boundary interval.
+- Next action: integrate atmosphere only through a separately registered engine
+  callsite lane; perform the deferred manual Claude review later without reopening
+  the already-proven integration gate
+
+### WS-013: FTL and atomic-teleport review hardening
+
+- Status: MERGED
+- Outcome: close retained-state, transform-validation, and warp-step numerical
+  gaps found during the independent WS-011 review without adding an engine callsite
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/review-sim-ftl`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-ftl`
+- Base commit: `2e002ba`
+- Owned paths: `src/sim/ftl.h`, `src/sim/ftl.cpp`, `tests/test_ftl.cpp`, and
+  the FTL contract in `docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md`
+- Excluded paths: app/scene callsites, timer/path-trace reset wiring, atmosphere,
+  N-body, relativity implementation, renderer, assets, ECS layout, and CMake
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve pure CPU teleport/warp APIs; make each operation
+  transactional on invalid input, rotate every authoritative world-frame retained
+  vector, and keep ordinary valid results and coordinate precision unchanged
+- Dependencies: merged Stage 0 coordinates, WS-009 relativity ownership, and the
+  reviewed WS-011 implementation
+- Acceptance gates: independent single-leg position/vector rotation, normalized
+  mouth handling, authoritative momentum rotation, exact accumulator/history
+  policy, invalid/extreme transform containment, fixed-step warp guards,
+  deterministic replay, Debug/Release CPU suites, and combined six-mode smoke
+- Negative controls: non-unit or non-finite mouth rotation, omitted momentum
+  rotation, invalid warp dt, and an overflowing per-step warp displacement must
+  fail or be rejected without partially changing state
+- Latest commit: `7141e67` on the review branch, merged to `main` by `72af9ad`
+- Review findings: the reviewed implementation omitted authoritative relativistic
+  momentum, trusted raw mouth quaternions, accepted invalid/overflowing warp steps,
+  and used self-referential rotation coverage. Its commit message claimed ten new
+  cases while the source contained eight; the integrated suite increased by eight.
+- Review note: the bounded read-only Claude review produced no output and its
+  isolated process tree was terminated after 60 seconds. Shawn explicitly allowed
+  this step to be deferred; it remains manual reciprocal-review debt rather than
+  reviewer approval.
+- Acceptance result: the three watched cases first produced 24 failed checks
+  against the reviewed implementation while 285 cases stayed green. The corrected
+  branch and combined `main` pass 289 cases and 15,853 checks in Debug and Release
+  plus raster, stable-DXR, and full-DXR smoke in both builds. Feature commit and
+  merge are reachable from `origin/main`; the clean worktree and local branch are
+  retired, while the remote review branch remains for audit.
+- Residual risk: FTL still has no production callsite. That lane must adapt ECS
+  local position + `FrameId` into `WorldPos`, widen float angular/torque fields,
+  map optional `RelativisticBody.momentum`, apply owner/frame changes atomically,
+  honor `Try*` rejection, split long warp motion into fixed steps, reset path-trace
+  accumulation but preserve its seed counter, and drain the timer accumulator.
+- Next action: register the highest-priority non-overlapping product-integration
+  lane after checking Claude's live branches; perform the deferred manual review
+  later without reopening the already-proven integration gate
+
+### WS-014: Coupled flight assist through physical actuators
+
+- Status: MERGED
+- Outcome: remove the ideal-reaction-wrench shortcut so coupled flight assist is
+  limited by, and visibly reflected in, the ship's actual thruster bank
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/coupled-actuator-control`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-coupled-actuator-control`
+- Base commit: `68ca26e`
+- Owned paths: `src/sim/flight_control.h`, `src/sim/flight_control.cpp`,
+  `src/sim/physics_system.h`, `src/sim/physics_system.cpp`,
+  `tests/test_flight_control.cpp`, `tests/test_physics_system.cpp`, and the
+  actuator-control contract in `docs/research/FLIGHT_PHYSICS_DESIGN.md`
+- Excluded paths: ECS component layout, gameplay/input mapping, app/scene wiring,
+  renderer/shaders/assets, collision, orbital/relativity/atmosphere/FTL modules,
+  CMake, and other shared documentation
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve `ComputeFlightAssist` as the pure desired-wrench
+  law and preserve decoupled demand allocation; add a deterministic bounded
+  desired-wrench allocator whose only realized output is per-nozzle throttle and
+  whose net force/torque comes back through `ComputeWrench`
+- Dependencies: merged rigid-body/thruster/flight-control core and the playable
+  ship's production `ThrusterSet` feedback path
+- Acceptance gates: coupled bodies without thrusters receive no imaginary force;
+  actual acceleration is capped by installed thrust; per-nozzle throttle is the
+  visible feedback source; asymmetric, weakened, or missing actuators degrade the
+  realized wrench; zero demand still brakes only when the bank can produce the
+  required opposing wrench; decoupled behavior remains unchanged; allocation is
+  finite and deterministic; Debug/Release CPU suites and combined six-mode smoke
+- Negative controls: direct accumulation of `AssistWrench`, a coupled ship that
+  accelerates beyond installed thrust, and unchanged throttle feedback under
+  coupled braking must each fail a watched test
+- Latest commits: feature `c837ea0`; merge `838f44e`
+- Review note: the bounded read-only Claude review produced no output and timed
+  out after 60 seconds. Shawn explicitly allowed this step to be deferred; it is
+  manual reciprocal-review debt rather than reviewer approval.
+- Acceptance result: three watched ECS cases first produced 11 failed checks
+  against the ideal-wrench shortcut while all 289 pre-existing cases stayed
+  green. The corrected feature branch and combined `main` pass 295 cases and
+  15,963 checks in Debug and Release plus raster, stable-DXR, and full-DXR smoke
+  in both builds. Coupled acceleration now comes only from installed nozzles;
+  missing and weakened banks demonstrably reduce authority, and actual throttle
+  state is retained for exhaust and damage feedback.
+- Residual risk: the projected allocator is deterministic and bounded but is not
+  a globally optimal constrained IFCS solver. Thruster geometry remains a trusted
+  component contract; malformed nozzle data is ignored by allocation but should
+  receive a broader component-validation policy before content authoring scales.
+- Next action: retire the clean local feature worktree after pushing `main`, then
+  re-audit Claude's collision branch and register a non-overlapping
+  collision/close-encounter policy lane
+
+### WS-015: Collision policy integration review
+
+- Status: ACTIVE
+- Outcome: integrate Claude's Stage-5 collision policy onto current `main` only
+  after adversarial coverage proves swept elastic contacts and public config
+  limits cannot violate anti-tunneling, energy, or bounded-work claims
+- Primary: Claude (`1749f74`); integrator/reviewer: Codex
+- Branch: `codex/review-sim-collision`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-collision`
+- Base commit: `5171cbf`; source checkpoint: `1749f74`
+- Owned paths: `src/sim/collision.h`, `src/sim/collision.cpp`,
+  `src/sim/nbody.h`, `tests/test_collision.cpp`, collision entries in
+  `CMakeLists.txt`, and collision-policy contracts in research documentation
+- Excluded paths: ECS reconciliation, app/scene wiring, renderer/shaders/assets,
+  flight control, atmosphere, relativity, FTL, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve Claude's power-of-two `StepNBody` subdivision,
+  deterministic body-ID reduction, central impulse, and volume-additive merge;
+  harden validation and swept contact response without inventing an ECS callsite
+- Dependencies: merged N-body foundation and Claude's clean published checkpoint
+- Acceptance gates: Claude's eight cases plus watched high-restitution full-crossing
+  bounce and invalid/extreme config cases; finite bounded subdivision; restitution
+  cannot inject energy; truthful depth-cap diagnostics; deterministic permutation;
+  Debug/Release CPU suites and combined six-mode smoke after integration
+- Negative controls: endpoint-only approach classification must miss the swept
+  elastic crossing; zero/non-finite subdivision denominators and out-of-range
+  restitution/max depth must fail or exceed the bounded-work contract before fix
+- Latest commit: Claude source `1749f74`; review branch not yet created
+- Review note: Codex owns this pass so no reciprocal Claude review blocks it; any
+  additional Claude review is optional manual debt under Shawn's instruction
+- Next action: create the review worktree from current `main`, cherry-pick the
+  source checkpoint, establish watched failures, then harden and verify
 
 ## 20. Helper Commands
 
