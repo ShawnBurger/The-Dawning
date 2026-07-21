@@ -579,15 +579,17 @@ The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. The current order is:
 
-1. WS-012 closed the WS-010 atmosphere findings and is published and retired.
-2. Codex reviews WS-011, Claude's FTL implementation, before any engine callsite.
+1. WS-012 and WS-013 closed the atmosphere and FTL review findings; both are
+   published and retired.
+2. Keep the timed-out reciprocal Claude reviews as explicit manual review debt;
+   they do not reopen the proven integration gates.
 3. Route coupled flight assist through real actuator limits so both flight modes
    expose physical thruster state.
 4. Add collision/close-encounter policy before production N-body activation.
-5. Do not start another simulation stage until WS-011 review debt is resolved and
-   the next lane is registered before editing.
+5. Register the next lane and verify its paths do not overlap Claude before editing.
 
-WS-013 is the active Codex review-fix lane for the concrete WS-011 findings.
+WS-013 completed the concrete WS-011 review findings. No Codex simulation lane is
+active until the next product-integration slice is registered.
 
 ### WS-001: Coordination contract
 
@@ -1003,12 +1005,13 @@ WS-013 is the active Codex review-fix lane for the concrete WS-011 findings.
   atmosphere velocity in the correct frame, and serialize `ceilingFadeWidth`
   when atmosphere models become persistent. The terminal taper intentionally
   modifies Earth USSA76 only within its final 5 km simulation boundary interval.
-- Next action: complete WS-011 FTL review; perform the deferred manual Claude
-  review later without reopening the already-proven integration gate
+- Next action: integrate atmosphere only through a separately registered engine
+  callsite lane; perform the deferred manual Claude review later without reopening
+  the already-proven integration gate
 
 ### WS-013: FTL and atomic-teleport review hardening
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: close retained-state, transform-validation, and warp-step numerical
   gaps found during the independent WS-011 review without adding an engine callsite
 - Primary: Codex
@@ -1033,11 +1036,29 @@ WS-013 is the active Codex review-fix lane for the concrete WS-011 findings.
 - Negative controls: non-unit or non-finite mouth rotation, omitted momentum
   rotation, invalid warp dt, and an overflowing per-step warp displacement must
   fail or be rejected without partially changing state
-- Latest commit: none; tests are written first against the reviewed behavior
-- Review note: request one bounded Claude review after the fix commit; per Shawn's
-  instruction, a failed attempt becomes deferred manual review debt
-- Next action: create the isolated worktree, prove the existing numerical and
-  retained-state gaps, then correct and verify them
+- Latest commit: `7141e67` on the review branch, merged to `main` by `72af9ad`
+- Review findings: the reviewed implementation omitted authoritative relativistic
+  momentum, trusted raw mouth quaternions, accepted invalid/overflowing warp steps,
+  and used self-referential rotation coverage. Its commit message claimed ten new
+  cases while the source contained eight; the integrated suite increased by eight.
+- Review note: the bounded read-only Claude review produced no output and its
+  isolated process tree was terminated after 60 seconds. Shawn explicitly allowed
+  this step to be deferred; it remains manual reciprocal-review debt rather than
+  reviewer approval.
+- Acceptance result: the three watched cases first produced 24 failed checks
+  against the reviewed implementation while 285 cases stayed green. The corrected
+  branch and combined `main` pass 289 cases and 15,853 checks in Debug and Release
+  plus raster, stable-DXR, and full-DXR smoke in both builds. Feature commit and
+  merge are reachable from `origin/main`; the clean worktree and local branch are
+  retired, while the remote review branch remains for audit.
+- Residual risk: FTL still has no production callsite. That lane must adapt ECS
+  local position + `FrameId` into `WorldPos`, widen float angular/torque fields,
+  map optional `RelativisticBody.momentum`, apply owner/frame changes atomically,
+  honor `Try*` rejection, split long warp motion into fixed steps, reset path-trace
+  accumulation but preserve its seed counter, and drain the timer accumulator.
+- Next action: register the highest-priority non-overlapping product-integration
+  lane after checking Claude's live branches; perform the deferred manual review
+  later without reopening the already-proven integration gate
 
 ## 20. Helper Commands
 
