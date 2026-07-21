@@ -140,6 +140,7 @@ set(SIM_SOURCES
     src/sim/atmosphere.cpp
     src/sim/ftl.cpp
     src/sim/collision.cpp
+    src/sim/sim_serialize.cpp
 )
 
 set(SIM_HEADERS
@@ -154,6 +155,7 @@ set(SIM_HEADERS
     src/sim/atmosphere.h
     src/sim/ftl.h
     src/sim/collision.h
+    src/sim/sim_serialize.h
 )
 
 set(SCENE_SOURCES
@@ -194,6 +196,7 @@ set(TEST_SOURCES
     tests/test_atmosphere.cpp
     tests/test_ftl.cpp
     tests/test_collision.cpp
+    tests/test_sim_serialize.cpp
 )
 
 set(TEST_HEADERS
@@ -450,6 +453,11 @@ add_executable(TheDawningTests
     # swept-contact detection, mass-fraction bounce and union-find merge.
     src/sim/collision.cpp
     src/sim/collision.h
+    # SIM STAGE 6 save/load codec. GPU-free: sim_serialize.h includes only
+    # core/types.h + reference_frame.h, so tests/test_sim_serialize.cpp drives the
+    # SHIPPED versioned/checksummed serializer and bounded-cursor deserializer.
+    src/sim/sim_serialize.cpp
+    src/sim/sim_serialize.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

@@ -233,6 +233,16 @@ public:
     const Frame& GetFrame(FrameId id) const;
     uint32_t     FrameCount() const { return static_cast<uint32_t>(m_frames.size()); }
 
+    // Save/load (SIM STAGE 6). The frame vector IS the graph: a frame's index is
+    // its FrameId and a parent always has a strictly lower index (CreateFrame only
+    // points at already-created frames). Frames() exposes it for serialization;
+    // RebuildFromFrames restores it WITHOUT reordering, so FrameIds are preserved
+    // bit-exact. The caller is responsible for having validated the vector (index
+    // == id, parent < index, canonical origins) - sim/sim_serialize.cpp does this
+    // on load before calling here.
+    const std::vector<Frame>& Frames() const { return m_frames; }
+    void RebuildFromFrames(std::vector<Frame> frames) { m_frames = std::move(frames); }
+
     // Compose a body's global WorldPos from its frame origin + small local offset.
     WorldPos ResolveWorldPos(const Body& body) const;
 
