@@ -579,8 +579,8 @@ The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. The current order is:
 
-1. Codex scopes and implements one measured shadow/rendering improvement in
-   WS-006; do not run a second Codex implementation lane at the same time.
+1. WS-006 is merged; Codex completes its combined-main publication and retires
+   the clean worktree before opening another implementation lane.
 2. Claude registers the atmosphere implementation workstream before editing the
    clean `claude/sim-atmosphere` worktree, with Codex assigned as reviewer.
 3. Codex completes the deferred numerical review of merged WS-008 before Claude
@@ -802,7 +802,7 @@ on `main`. The current order is:
 
 ### WS-006: Shadow/rendering improvement
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: remove hard cascaded-shadow transitions by consuming the already
   shipped fade bands, cross-fading adjacent shadow samples at the first three
   boundaries and fading the outer cascade to lit coverage
@@ -820,9 +820,7 @@ on `main`. The current order is:
   design documentation
 - Excluded paths: DXR/path-tracing behavior, simulation, gameplay, asset import,
   resource lifetime, root-signature layout, and unrelated renderer refactors
-- Shared-file locks: `src/app.cpp`, `src/render/renderer.*`,
-  `tools/smoke_test.ps1`, and the Shadows section of `README.md` locked to WS-006;
-  `CMakeLists.txt` remains integration-only and is not expected to change
+- Shared-file locks: released; `CMakeLists.txt` remained unchanged
 - Interface contract: preserve the existing four matrices, one
   `Texture2DArray`, radial split table, world-anchored snap, 3x3 PCF kernel, and
   constant-buffer layout; ordinary pixels sample one cascade, fade-band pixels
@@ -837,10 +835,20 @@ on `main`. The current order is:
 - Negative controls: hard-selecting the primary sample while leaving the probe
   armed must fail the GPU result check; breaking adjacent weights must fail the
   CPU partition tests; a scene with no observed fade-band pixels must fail smoke
-- Latest commit: none; baseline raster capture recorded from `d5d3bd2`
-- Next action: create the task worktree, land the CPU blend contract first, then
-  implement the shader and extend the existing draw-probe record without changing
-  the root signature
+- Latest commit: `aab83dc` on the task branch, merged to `main` by `95036c2`
+- Review note: Claude review was deferred under Shawn's explicit instruction
+  after the Claude CLI reported its session limit; this is review debt rather
+  than reviewer approval.
+- Acceptance result: Debug and Release builds pass 257 CPU cases and 15,479
+  checks plus raster, stable-DXR, and full-DXR smoke. The raster GPU witness
+  measured 73,708 fade-band pixels across three records, pair mask 7, nonzero
+  adjacent-sample signal, and zero output mismatches. GPU validation passed with
+  a 60-second harness allowance. A watched mutation returning the primary sample
+  failed with 2,598 mismatch pixels while the older object/material witnesses
+  stayed clean. Deterministic before/after captures changed 187 pixels inside a
+  247x82 distant-shadow region, with no scene-wide blur or color shift.
+- Next action: publish the combined-main matrix, retire the clean task worktree,
+  and complete the deferred manual Claude review when capacity is available
 
 ## 20. Helper Commands
 
