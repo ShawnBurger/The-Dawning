@@ -1352,6 +1352,48 @@ are now integrated as well. The current order is:
   dependency, and select the smallest isolated orchestration or passive-orbit
   adapter lane that does not overlap Claude's active asset/render work
 
+### WS-019: Repository wiring audit and simulation orchestration foundation
+
+- Status: ACTIVE
+- Outcome: establish a source-backed runtime wiring inventory, correct the live
+  save/load ownership mismatch, and connect the passive orbit/collision kernels
+  behind one deterministic GPU-free fixed-step orchestration interface
+- Primary: Codex
+- Reviewer: Claude (optional/deferred after two bounded CLI timeouts)
+- Branch: `codex/runtime-integration-audit`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-runtime-integration-audit`
+- Base commit: registration commit from `436adb8`
+- Owned paths: new `src/sim/*_system.{h,cpp}` orchestration/adapter files and
+  matching tests; the exact `sim_serialize` owner-range and total-input fixes;
+  their exact CMake entries; `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`;
+  and this completion ledger entry
+- Excluded paths: `src/app.*`, `src/scene/*`, renderer, shaders, model/asset
+  import and upload, generated assets, and every dirty Claude worktree
+- Shared-file locks: Claude's dirty per-object and asset lanes currently own
+  `app.cpp`, `scene.cpp`, renderer/shaders, and asset/import files. This lane may
+  inspect them read-only but will not modify them. CMake edits are additive and
+  limited to the new GPU-free files/tests
+- Interface contract: one fixed-step entry point owns phase order and reports
+  every accepted/rejected subsystem. Passive `NBodyActive` and `OnRails` bodies
+  are gathered from the real ECS, expressed through `FrameGraph`, advanced by
+  the shipped collision-aware N-body or Kepler kernels, and reconciled without
+  allowing `ForceIntegrated` bodies into either mover. Save/load accepts all
+  three production owner values and rejects null non-empty buffers safely
+- Acceptance gates: cross-frame N-body and rails known answers through the real
+  registry; collision survivor/destruction reconciliation; one-owner exclusion;
+  deterministic insertion-order replay; malformed state is an atomic no-op;
+  ForceIntegrated save/load round-trip; null non-empty deserialize witness;
+  Debug/Release full suites and the six-mode GPU smoke matrix
+- Negative controls: feeding `ForceIntegrated` into the passive gather must move
+  it in the deliberately wrong control and remain exact in production; old
+  save/load owner bound 1 must reject the new valid fixture; missing collision
+  reconciliation must leave a merged-away entity alive
+- Residual risk: application/scene callsites, authored atmosphere bindings, FTL
+  commands, and ECS snapshot application remain integration work until Claude's
+  overlapping render/asset worktrees are reconciled
+- Next action: publish registration, create the isolated worktree, write the
+  call-graph audit, then implement and falsify the GPU-free adapters
+
 ## 20. Helper Commands
 
 Create a task worktree:
