@@ -2,7 +2,7 @@
 
 Date: 2026-07-21
 Stage: 5E / WS-031
-Status: implemented; validation evidence is recorded at closure
+Status: closed and integrated
 
 ## Decision
 
@@ -166,10 +166,48 @@ Closure requires Debug and Release all-target builds and CPU suites,
 deterministic cooked-asset inspection, raster, stable-DXR, full-DXR, D3D12 GPU
 validation, and manual capture inspection.
 
+## Closure Evidence
+
+The final combined tree includes simulation Stages 9 through 12 and passed the
+following gates:
+
+- Debug and Release all-target builds;
+- Debug and Release CTest, 5/5 in each configuration;
+- Debug and Release direct CPU suites, 504 cases and 18,809 checks in each
+  configuration, with zero failures;
+- source-manifest validation and two independent byte-identical assembly cooks;
+- a 2,359-byte reference assembly with SHA-256
+  `E4C3CD8EAD76D8D7120E34AE4D2846FDBFF44E62D5EF9FB8B9A430F5B56FD86F`;
+- Release raster with the deterministic flight profile, Release stable DXR,
+  Release full DXR, and Debug stable DXR with D3D12 GPU validation;
+- an exact flight witness in which root and child each moved `0.523611`, the
+  hierarchy error was `0.000000000`, speed was `4.833`, main throttle was
+  `1.000`, and flight mode was decoupled;
+- raster draw witnesses of 25/25 shadow, main, and material records, with zero
+  unshaded records; and
+- a 73,708-pixel cascade-blend signal plus a 1920x1080 manual capture inspection
+  that was nonblank, correctly framed, and free of incoherent overlap or child
+  transform artifacts.
+
+The adversarial pass found and corrected four contract-level defects before
+integration:
+
+1. Generic assembly publication had accidentally inherited the playable ship's
+   stricter root-scale limits.
+2. A tolerated near-unit root quaternion was not normalized before rotating
+   child offsets.
+3. Replacing the prototype cube as camera target disarmed the renderer cascade
+   negative control.
+4. The flight smoke marker reused `mode`, overwriting the renderer mode witness.
+
+No open defect remains inside the Stage 5E ownership boundary. Follow-on work is
+deliberately left unclaimed at closure.
+
 ## Deliberate Follow-Ons
 
 This stage does not add a general ECS transform hierarchy, center-of-mass
 authoring, per-module physical damage, articulated physics, production ship art,
 navmesh, pressure, EVA, multiplayer authority, or save-format expansion. Those
 remain separate lanes. The next ship-content lane may replace the reference
-asset without changing this identity and frame contract.
+asset without changing this identity and frame contract. Codex pauses after this
+stage and does not claim that lane here.

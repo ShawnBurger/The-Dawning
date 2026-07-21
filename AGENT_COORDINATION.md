@@ -2187,7 +2187,7 @@ are now integrated as well. The current order is:
 
 ### WS-031: Authoritative assembly-root presentation propagation
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: make the committed production assembly root the one playable-ship
   entity and propagate its live double-translation, rotation, and validated
   scale into every module and moving-part render transform. Remove the
@@ -2240,10 +2240,42 @@ are now integrated as well. The current order is:
   moving-part counts, stale plan/topology, invalid local transform, destroyed
   assembly, and failed staging cannot partially move the rendered hierarchy or
   transfer gameplay identity back to a placeholder entity
-- Next action: implement the CPU-only local-to-world presentation transaction,
-  wire it through the runtime host and fixed-step App path, replace the player
-  cube with the committed root, then audit and validate the complete lane before
-  integration.
+- Integrated commits: claim `bdbf020`, implementation `577eca5`, and adversarial
+  hardening `b2e68dc`; fast-forwarded to `main` after rebasing over simulation
+  Stages 9 through 12.
+- Delivered: the committed assembly root is the sole playable-ship entity and
+  owns flight physics, input, possession, camera, and gravity identity without a
+  render mesh; prepared module and moving-part poses remain immutable and
+  assembly-local; one CPU-only transaction validates and root-composes the full
+  child batch before ECS publication; accepted fixed steps publish the entire
+  rendered hierarchy through the live root; interior, dynamic collision, and
+  on-foot queries stay assembly-local; and the interactive prototype cube is
+  removed. A smoke-only `SmokeShipProbe` preserves renderer negative-control
+  framing without acquiring gameplay or physics identity.
+- Adversarial review: corrected accidental application of strict playable-root
+  scale limits to generic assembly commits; normalized accepted near-unit root
+  quaternions before rotating child offsets; restored the renderer cascade probe
+  after replacing the prototype camera target; and split `flight_mode` from the
+  renderer's `mode` marker so one smoke witness cannot overwrite another.
+- Verification: on the combined Stage 12 tree, Debug and Release all-target
+  builds passed; Debug and Release CTest passed 5/5; both direct CPU suites
+  passed 504 cases and 18,809 checks with zero failures; the reference manifest
+  validated and two independent cooks matched at 2,359 bytes and SHA-256
+  `E4C3CD8EAD76D8D7120E34AE4D2846FDBFF44E62D5EF9FB8B9A430F5B56FD86F`;
+  Release raster plus flight, Release stable DXR, Release full DXR, and Debug
+  stable DXR with D3D12 GPU validation all passed. The flight witness measured
+  equal root/child displacement (`0.523611`) with zero hierarchy error, decoupled
+  speed `4.833`, and main throttle `1.000`; raster retained 25/25 shadow, main,
+  and material draw records plus a 73,708-pixel cascade-blend signal. A
+  1920x1080 interactive/capture inspection was nonblank, correctly framed, and
+  showed the production corridor assembly following the authored root without
+  overlap or transform artifacts.
+- Known boundary: this work establishes identity and presentation propagation,
+  not a general ECS transform hierarchy, articulated module physics, production
+  ship art, center-of-mass authoring, pressure/EVA, navmesh, networking, or save
+  expansion. Those remain separate, unclaimed lanes.
+- Next action: pause after Step 5 as requested. No follow-on lane is claimed by
+  Codex from this workstream.
 
 ## 20. Helper Commands
 
