@@ -315,6 +315,26 @@ TEST_CASE(Collision_Bounce_ConservationAndClosedForm)
 }
 
 // =============================================================================
+// T5b - RESTITUTION IS CLAMPED: a misconfigured e>1 must NOT inject kinetic energy
+//       (clamped to the elastic e=1 bound), so the "never injects energy" guarantee
+//       holds for any config. e<0 is clamped to 0 (fully inelastic-ish, dissipative).
+// =============================================================================
+TEST_CASE(Collision_Bounce_RestitutionClampedNoEnergyInjection)
+{
+    CloseEncounterConfig cfg; cfg.restitution = 2.0; // absurd: would DOUBLE the rebound
+    std::vector<NBodyParticle> b = {
+        MakeP(1, Vec3d{ -0.95, 0, 0 }, Vec3d{ 3, 0, 0 },  2.0, 1.0),
+        MakeP(2, Vec3d{ 0.95, 0, 0 },  Vec3d{ -3, 0, 0 }, 5.0, 1.0),
+    };
+    const double k0 = KineticGScaled(b);
+    const Vec3d  p0 = MomentumSum(b);
+    CloseEncounterReport r; ResolveInstant(b, cfg, r);
+    CHECK_EQ(CountBounces(r), 1);
+    CHECK(KineticGScaled(b) <= k0 * (1.0 + 1e-12)); // clamped to elastic: KE not increased
+    CHECK_APPROX_EPS(MomentumSum(b).x, p0.x, 1e-12); // momentum still conserved
+}
+
+// =============================================================================
 // T6 - DETERMINISM UNDER INPUT PERMUTATION: a coupled pileup (a merge trio and a
 //      separate merge pair) produces bit-identical post-state + events regardless
 //      of input order. (Global e=0, so the whole scene merges by cluster.)

@@ -72,10 +72,14 @@ bool ApplyBounce(NBodyParticle& a, NBodyParticle& b, double e)
     const double vn = (a.velocity - b.velocity).Dot(n);
     if (!(vn < 0.0)) return false;                 // separating: never impulse
 
+    // Clamp restitution to [0,1] AT THE POINT OF USE so the "never injects energy"
+    // guarantee holds unconditionally: e>1 would add KE, e<0 is unphysical. A caller
+    // that misconfigures cfg.restitution gets a perfectly-elastic bound, not a pump.
+    const double eUsed = (e < 0.0) ? 0.0 : (e > 1.0 ? 1.0 : e);
     const double M  = a.mu + b.mu;                 // > 0 by eligibility
     const double fi = b.mu / M;                     // finite; fi + fj == 1
     const double fj = a.mu / M;
-    const double dv = (1.0 + e) * vn;               // scalar (vn < 0)
+    const double dv = (1.0 + eUsed) * vn;           // scalar (vn < 0)
     a.velocity -= n * (dv * fi);
     b.velocity += n * (dv * fj);
     return true;
@@ -357,10 +361,14 @@ void StepNBodyCollisional(std::vector<NBodyParticle>& bodies, double dt,
         return; // house guard (matches StepNBody)
 
     int L = RequiredSubdivisionLevel(bodies, dt, cfg); // desired, unclamped
-    report.hitDepthCap = (L > cfg.maxLevel);
-    if (L > cfg.maxLevel) L = cfg.maxLevel;
+    // Effective cap = min(maxLevel, 30): 30 is a HARD representational limit (nSub,
+    // microSteps and the loop counter are uint32_t; 1u<<L is UB for L>=32), so a
+    // maxLevel above it cannot be honored. Folding it into the cap keeps hitDepthCap
+    // TRUTHFUL - a misconfigured maxLevel>30 no longer truncates silently.
+    const int effectiveCap = (cfg.maxLevel < 30) ? cfg.maxLevel : 30;
+    report.hitDepthCap = (L > effectiveCap);
+    if (L > effectiveCap) L = effectiveCap;
     if (L < 0) L = 0;
-    if (L > 30) L = 30;                                // shift-overflow / runaway backstop
     report.subdivisionLevel = L;
 
     const uint32_t nSub = 1u << L;
