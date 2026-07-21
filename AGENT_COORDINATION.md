@@ -8,24 +8,24 @@ Owner: Shawn Burger
 
 Integration manager: Codex
 
-Last revised: 2026-07-20
+Last revised: 2026-07-21
 
 ## 1. Purpose
 
 This document defines how Codex and Claude Code collaborate on The Dawning. Its
-goals are to gain real parallel throughput, preserve independent review, prevent
+goals are to gain real parallel throughput, preserve disciplined review, prevent
 Git and file collisions, and keep `main` continuously understandable and
 testable.
 
 The operating model is:
 
-> Parallel by subsystem, serial by feature, reciprocal review, one integrator,
+> Parallel by subsystem, serial by feature, adversarial manual review, one integrator,
 > and one worktree per active task.
 
 Two agents may work at the same time only when their workstreams have disjoint
 ownership or an explicit interface contract. A single feature always has one
-primary implementer. The other agent reviews the committed result rather than
-building a competing implementation in parallel.
+primary implementer. Codex performs the final manual review from a stable commit
+rather than asking the other agent to build or review a competing implementation.
 
 This contract is intentionally shorter-lived than architecture documents and
 more authoritative than historical handoffs. Update it when ownership or the
@@ -80,8 +80,7 @@ Claude normally owns:
 - the N-body orbital core, relativistic momentum/time modules, atmosphere force
   model, and FTL frame handling in the staged simulation plan;
 - pure CPU simulation code and its analytic invariants, deterministic replay,
-  convergence tests, and watched-failing negative controls;
-- review of Codex's playable-ship, asset-pipeline, and rendering work.
+  convergence tests, and watched-failing negative controls.
 
 This is the current owner-directed split recorded on `main` at `b102363`.
 Assignment remains per feature rather than a permanent claim over every nearby
@@ -97,21 +96,30 @@ Every workstream names exactly one primary. The primary:
 - records assumptions and known limitations;
 - produces a committed handoff before review.
 
-### 3.5 Reviewer
+### 3.5 Adversarial manual review
 
-The other agent is the reviewer. The reviewer:
+Codex owns the final manual review for every integration lane, including
+Codex-authored features. Claude review is optional input and is not requested or
+required by default.
 
-- reads the committed diff and relevant surrounding code;
-- looks first for correctness defects, regressions, unsupported claims, missing
-  tests, unsafe lifecycle behavior, and architecture conflicts;
-- does not edit the primary's worktree;
-- does not build a second version of the same feature concurrently;
-- returns findings ordered by severity and grounded in files/tests;
-- adds code only through a separate review branch or by returning the task to
-  the primary for correction.
+To counter confirmation bias, the review is a distinct pass after a stable
+commit. Codex must:
 
-Review is independent, but it is not adversarial theater. A review with no
-findings is valid when the evidence supports it.
+1. Re-read the feature contract and surrounding architecture before re-reading
+   the implementation.
+2. Treat every load-bearing claim as a failure hypothesis, not as a description
+   to confirm.
+3. Inspect callers, ownership, cleanup, malformed input, numeric limits,
+   concurrency, and consumption sites outside the changed lines.
+4. Try to construct the smallest counterexample for each important invariant.
+5. Turn every credible risk into a watched negative test or an explicit residual
+   limitation before integration.
+6. Rebuild and rerun the required matrix from the reviewed commit, then inspect
+   the exact staged and published inventory.
+
+A manual review with no findings is valid only when those steps produce no
+counterexample. Finding and correcting a defect is evidence that the review was
+useful, not evidence that the implementation pass failed.
 
 ### 3.6 Integration manager
 
@@ -167,7 +175,7 @@ repair the history later.
 
 - Codex task branches: `codex/<task-slug>`
 - Claude task branches: `claude/<task-slug>`
-- Review-fix branches: `<reviewer>/review-<task-slug>` when needed
+- Review-fix branches: `codex/review-<task-slug>` when a separate lane is needed
 - Integration branch: `main`
 
 Create a branch from the recorded base commit, normally current clean `main` or
@@ -185,7 +193,7 @@ At most three workstreams may be active:
 
 - one Codex implementation lane;
 - one Claude implementation lane;
-- one integration or review lane.
+- one integration or manual-review lane.
 
 An agent starts no second implementation lane while its first lane is `ACTIVE`,
 `REVIEW`, or `READY_TO_MERGE`. Research needed by an active feature belongs to
@@ -265,7 +273,7 @@ These are defaults, not permission to ignore the active table.
 | ECS behavior | Active workstream | `src/ecs/systems.*`, ECS tests |
 | Coordinates and time | Claude | `src/core/**` additions, `src/sim/**`, math tests |
 | Input, camera, gameplay | Codex | `src/input/**`, gameplay modules, camera ownership |
-| Render/asset review | Claude | committed-diff review and visual/architecture cross-check |
+| Render/asset review | Codex | adversarial manual review and consumption-site cross-check |
 | Simulation review | Codex | committed-diff review and numerical/ownership cross-check |
 | Main integration and GitHub | Codex | canonical checkout and `main` |
 
@@ -323,15 +331,17 @@ If both workstreams need the same shared file, prefer one of these patterns:
 4. Primary checks scope and staged contents.
 5. Primary commits and hands off a stable hash.
 
-### Phase C: independent review
+### Phase C: adversarial manual review
 
-1. Reviewer compares the committed branch with its recorded base.
-2. Reviewer reads surrounding ownership and lifecycle code, not only changed
-   lines.
-3. Reviewer attempts negative controls for important assertions.
-4. Reviewer reports findings first, ordered by severity.
-5. Reviewer either approves, requests changes, or creates a separate review-fix
-   branch from the primary commit.
+1. Codex compares the stable committed branch with its recorded base.
+2. Codex resets perspective by re-reading the contract, then inspects surrounding
+   ownership and lifecycle code rather than only changed lines.
+3. Codex writes concrete failure hypotheses and attempts watched negative
+   controls for every load-bearing assertion.
+4. Codex records findings first, ordered by severity, and corrects them in a
+   separate commit so the review effect remains visible.
+5. Codex reruns the full required matrix and records residual risks before
+   approving integration.
 
 ### Phase D: integrate
 
@@ -580,8 +590,8 @@ relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. Collision policy and the first atomic FTL and atmosphere ECS adapters
 are now integrated as well. The current order is:
 
-1. Keep timed-out reciprocal Claude reviews as explicit manual review debt; they
-   do not reopen already-proven integration gates.
+1. Treat past timed-out Claude reviews as historical context, not outstanding
+   review debt; all current and future gates use Codex's adversarial manual pass.
 2. Preserve the one-owner simulation contracts established by WS-014 through
    WS-017 while Claude's save/load, asset, and render work remains isolated.
 3. Reconcile the three motion owners (N-body, rails, and force-integrated rigid
@@ -2031,14 +2041,17 @@ Check branch overlap:
 .\tools\agent_overlap.ps1 -Base main -Branches codex/<task>,claude/<task>
 ```
 
-Ask Claude for a read-only review from the correct worktree:
+Run the manual review from the correct worktree and immutable range:
 
 ```powershell
-.\tools\claude.cmd -p "Read AGENT_COORDINATION.md and review <base>..<head>. Do not edit, stage, commit, or push. Return findings by severity, tests reviewed, residual risks, and APPROVE or CHANGES_REQUESTED."
+git diff --check <base>..<head>
+git diff --stat <base>..<head>
+git diff <base>..<head> -- <owned-paths>
 ```
 
-The prompt is not a substitute for worktree isolation. A read-only instruction
-reduces ambiguity; a separate checkout prevents accidental shared-index commits.
+The diff is only the entry point. Re-read contracts and surrounding call sites,
+construct counterexamples, add watched negative tests, and rerun the full gate
+matrix before integration.
 
 ## 21. Definition of Productive Parallelism
 
@@ -2051,6 +2064,6 @@ Parallelism is productive only when all of these are true:
 - each result can be reviewed and merged independently;
 - integration costs less than the time saved.
 
-If those conditions do not hold, sequence the work and use the second agent as
-reviewer. Two simultaneous implementations of the same feature are a research
-experiment, not the default development process.
+If those conditions do not hold, sequence the work and apply Codex's manual
+review after the implementation commit. Two simultaneous implementations of the
+same feature are a research experiment, not the default development process.
