@@ -1541,8 +1541,10 @@ are now integrated as well. The current order is:
   `D:\The Dawning (new)\.agents\worktrees\codex-cooked-assembly-runtime-contract`
 - Base commit: `2046fc8`
 - Owned paths: new `src/asset/cooked_assembly.{h,cpp}`, new focused C++ tests,
-  `tools/compile_asset_manifest.py`, focused Python tests, additive assembly
-  documentation, and the minimal source/test registration in `CMakeLists.txt`
+  `tools/compile_asset_manifest.py`, new read-only
+  `tools/assembly_inspector.cpp`, focused Python tests, additive assembly
+  documentation, and the minimal source/tool/test registration in
+  `CMakeLists.txt`
 - Excluded paths: `src/app.{h,cpp}`, `src/scene/**`, `src/ecs/**`,
   `src/gameplay/**`, `src/render/**`, shaders, `src/sim/**`, Meshy generation,
   existing importer behavior, and runtime entity spawning
@@ -1553,7 +1555,8 @@ are now integrated as well. The current order is:
   or dangling identity, and emits a checksummed/versioned artifact. The C++
   loader performs no JSON parsing, file-system asset resolution, scene mutation,
   or GPU work; it either returns the complete immutable assembly graph or a
-  diagnostic with no partial state.
+  diagnostic with no partial state. The inspector is a test/operator surface
+  over that loader and has no mutation authority.
 - Dependencies: WS-021 schema version 1 and its reference ship manifest
 - Acceptance gates: deterministic byte-for-byte compilation; Python-to-C++
   round trip preserves all graph identity and references; truncated, corrupt,
