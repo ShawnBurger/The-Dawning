@@ -71,7 +71,9 @@ struct PreparedAssemblyVisualBinding
 struct PreparedAssemblyModule
 {
     uint32_t stableIndex = 0;
-    ecs::Transform worldTransform;
+    // Immutable pose authored relative to the assembly root. Runtime
+    // presentation composes this through the live root each fixed step.
+    ecs::Transform localTransform;
     PreparedAssemblyVisualBinding visual;
     PreparedAssemblyBinding collision;
     std::vector<PreparedAssemblyVisualBinding> lods;
@@ -89,7 +91,9 @@ struct PreparedAssemblyMovingPart
     uint32_t stableIndex = 0;
     uint32_t moduleIndex = asset::kAssemblyNoIndex;
     uint32_t interactionIndex = asset::kAssemblyNoIndex;
-    ecs::Transform worldTransform;
+    // Closed pose in assembly-local space. The interior runtime owns the
+    // current local pose; presentation alone converts it to world space.
+    ecs::Transform localTransform;
     PreparedAssemblyVisualBinding visual;
 };
 

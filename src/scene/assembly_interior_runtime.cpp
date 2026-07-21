@@ -216,7 +216,7 @@ AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
         for (size_t i = 0; i < stagedModules.size(); ++i)
         {
             if (stagedModules[i].stableIndex != i ||
-                !IsFinite(stagedModules[i].worldTransform))
+                !IsFinite(stagedModules[i].localTransform))
             {
                 return Failure(
                     AssemblyInteriorStatus::InvalidTopology,
@@ -229,7 +229,7 @@ AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
             const asset::AssemblyMovingPart& source = assembly->movingParts[i];
             const PreparedAssemblyMovingPart& prepared = stagedMovingParts[i];
             const core::Vec3f axis = ToFloat3(source.axis);
-            if (prepared.stableIndex != i || !IsFinite(prepared.worldTransform) ||
+            if (prepared.stableIndex != i || !IsFinite(prepared.localTransform) ||
                 source.moduleIndex >= assembly->modules.size() ||
                 source.interactionIndex >= assembly->interactions.size() ||
                 prepared.moduleIndex != source.moduleIndex ||
@@ -250,14 +250,14 @@ AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
             ecs::Transform openEndpoint;
             if (!BuildAssemblyMovingPartTransform(
                     source,
-                    stagedModules[source.moduleIndex].worldTransform,
-                    prepared.worldTransform,
+                    stagedModules[source.moduleIndex].localTransform,
+                    prepared.localTransform,
                     0.0,
                     closedEndpoint) ||
                 !BuildAssemblyMovingPartTransform(
                     source,
-                    stagedModules[source.moduleIndex].worldTransform,
-                    prepared.worldTransform,
+                    stagedModules[source.moduleIndex].localTransform,
+                    prepared.localTransform,
                     1.0,
                     openEndpoint))
             {
@@ -266,7 +266,7 @@ AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
                     "prepared moving-part endpoint transform is invalid",
                     static_cast<uint32_t>(i));
             }
-            stagedTransforms.push_back(prepared.worldTransform);
+            stagedTransforms.push_back(prepared.localTransform);
         }
 
         for (size_t i = 0; i < assembly->interactions.size(); ++i)
@@ -488,8 +488,8 @@ AssemblyInteriorResult AssemblyInteriorRuntime::FindNearest(
             AssemblyInteriorStatus::NotInitialized,
             "interior runtime is not initialized");
     }
-    const float forwardLengthSq = query.worldForward.LengthSq();
-    if (!IsFinite(query.worldPosition) || !IsFinite(query.worldForward) ||
+    const float forwardLengthSq = query.assemblyForward.LengthSq();
+    if (!IsFinite(query.assemblyPosition) || !IsFinite(query.assemblyForward) ||
         !std::isfinite(query.maxDistanceMeters) ||
         !std::isfinite(query.minimumForwardDot) ||
         !std::isfinite(forwardLengthSq) ||
@@ -503,7 +503,7 @@ AssemblyInteriorResult AssemblyInteriorRuntime::FindNearest(
             "interaction query is invalid");
     }
 
-    const core::Vec3f forward = query.worldForward.Normalized();
+    const core::Vec3f forward = query.assemblyForward.Normalized();
     const double maxDistanceSq =
         query.maxDistanceMeters * query.maxDistanceMeters;
     double bestDistanceSq = (std::numeric_limits<double>::max)();
@@ -515,9 +515,9 @@ AssemblyInteriorResult AssemblyInteriorRuntime::FindNearest(
         const asset::AssemblySocket& socket =
             m_assembly->sockets[interaction.socketIndex];
         const core::Vec3d socketPosition = LocalPointToWorld(
-            m_modules[interaction.moduleIndex].worldTransform,
+            m_modules[interaction.moduleIndex].localTransform,
             socket.positionMeters);
-        const core::Vec3d offset = socketPosition - query.worldPosition;
+        const core::Vec3d offset = socketPosition - query.assemblyPosition;
         const double distanceSq = offset.LengthSq();
         if (!std::isfinite(distanceSq) || distanceSq > maxDistanceSq)
             continue;
@@ -711,7 +711,7 @@ double AssemblyInteriorRuntime::InteractionMotionProgress(
         : 0.0;
 }
 
-const ecs::Transform* AssemblyInteriorRuntime::MovingPartTransform(
+const ecs::Transform* AssemblyInteriorRuntime::MovingPartLocalTransform(
     uint32_t stableIndex) const
 {
     return stableIndex < m_movingTransforms.size()
@@ -830,9 +830,9 @@ void AssemblyInteriorRuntime::RebuildMovingTransforms()
     {
         const asset::AssemblyMovingPart& part = m_assembly->movingParts[i];
         const ecs::Transform& module =
-            m_modules[part.moduleIndex].worldTransform;
+            m_modules[part.moduleIndex].localTransform;
         const ecs::Transform& closed =
-            m_movingParts[i].worldTransform;
+            m_movingParts[i].localTransform;
         const double progress =
             m_interactions[part.interactionIndex].motionProgress;
         ecs::Transform transformed = closed;

@@ -108,22 +108,22 @@ struct Fixture
 
         scene::PreparedAssemblyModule preparedModule;
         preparedModule.stableIndex = 0;
-        preparedModule.worldTransform.position = { 10.0, 0.0, 0.0 };
-        preparedModule.worldTransform.scale = { 2.0f, 1.0f, 1.0f };
+        preparedModule.localTransform.position = { 10.0, 0.0, 0.0 };
+        preparedModule.localTransform.scale = { 2.0f, 1.0f, 1.0f };
         modules.push_back(preparedModule);
 
         scene::PreparedAssemblyMovingPart preparedHatch;
         preparedHatch.stableIndex = 0;
         preparedHatch.moduleIndex = 0;
         preparedHatch.interactionIndex = 0;
-        preparedHatch.worldTransform.position = { 11.0, 0.0, 0.0 };
+        preparedHatch.localTransform.position = { 11.0, 0.0, 0.0 };
         movingParts.push_back(preparedHatch);
 
         scene::PreparedAssemblyMovingPart preparedDoor;
         preparedDoor.stableIndex = 1;
         preparedDoor.moduleIndex = 0;
         preparedDoor.interactionIndex = 1;
-        preparedDoor.worldTransform.position = { 10.0, 0.0, 3.0 };
+        preparedDoor.localTransform.position = { 10.0, 0.0, 3.0 };
         movingParts.push_back(preparedDoor);
     }
 
@@ -201,7 +201,7 @@ TEST_CASE(AssemblyInterior_RotationalMotionReversesWithoutDriftAndGatesPortal)
     CHECK_EQ(runtime.InteractionStateName(0), std::string_view("closing"));
     CHECK(runtime.Advance(0.5).Succeeded());
     CHECK_EQ(runtime.InteractionStateName(0), std::string_view("closed"));
-    const ecs::Transform* closed = runtime.MovingPartTransform(0);
+    const ecs::Transform* closed = runtime.MovingPartLocalTransform(0);
     CHECK(closed != nullptr);
     CHECK_APPROX(closed->position.x, 11.0);
     CHECK_APPROX(closed->position.z, 0.0);
@@ -210,7 +210,7 @@ TEST_CASE(AssemblyInterior_RotationalMotionReversesWithoutDriftAndGatesPortal)
     CHECK(runtime.Advance(1.0).Succeeded());
     CHECK_EQ(runtime.InteractionStateName(0), std::string_view("open"));
     CHECK(runtime.IsPortalTraversable(0));
-    const ecs::Transform* open = runtime.MovingPartTransform(0);
+    const ecs::Transform* open = runtime.MovingPartLocalTransform(0);
     CHECK(open != nullptr);
     CHECK_APPROX(open->position.x, 10.0);
     CHECK_APPROX(open->position.z, -1.0);
@@ -224,7 +224,7 @@ TEST_CASE(AssemblyInterior_LinearMotionUsesAuthoredModuleScale)
     CHECK(runtime.ActivateInteraction("inner_door").Succeeded());
     CHECK(runtime.Advance(1.0).Succeeded());
 
-    const ecs::Transform* open = runtime.MovingPartTransform(1);
+    const ecs::Transform* open = runtime.MovingPartLocalTransform(1);
     CHECK(open != nullptr);
     CHECK_APPROX(open->position.x, 12.0);
     CHECK_APPROX(open->position.y, 0.0);
@@ -250,8 +250,8 @@ TEST_CASE(AssemblyInterior_TimePartitioningIsDeterministic)
     CHECK_APPROX(
         once.InteractionMotionProgress(1),
         partitioned.InteractionMotionProgress(1));
-    const ecs::Transform* a = once.MovingPartTransform(1);
-    const ecs::Transform* b = partitioned.MovingPartTransform(1);
+    const ecs::Transform* a = once.MovingPartLocalTransform(1);
+    const ecs::Transform* b = partitioned.MovingPartLocalTransform(1);
     CHECK(a != nullptr);
     CHECK(b != nullptr);
     CHECK_APPROX(a->position.x, b->position.x);
@@ -282,8 +282,8 @@ TEST_CASE(AssemblyInterior_NearestQueryUsesRangeViewAndStableOrder)
     CHECK(fixture.Initialize(runtime).Succeeded());
 
     scene::AssemblyInteractionQuery query;
-    query.worldPosition = { 10.0, 0.0, 0.0 };
-    query.worldForward = { 0.0f, 0.0f, 1.0f };
+    query.assemblyPosition = { 10.0, 0.0, 0.0 };
+    query.assemblyForward = { 0.0f, 0.0f, 1.0f };
     query.maxDistanceMeters = 1.5;
     const auto found = runtime.FindNearest(query);
     CHECK(found.Succeeded());
@@ -296,22 +296,22 @@ TEST_CASE(AssemblyInterior_NearestQueryUsesRangeViewAndStableOrder)
     CHECK_EQ(activated.stableIndex, 0u);
     CHECK_EQ(runtime.InteractionStateName(0), std::string_view("opening"));
 
-    query.worldForward = { 0.0f, 0.0f, -1.0f };
+    query.assemblyForward = { 0.0f, 0.0f, -1.0f };
     CHECK_EQ(
         runtime.ActivateNearest(query).status,
         scene::AssemblyInteriorStatus::NotFound);
-    query.worldForward = {};
+    query.assemblyForward = {};
     CHECK_EQ(
         runtime.ActivateNearest(query).status,
         scene::AssemblyInteriorStatus::InvalidArgument);
 
-    query.worldForward = { 0.0f, 0.0f, 1.0f };
+    query.assemblyForward = { 0.0f, 0.0f, 1.0f };
     query.maxDistanceMeters = (std::numeric_limits<double>::max)();
     CHECK_EQ(
         runtime.FindNearest(query).status,
         scene::AssemblyInteriorStatus::InvalidArgument);
     query.maxDistanceMeters = 1.5;
-    query.worldForward = {
+    query.assemblyForward = {
         (std::numeric_limits<float>::max)(),
         (std::numeric_limits<float>::max)(),
         (std::numeric_limits<float>::max)()

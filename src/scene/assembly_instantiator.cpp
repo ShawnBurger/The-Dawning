@@ -1,4 +1,5 @@
 #include "assembly_instantiator.h"
+#include "assembly_presentation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -486,10 +487,15 @@ AssemblyPreparationResult PrepareAssemblyInstance(
         {
             PreparedAssemblyModule prepared;
             prepared.stableIndex = static_cast<uint32_t>(i);
+            ecs::Transform validatedWorld;
             if (!ComposeTransform(
+                    ecs::Transform{},
+                    assembly.modules[i].transform,
+                    prepared.localTransform) ||
+                !ComposeTransform(
                     plan->m_rootTransform,
                     assembly.modules[i].transform,
-                    prepared.worldTransform))
+                    validatedWorld))
             {
                 return PreparationFailure(
                     AssemblyInstantiationStatus::InvalidResolvedResources,
@@ -624,8 +630,8 @@ AssemblyPreparationResult PrepareAssemblyInstance(
             prepared.stableIndex = static_cast<uint32_t>(i);
             prepared.moduleIndex = source.moduleIndex;
             prepared.interactionIndex = source.interactionIndex;
-            prepared.worldTransform =
-                plan->m_modules[source.moduleIndex].worldTransform;
+            prepared.localTransform =
+                plan->m_modules[source.moduleIndex].localTransform;
             AssemblyRuntimeAdapterStatus adapterStatus =
                 AssemblyRuntimeAdapterStatus::Success;
             const AssemblyInstantiationStatus status = PrepareVisualBinding(
@@ -774,6 +780,47 @@ AssemblyCommitResult CommitPreparedAssembly(
         instance->m_movingPartEntities.reserve(
             instance->m_plan->MovingParts().size());
 
+        std::vector<ecs::Transform> movingLocalTransforms;
+        std::vector<ecs::Transform> moduleWorldTransforms(
+            instance->m_plan->Modules().size());
+        std::vector<ecs::Transform> movingPartWorldTransforms(
+            instance->m_plan->MovingParts().size());
+        movingLocalTransforms.reserve(instance->m_plan->MovingParts().size());
+        for (const PreparedAssemblyMovingPart& part :
+             instance->m_plan->MovingParts())
+        {
+            movingLocalTransforms.push_back(part.localTransform);
+        }
+        AssemblyPresentationConfig presentationConfig;
+        // Generic assembly publication preserves the existing support for
+        // nonuniform authored roots. The playable-ship host applies the stricter
+        // uniform-root contract on every live propagation.
+        presentationConfig.requireUniformRootScale = false;
+        presentationConfig.maxModules =
+            (std::numeric_limits<uint32_t>::max)();
+        presentationConfig.maxMovingParts =
+            (std::numeric_limits<uint32_t>::max)();
+        presentationConfig.minimumRootScale =
+            (std::numeric_limits<float>::denorm_min)();
+        presentationConfig.maximumRootScale =
+            (std::numeric_limits<float>::max)();
+        presentationConfig.maximumLocalMagnitude =
+            (std::numeric_limits<float>::max)();
+        const AssemblyPresentationResult presentation =
+            StageAssemblyPresentation(
+                instance->m_plan->RootTransform(),
+                instance->m_plan->Modules(),
+                instance->m_plan->MovingParts(),
+                movingLocalTransforms,
+                moduleWorldTransforms,
+                movingPartWorldTransforms,
+                presentationConfig);
+        if (!presentation.Succeeded())
+        {
+            result.status = AssemblyInstantiationStatus::InvalidResolvedResources;
+            return result;
+        }
+
         const auto createTracked = [&]() {
             const ecs::Entity entity = target.CreateEntity();
             if (!entity.IsNull())
@@ -805,7 +852,8 @@ AssemblyCommitResult CommitPreparedAssembly(
                 result.stagedEntityCount = staged.size();
                 return result;
             }
-            target.AssignTransform(entity, module.worldTransform);
+            target.AssignTransform(
+                entity, moduleWorldTransforms[module.stableIndex]);
             target.AssignMeshInstance(
                 entity,
                 ecs::MeshInstance{ module.visual.runtime.mesh.value, true });
@@ -838,7 +886,8 @@ AssemblyCommitResult CommitPreparedAssembly(
                 result.stagedEntityCount = staged.size();
                 return result;
             }
-            target.AssignTransform(entity, part.worldTransform);
+            target.AssignTransform(
+                entity, movingPartWorldTransforms[part.stableIndex]);
             target.AssignMeshInstance(
                 entity,
                 ecs::MeshInstance{ part.visual.runtime.mesh.value, true });

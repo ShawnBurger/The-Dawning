@@ -1,4 +1,5 @@
 #include "assembly_runtime_host.h"
+#include "assembly_presentation.h"
 
 #include "../core/log.h"
 
@@ -216,8 +217,10 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
 {
     if (m_pending || m_instance || m_plan || m_catalog || m_owners ||
         m_interior.IsInitialized() || m_dynamicCollision.IsInitialized() ||
-        !m_models.empty() ||
-        !m_collisions.empty() || m_collisionWorld)
+        !m_models.empty() || !m_collisions.empty() || m_collisionWorld ||
+        !m_presentationModuleWorld.empty() ||
+        !m_presentationMovingLocal.empty() ||
+        !m_presentationMovingWorld.empty())
     {
         return Failure(
             AssemblyRuntimeHostStatus::InvalidState,
@@ -606,15 +609,39 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
                     : std::string(" (") + dynamicInitialized.error + ")"));
     }
 
+    try
+    {
+        m_presentationModuleWorld.resize(m_plan->Modules().size());
+        m_presentationMovingLocal.resize(m_plan->MovingParts().size());
+        m_presentationMovingWorld.resize(m_plan->MovingParts().size());
+    }
+    catch (const std::bad_alloc&)
+    {
+        DestroyAssemblyInstance(target, *committed.instance);
+        m_dynamicCollision.Shutdown();
+        m_interior.Shutdown();
+        m_presentationModuleWorld.clear();
+        m_presentationMovingLocal.clear();
+        m_presentationMovingWorld.clear();
+        m_plan.reset();
+        m_pending = false;
+        return Failure(
+            AssemblyRuntimeHostStatus::AllocationFailure,
+            "allocation failure while staging assembly presentation");
+    }
+
     m_instance = committed.instance;
     const AssemblyInteriorResult initialTransforms =
-        ApplyInteriorTransforms(scene);
+        SynchronizePresentation(scene);
     if (!initialTransforms.Succeeded())
     {
         DestroyAssemblyInstance(target, *m_instance);
         m_instance.reset();
         m_dynamicCollision.Shutdown();
         m_interior.Shutdown();
+        m_presentationModuleWorld.clear();
+        m_presentationMovingLocal.clear();
+        m_presentationMovingWorld.clear();
         m_plan.reset();
         m_pending = false;
         return Failure(
@@ -664,16 +691,42 @@ AssemblyInteriorResult AssemblyRuntimeHost::ValidateInteriorEntities(
             AssemblyInteriorStatus::NotInitialized,
             "interior host is not live");
     }
+    const std::span<const ecs::Entity> modules =
+        m_instance->ModuleEntities();
     const std::span<const ecs::Entity> entities =
         m_instance->MovingPartEntities();
-    if (entities.size() != m_interior.MovingPartCount())
+    if (!m_instance->Plan() ||
+        modules.size() != m_instance->Plan()->Modules().size() ||
+        entities.size() != m_instance->Plan()->MovingParts().size() ||
+        entities.size() != m_interior.MovingPartCount() ||
+        m_presentationModuleWorld.size() != modules.size() ||
+        m_presentationMovingLocal.size() != entities.size() ||
+        m_presentationMovingWorld.size() != entities.size())
     {
         return InteriorFailure(
             AssemblyInteriorStatus::InvalidTopology,
-            "interior moving-part entity count does not match runtime topology");
+            "assembly presentation entity count does not match runtime topology");
     }
 
     ecs::Registry& registry = scene.GetRegistry();
+    if (!registry.IsAlive(m_instance->RootEntity()) ||
+        registry.TryGet<ecs::Transform>(m_instance->RootEntity()) == nullptr)
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::InvalidTopology,
+            "assembly root entity or transform is unavailable");
+    }
+    for (size_t i = 0; i < modules.size(); ++i)
+    {
+        if (!registry.IsAlive(modules[i]) ||
+            registry.TryGet<ecs::Transform>(modules[i]) == nullptr)
+        {
+            return InteriorFailure(
+                AssemblyInteriorStatus::InvalidTopology,
+                "assembly module entity or transform is unavailable",
+                static_cast<uint32_t>(i));
+        }
+    }
     for (size_t i = 0; i < entities.size(); ++i)
     {
         if (!registry.IsAlive(entities[i]) ||
@@ -684,7 +737,8 @@ AssemblyInteriorResult AssemblyRuntimeHost::ValidateInteriorEntities(
                 "interior moving-part entity or transform is unavailable",
                 static_cast<uint32_t>(i));
         }
-        if (m_interior.MovingPartTransform(static_cast<uint32_t>(i)) == nullptr)
+        if (m_interior.MovingPartLocalTransform(
+                static_cast<uint32_t>(i)) == nullptr)
         {
             return InteriorFailure(
                 AssemblyInteriorStatus::InvalidTopology,
@@ -754,20 +808,60 @@ AssemblyInteriorResult AssemblyRuntimeHost::RollbackInteriorMutation(
     return failure;
 }
 
-AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorTransforms(
-    Scene& scene) const
+AssemblyInteriorResult AssemblyRuntimeHost::SynchronizePresentation(
+    Scene& scene)
 {
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
 
     ecs::Registry& registry = scene.GetRegistry();
+    const ecs::Transform& root =
+        *registry.TryGet<ecs::Transform>(m_instance->RootEntity());
+    const std::span<const ecs::Entity> modules =
+        m_instance->ModuleEntities();
     const std::span<const ecs::Entity> entities =
         m_instance->MovingPartEntities();
     for (size_t i = 0; i < entities.size(); ++i)
     {
+        m_presentationMovingLocal[i] =
+            *m_interior.MovingPartLocalTransform(static_cast<uint32_t>(i));
+    }
+
+    const AssemblyPresentationResult staged = StageAssemblyPresentation(
+        root,
+        m_instance->Plan()->Modules(),
+        m_instance->Plan()->MovingParts(),
+        m_presentationMovingLocal,
+        m_presentationModuleWorld,
+        m_presentationMovingWorld);
+    if (!staged.Succeeded())
+    {
+        return InteriorFailure(
+            staged.status == AssemblyPresentationStatus::InvalidRoot ||
+                    staged.status == AssemblyPresentationStatus::InvalidArgument
+                ? AssemblyInteriorStatus::InvalidArgument
+                : AssemblyInteriorStatus::InvalidTopology,
+            std::string("assembly presentation staging failed: ") +
+                AssemblyPresentationStatusName(staged.status) +
+                (staged.error.empty()
+                    ? std::string{}
+                    : std::string(" (") + std::string(staged.error) + ")"),
+            staged.failedStableIndex);
+    }
+
+    // Every pointer and every world pose was validated above. No component is
+    // added or removed during publication, so the component pools cannot move
+    // between this topology check and the all-or-nothing assignment batch.
+    for (size_t i = 0; i < modules.size(); ++i)
+    {
+        *registry.TryGet<ecs::Transform>(modules[i]) =
+            m_presentationModuleWorld[i];
+    }
+    for (size_t i = 0; i < entities.size(); ++i)
+    {
         *registry.TryGet<ecs::Transform>(entities[i]) =
-            *m_interior.MovingPartTransform(static_cast<uint32_t>(i));
+            m_presentationMovingWorld[i];
     }
     return { AssemblyInteriorStatus::Success };
 }
@@ -857,19 +951,24 @@ AssemblyInteriorResult AssemblyRuntimeHost::AdvanceInterior(
         return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult advanced = m_interior.Advance(dt, config);
-    if (!advanced.Succeeded() || !advanced.changed)
+    if (!advanced.Succeeded())
         return advanced;
-    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
-    if (!refreshed.Succeeded())
+    if (advanced.changed)
     {
-        return RollbackInteriorMutation(
-            previousInterior, previousCollision, refreshed);
+        const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+        if (!refreshed.Succeeded())
+        {
+            return RollbackInteriorMutation(
+                previousInterior, previousCollision, refreshed);
+        }
     }
-    const AssemblyInteriorResult applied = ApplyInteriorTransforms(scene);
+    const AssemblyInteriorResult applied = SynchronizePresentation(scene);
     if (!applied.Succeeded())
     {
-        return RollbackInteriorMutation(
-            previousInterior, previousCollision, applied);
+        return advanced.changed
+            ? RollbackInteriorMutation(
+                  previousInterior, previousCollision, applied)
+            : applied;
     }
     return advanced;
 }
@@ -893,19 +992,24 @@ AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorSnapshot(
         return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult applied = m_interior.ApplySnapshot(snapshot);
-    if (!applied.Succeeded() || !applied.changed)
+    if (!applied.Succeeded())
         return applied;
-    const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
-    if (!refreshed.Succeeded())
+    if (applied.changed)
     {
-        return RollbackInteriorMutation(
-            previousInterior, previousCollision, refreshed);
+        const AssemblyInteriorResult refreshed = RefreshDynamicCollision();
+        if (!refreshed.Succeeded())
+        {
+            return RollbackInteriorMutation(
+                previousInterior, previousCollision, refreshed);
+        }
     }
-    const AssemblyInteriorResult transformed = ApplyInteriorTransforms(scene);
+    const AssemblyInteriorResult transformed = SynchronizePresentation(scene);
     if (!transformed.Succeeded())
     {
-        return RollbackInteriorMutation(
-            previousInterior, previousCollision, transformed);
+        return applied.changed
+            ? RollbackInteriorMutation(
+                  previousInterior, previousCollision, transformed)
+            : transformed;
     }
     return applied;
 }
@@ -937,6 +1041,9 @@ void AssemblyRuntimeHost::ReleaseState(
     m_interior.Shutdown();
     m_instance.reset();
     m_plan.reset();
+    m_presentationModuleWorld.clear();
+    m_presentationMovingLocal.clear();
+    m_presentationMovingWorld.clear();
     m_catalog.reset();
     m_owners.reset();
     for (auto it = m_models.rbegin(); it != m_models.rend(); ++it)

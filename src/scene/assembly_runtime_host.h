@@ -84,6 +84,7 @@ public:
     AssemblyInteriorResult ApplyInteriorSnapshot(
         Scene& scene,
         const AssemblyInteriorSnapshot& snapshot);
+    AssemblyInteriorResult SynchronizePresentation(Scene& scene);
 
     bool Shutdown(
         Scene& scene,
@@ -107,7 +108,6 @@ public:
 
 private:
     AssemblyInteriorResult ValidateInteriorEntities(Scene& scene) const;
-    AssemblyInteriorResult ApplyInteriorTransforms(Scene& scene) const;
     AssemblyInteriorResult CaptureInteriorForMutation(
         AssemblyInteriorSnapshot& snapshot) const;
     AssemblyInteriorResult RefreshDynamicCollision();
@@ -133,6 +133,9 @@ private:
     std::shared_ptr<const PreparedAssemblyPlan> m_plan;
     std::shared_ptr<AssemblyInstance> m_instance;
     AssemblyInteriorRuntime m_interior;
+    std::vector<ecs::Transform> m_presentationModuleWorld;
+    std::vector<ecs::Transform> m_presentationMovingLocal;
+    std::vector<ecs::Transform> m_presentationMovingWorld;
     bool m_pending = false;
 };
 

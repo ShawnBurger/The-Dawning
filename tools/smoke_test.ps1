@@ -7,6 +7,7 @@ param(
     [switch]$ForceGrow,
     [switch]$Unlocked,
     [switch]$GPUValidation,
+    [switch]$Flight,
     [int]$TimeoutSeconds = 15,
     [string]$Config = "Debug",
     [switch]$NoCapture
@@ -68,6 +69,7 @@ if ($ResizeStress) { $arguments += "--smoke-resize" }
 if ($ForceGrow)    { $arguments += "--smoke-force-grow" }
 if ($Unlocked)     { $arguments += "--smoke-unlocked" }
 if ($GPUValidation){ $arguments += "--gpu-validation" }
+if ($Flight)       { $arguments += "--smoke-flight" }
 if (!$NoCapture)   { $arguments += "--smoke-capture" }
 
 $process = Start-Process -FilePath $exe `
@@ -193,6 +195,18 @@ Assert-Marker "on_foot_controller" "ok"
 Assert-Marker "closed" "blocked"
 Assert-Marker "open" "traversable"
 Assert-Marker "blockers" "2"
+Assert-Marker "assembly_root_presentation" "ok"
+Assert-Marker "player_ship" "same"
+Assert-Marker "root_mesh" "absent"
+Assert-Marker "assembly_children" "coherent"
+Assert-Marker "smoke_camera_probe" "isolated"
+Assert-Marker "gameplay_identity" "assembly_root"
+if ($Flight) {
+    Assert-Marker "assembly_root_motion" "ok"
+    Assert-Marker "hierarchy_motion" "coherent"
+    Assert-Marker "playable_ship" "ok"
+    Assert-Marker "flight_mode" "decoupled"
+}
 Assert-Marker "pilot_possession_ready" "ok"
 Assert-Marker "pilot_possession" "ok"
 Assert-Marker "exit" "on_foot"

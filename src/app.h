@@ -72,6 +72,7 @@ private:
     bool BuildAssemblyInteractionQuery(
         scene::AssemblyInteractionQuery& query);
     bool UpdateOnFootSimulation(double dt);
+    bool ValidateSmokeAssemblyMotion();
     void UpdatePlayerShipVisuals();
     bool UpdateCamera(const core::TimeStep& timeStep);
     bool AdvanceSimulation(double dt);
@@ -136,10 +137,15 @@ private:
     bool m_smokeRTIBLControlRequested  = false;
     bool m_smokeRTIBLConsumeRequested  = false;
     bool m_smokeSnapshotVerified = false;
+    bool m_smokeAssemblyBaselineReady = false;
+    bool m_smokeAssemblyMotionVerified = false;
+    core::Vec3d m_smokeAssemblyInitialRootPosition = {};
+    core::Vec3d m_smokeAssemblyInitialModulePosition = {};
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;
     ecs::Entity m_smokeTextureEntity;
+    ecs::Entity m_smokeCameraTarget;
     ecs::Entity m_playerShip;
     gameplay::PilotSeatBinding m_pilotSeat;
     gameplay::PlayerPossessionState m_playerPossession;

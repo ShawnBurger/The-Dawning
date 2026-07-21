@@ -657,34 +657,24 @@ bool App::InitializeScene()
                        cubeAlbedo.value, cubeNormal.value, cubeOrm.value,
                        core::Color{ 0.25f, 0.85f, 1.0f, 1.0f }, 2.5f,
                        cubeEmissive.value };
-    ecs::Material playerMaterial = m_smokeGrowthMaterial;
-    playerMaterial.albedo = { 0.18f, 0.32f, 0.58f, 1.0f };
-    playerMaterial.emissiveStrength = 0.45f;
-    ecs::Transform playerShipTransform{
-        { 0, 1.2, -2.0 }, core::Quatf::Identity(), { 3.0f, 0.9f, 4.4f }
-    };
-    // The rendering smoke oracle intentionally owns the legacy center-stage
-    // transform: its cascade-transition probe depends on that fixed witness.
-    // Interactive runs align the prototype ship entity with the authored
-    // assembly root until the production hierarchy replaces the cube.
-    if (!m_options.smoke)
+    const scene::AssemblyInstance* playerAssembly = m_runtimeAssembly.Instance();
+    if (!playerAssembly || !playerAssembly->IsAlive() ||
+        playerAssembly->RootEntity().IsNull() ||
+        playerAssembly->ModuleEntities().empty())
     {
-        if (const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
-            instance && instance->Plan())
-        {
-            const ecs::Transform& authoredRoot = instance->Plan()->RootTransform();
-            playerShipTransform.position = authoredRoot.position;
-            playerShipTransform.rotation = authoredRoot.rotation;
-        }
-    }
-    m_playerShip = m_scene.CreateRenderable(
-        "PlayerShip", cube,
-        playerMaterial,
-        playerShipTransform);
-    if (m_playerShip.IsNull())
+        core::Log::Error("Playable ship has no committed assembly root");
         return false;
+    }
+    m_playerShip = playerAssembly->RootEntity();
 
     auto& registry = m_scene.GetRegistry();
+    if (!registry.IsAlive(m_playerShip) ||
+        registry.TryGet<ecs::Transform>(m_playerShip) == nullptr ||
+        registry.Has<ecs::MeshInstance>(m_playerShip))
+    {
+        core::Log::Error("Playable assembly root is not a meshless live transform");
+        return false;
+    }
     registry.Assign<ecs::RigidBody>(m_playerShip, gameplay::MakeFighterRigidBody());
     registry.Assign<ecs::ThrusterSet>(m_playerShip, gameplay::MakeFighterThrusterSet());
     registry.Assign<ecs::FlightControl>(m_playerShip, ecs::FlightControl{});
@@ -696,7 +686,58 @@ bool App::InitializeScene()
     playerGravity.isSource = false;
     playerGravity.owner = ecs::OrbitOwner::ForceIntegrated;
     registry.Assign<ecs::GravitationalBody>(m_playerShip, playerGravity);
-    m_smokeTextureEntity = m_playerShip;
+    m_smokeTextureEntity = playerAssembly->ModuleEntities().front();
+
+    if (m_options.smoke)
+    {
+        // The cascade and texture-mutation oracles need their legacy central
+        // shape to remain stable across renderer work. It is deliberately a
+        // smoke-only probe with no gameplay, physics, or assembly identity.
+        ecs::Material smokeProbeMaterial = m_smokeGrowthMaterial;
+        smokeProbeMaterial.albedo = { 0.18f, 0.32f, 0.58f, 1.0f };
+        smokeProbeMaterial.emissiveStrength = 0.45f;
+        m_smokeTextureEntity = m_scene.CreateRenderable(
+            "SmokeShipProbe",
+            cube,
+            smokeProbeMaterial,
+            ecs::Transform{
+                { 0, 1.2, -2.0 },
+                core::Quatf::Identity(),
+                { 3.0f, 0.9f, 4.4f }
+            });
+        if (m_smokeTextureEntity.IsNull())
+            return false;
+        m_smokeCameraTarget = m_smokeTextureEntity;
+        core::Log::Info(
+            "[SMOKE] smoke_camera_probe=isolated gameplay_identity=assembly_root");
+    }
+
+    const scene::AssemblyInteriorResult presentationReady =
+        m_runtimeAssembly.SynchronizePresentation(m_scene);
+    if (!presentationReady.Succeeded())
+    {
+        core::Log::Errorf(
+            "Playable assembly presentation failed [%s]: %s",
+            scene::AssemblyInteriorStatusName(presentationReady.status),
+            presentationReady.error.c_str());
+        return false;
+    }
+    core::Log::Infof(
+        "[SMOKE] assembly_root_presentation=ok root=%u player_ship=same modules=%zu moving_parts=%zu root_mesh=absent",
+        m_playerShip.id,
+        playerAssembly->ModuleEntities().size(),
+        playerAssembly->MovingPartEntities().size());
+    const ecs::Transform* initialRoot =
+        registry.TryGet<ecs::Transform>(m_playerShip);
+    const ecs::Transform* initialModule = registry.TryGet<ecs::Transform>(
+        playerAssembly->ModuleEntities().front());
+    if (!initialRoot || !initialModule)
+        return false;
+    m_smokeAssemblyInitialRootPosition = initialRoot->position;
+    m_smokeAssemblyInitialModulePosition = initialModule->position;
+    m_smokeAssemblyBaselineReady = true;
+    core::Log::Info(
+        "[SMOKE] assembly_children=coherent frame=assembly_local");
 
     // Exhaust creation adds more Transform components and can reallocate that
     // pool, so keep value copies while the visual entities are being spawned.
@@ -727,7 +768,7 @@ bool App::InitializeScene()
         registry.Remove<ecs::MeshInstance>(m_thrusterVisuals[i]);
     }
 
-    core::Log::Infof("Playable ship ready: entity=%u thrusters=%u mode=COUPLED",
+    core::Log::Infof("Playable assembly ship ready: entity=%u thrusters=%u mode=COUPLED",
                      m_playerShip.id, m_thrusterVisualCount);
     if (!InitializePlayerPossession())
         return false;
@@ -1467,6 +1508,13 @@ bool App::AdvanceSimulation(double dt)
             m_scene.InvalidatePathTraceHistory();
     }
 
+    if (!ValidateSmokeAssemblyMotion())
+    {
+        m_exitCode = 11;
+        m_running = false;
+        return false;
+    }
+
     if (!UpdateOnFootSimulation(dt))
     {
         m_exitCode = 12;
@@ -1675,17 +1723,12 @@ bool App::BuildPlayerShipRoot(ecs::Transform& root)
         m_scene.GetRegistry().TryGet<ecs::Transform>(m_playerShip);
     if (!ship)
         return false;
-    ecs::Transform candidate = *ship;
-    // The prototype cube's nonuniform scale is render geometry, not ship-root
-    // scale. Interior meters stay unscaled while position and orientation follow
-    // the same simulated entity.
-    candidate.scale = { 1.0f, 1.0f, 1.0f };
     if (!gameplay::IsValidPossessionRoot(
-            candidate, m_possessionConfig.uniformRootScaleTolerance))
+            *ship, m_possessionConfig.uniformRootScaleTolerance))
     {
         return false;
     }
-    root = candidate;
+    root = *ship;
     return true;
 }
 
@@ -1717,21 +1760,9 @@ bool App::BuildAssemblyInteractionQuery(
         return false;
     }
 
-    const ecs::Transform& authoredRoot = instance->Plan()->RootTransform();
     scene::AssemblyInteractionQuery candidate;
-    if (!gameplay::AssemblyLocalPointToWorld(
-            authoredRoot,
-            localPosition,
-            candidate.worldPosition,
-            m_possessionConfig.uniformRootScaleTolerance) ||
-        !gameplay::AssemblyLocalDirectionToWorld(
-            authoredRoot,
-            localForward,
-            candidate.worldForward,
-            m_possessionConfig.uniformRootScaleTolerance))
-    {
-        return false;
-    }
+    candidate.assemblyPosition = localPosition;
+    candidate.assemblyForward = localForward.ToFloat();
     candidate.maxDistanceMeters =
         m_possessionConfig.maximumSeatUseDistanceMeters;
     candidate.minimumForwardDot =
@@ -1961,6 +1992,66 @@ bool App::UpdateOnFootSimulation(double dt)
     return true;
 }
 
+bool App::ValidateSmokeAssemblyMotion()
+{
+    if (!m_options.smokeFlight || m_smokeAssemblyMotionVerified ||
+        m_frameCount != SmokeFrameForTime(m_options.smokeSeconds))
+    {
+        return true;
+    }
+
+    const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
+    if (!m_smokeAssemblyBaselineReady || !instance || !instance->IsAlive() ||
+        instance->RootEntity() != m_playerShip ||
+        instance->ModuleEntities().empty())
+    {
+        core::Log::Error("Assembly root-motion smoke baseline is unavailable");
+        return false;
+    }
+
+    const auto& registry = m_scene.GetRegistry();
+    const ecs::Transform* root =
+        registry.TryGet<ecs::Transform>(m_playerShip);
+    const ecs::Transform* module = registry.TryGet<ecs::Transform>(
+        instance->ModuleEntities().front());
+    if (!root || !module)
+    {
+        core::Log::Error("Assembly root-motion smoke entities are unavailable");
+        return false;
+    }
+
+    const core::Vec3d rootDisplacement =
+        root->position - m_smokeAssemblyInitialRootPosition;
+    const core::Vec3d moduleDisplacement =
+        module->position - m_smokeAssemblyInitialModulePosition;
+    const double rootDistance = rootDisplacement.Length();
+    const double moduleDistance = moduleDisplacement.Length();
+    const double hierarchyError =
+        (moduleDisplacement - rootDisplacement).Length();
+    constexpr double minimumMotionMeters = 1.0e-4;
+    constexpr double maximumHierarchyErrorMeters = 1.0e-5;
+    if (!std::isfinite(rootDistance) || !std::isfinite(moduleDistance) ||
+        !std::isfinite(hierarchyError) || rootDistance <= minimumMotionMeters ||
+        moduleDistance <= minimumMotionMeters ||
+        hierarchyError > maximumHierarchyErrorMeters)
+    {
+        core::Log::Errorf(
+            "Assembly root-motion smoke failed: root=%.9f child=%.9f error=%.9f",
+            rootDistance,
+            moduleDistance,
+            hierarchyError);
+        return false;
+    }
+
+    m_smokeAssemblyMotionVerified = true;
+    core::Log::Infof(
+        "[SMOKE] assembly_root_motion=ok hierarchy_motion=coherent root_delta=%.6f child_delta=%.6f hierarchy_error=%.9f",
+        rootDistance,
+        moduleDistance,
+        hierarchyError);
+    return true;
+}
+
 void App::UpdatePlayerShipVisuals()
 {
     auto& registry = m_scene.GetRegistry();
@@ -2009,7 +2100,7 @@ void App::UpdatePlayerShipVisuals()
             ? thrusters->thrusters[4].throttle
             : 0.0f;
         core::Log::Infof(
-            "[SMOKE] playable_ship=ok mode=%s speed=%.3f main_throttle=%.3f",
+            "[SMOKE] playable_ship=ok flight_mode=%s speed=%.3f main_throttle=%.3f",
             control && control->mode == ecs::FlightMode::Decoupled
                 ? "decoupled"
                 : "coupled",
@@ -2046,7 +2137,11 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
     }
 
     const auto& registry = m_scene.GetRegistry();
-    if (const auto* ship = registry.TryGet<ecs::Transform>(m_playerShip))
+    const ecs::Entity chaseTarget =
+        m_options.smoke && !m_smokeCameraTarget.IsNull()
+            ? m_smokeCameraTarget
+            : m_playerShip;
+    if (const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget))
     {
         const gameplay::ChaseCameraPose target = gameplay::BuildChaseCameraPose(*ship);
         gameplay::ChaseCameraPose pose = target;

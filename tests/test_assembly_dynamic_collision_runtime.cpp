@@ -214,8 +214,8 @@ TEST_CASE(DynamicInteriorCollision_RotatedPanelMatchesMotionAndStaysAssemblyLoca
     const core::Vec3d rootOffset{ 100.0, 0.0, 0.0 };
     ecs::Transform worldModule = localModule;
     worldModule.position += rootOffset;
-    fixture.modules[0].worldTransform = worldModule;
-    fixture.movingParts[0].worldTransform = worldModule;
+    fixture.modules[0].localTransform = worldModule;
+    fixture.movingParts[0].localTransform = worldModule;
 
     CHECK(fixture.Initialize());
     const auto closed = fixture.dynamic.Snapshot();
@@ -244,7 +244,8 @@ TEST_CASE(DynamicInteriorCollision_RotatedPanelMatchesMotionAndStaysAssemblyLoca
     const auto snapshot = fixture.dynamic.Snapshot();
     CHECK_EQ(snapshot->dynamicBoxes.size(), 1u);
 
-    const ecs::Transform* moving = fixture.interior.MovingPartTransform(0);
+    const ecs::Transform* moving =
+        fixture.interior.MovingPartLocalTransform(0);
     CHECK(moving != nullptr);
     const core::Vec3f scaledSocket{
         static_cast<float>(fixture.assembly->sockets[0].positionMeters[0]) *

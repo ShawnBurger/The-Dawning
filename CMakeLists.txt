@@ -212,6 +212,7 @@ set(SCENE_SOURCES
     src/scene/assembly_dynamic_collision_runtime.cpp
     src/scene/assembly_interior_runtime.cpp
     src/scene/assembly_instantiator.cpp
+    src/scene/assembly_presentation.cpp
     src/scene/assembly_runtime_host.cpp
     src/scene/assembly_runtime_resources.cpp
     src/scene/resource_manager.cpp
@@ -224,6 +225,7 @@ set(SCENE_HEADERS
     src/scene/assembly_dynamic_collision_runtime.h
     src/scene/assembly_interior_runtime.h
     src/scene/assembly_instantiator.h
+    src/scene/assembly_presentation.h
     src/scene/assembly_runtime_host.h
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h
@@ -245,6 +247,7 @@ set(TEST_SOURCES
     tests/test_assembly_collision_runtime.cpp
     tests/test_assembly_dynamic_collision_runtime.cpp
     tests/test_assembly_instantiator.cpp
+    tests/test_assembly_presentation.cpp
     tests/test_assembly_runtime_resources.cpp
     tests/test_assembly_resource_catalog.cpp
     tests/test_assembly_resource_resolver.cpp
@@ -548,6 +551,10 @@ add_executable(TheDawningTests
     # Registry target and fault-injected test target both remain GPU-free.
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_instantiator.h
+    # Atomic CPU-only composition of immutable assembly-local poses through a
+    # live root. The runtime host publishes only complete validated batches.
+    src/scene/assembly_presentation.cpp
+    src/scene/assembly_presentation.h
     # Deterministic authored-interior state machine and moving-part transform
     # reconstruction. GPU-free: it owns no ECS entities or render resources.
     src/scene/assembly_interior_runtime.cpp

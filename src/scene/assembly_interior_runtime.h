@@ -62,8 +62,8 @@ struct AssemblyInteriorSnapshot
 
 struct AssemblyInteractionQuery
 {
-    core::Vec3d worldPosition;
-    core::Vec3f worldForward = { 0.0f, 0.0f, 1.0f };
+    core::Vec3d assemblyPosition;
+    core::Vec3f assemblyForward = { 0.0f, 0.0f, 1.0f };
     double maxDistanceMeters = 2.5;
     float minimumForwardDot = 0.25f;
 };
@@ -79,9 +79,9 @@ bool BuildAssemblyMovingPartTransform(
     ecs::Transform& transformed);
 
 // Executes authored assembly interactions without owning ECS entities or GPU
-// resources. All moving transforms are reconstructed from immutable closed
-// poses, so stepping, reversal, and snapshot restoration never accumulate
-// transform drift.
+// resources. Queries, modules, and moving transforms are assembly-local. All
+// moving transforms are reconstructed from immutable closed poses, so stepping,
+// reversal, root motion, and snapshot restoration never accumulate drift.
 class AssemblyInteriorRuntime final
 {
 public:
@@ -121,7 +121,7 @@ public:
     std::string_view InteractionStateName(uint32_t stableIndex) const;
     uint32_t InteractionStateIndex(uint32_t stableIndex) const;
     double InteractionMotionProgress(uint32_t stableIndex) const;
-    const ecs::Transform* MovingPartTransform(uint32_t stableIndex) const;
+    const ecs::Transform* MovingPartLocalTransform(uint32_t stableIndex) const;
 
     AssemblyInteriorSnapshot CaptureSnapshot() const;
     AssemblyInteriorResult ApplySnapshot(

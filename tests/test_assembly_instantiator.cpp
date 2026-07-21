@@ -317,7 +317,7 @@ scene::AssemblyPreparationResult Prepare(
 
 } // namespace
 
-TEST_CASE(AssemblyInstantiator_PreparesEveryBindingAndComposesWorldTransforms)
+TEST_CASE(AssemblyInstantiator_PreparesEveryBindingAndPreservesLocalTransforms)
 {
     Fixture fixture;
     FakeResourceAdapter adapter;
@@ -341,15 +341,13 @@ TEST_CASE(AssemblyInstantiator_PreparesEveryBindingAndComposesWorldTransforms)
     CHECK_EQ(adapter.navigationCalls, (uint32_t)1);
     CHECK_EQ(adapter.walkableCalls, (uint32_t)1);
 
-    const core::Vec3f expectedOffset = root.rotation.Normalized().Rotate(
-        core::Vec3f{ 2.0f, 6.0f, 12.0f });
-    const ecs::Transform& hull = result.plan->Modules()[0].worldTransform;
-    CHECK_APPROX_EPS(hull.position.x, 10.0 + expectedOffset.x, 1.0e-5);
-    CHECK_APPROX_EPS(hull.position.y, 20.0 + expectedOffset.y, 1.0e-5);
-    CHECK_APPROX_EPS(hull.position.z, 30.0 + expectedOffset.z, 1.0e-5);
-    CHECK_APPROX_EPS(hull.scale.x, 2.0f, 1.0e-6f);
-    CHECK_APPROX_EPS(hull.scale.y, 6.0f, 1.0e-6f);
-    CHECK_APPROX_EPS(hull.scale.z, 4.0f, 1.0e-6f);
+    const ecs::Transform& hull = result.plan->Modules()[0].localTransform;
+    CHECK_APPROX_EPS(hull.position.x, 1.0, 1.0e-8);
+    CHECK_APPROX_EPS(hull.position.y, 2.0, 1.0e-8);
+    CHECK_APPROX_EPS(hull.position.z, 3.0, 1.0e-8);
+    CHECK_APPROX_EPS(hull.scale.x, 1.0f, 1.0e-6f);
+    CHECK_APPROX_EPS(hull.scale.y, 2.0f, 1.0e-6f);
+    CHECK_APPROX_EPS(hull.scale.z, 1.0f, 1.0e-6f);
     CHECK_EQ(result.plan->Modules()[0].visual.catalog.ownerToken, (uint64_t)101);
     CHECK_EQ(result.plan->Modules()[0].collision.ownerToken, (uint64_t)201);
     CHECK_EQ(result.plan->Modules()[0].lods[0].catalog.ownerToken, (uint64_t)102);
@@ -357,15 +355,18 @@ TEST_CASE(AssemblyInstantiator_PreparesEveryBindingAndComposesWorldTransforms)
     CHECK_EQ(result.plan->Zones()[0].walkableSurface.ownerToken, (uint64_t)401);
     CHECK_EQ(result.plan->MovingParts()[0].visual.catalog.ownerToken, (uint64_t)104);
     CHECK_EQ(
-        result.plan->MovingParts()[0].worldTransform.position.x,
-        result.plan->Modules()[1].worldTransform.position.x);
+        result.plan->MovingParts()[0].localTransform.position.x,
+        result.plan->Modules()[1].localTransform.position.x);
 }
 
 TEST_CASE(AssemblyInstantiator_CommitsStableEntityMappingsAndDestroysIdempotently)
 {
     Fixture fixture;
     FakeResourceAdapter adapter;
-    auto prepared = Prepare(fixture, adapter);
+    ecs::Transform genericRoot;
+    genericRoot.position = { 100.0, 200.0, 300.0 };
+    genericRoot.scale = { 2.0e6f, 3.0e6f, 4.0e6f };
+    auto prepared = Prepare(fixture, adapter, genericRoot);
     CHECK(prepared.Succeeded());
 
     ecs::Registry registry;
@@ -380,6 +381,12 @@ TEST_CASE(AssemblyInstantiator_CommitsStableEntityMappingsAndDestroysIdempotentl
     CHECK_FALSE(registry.Has<ecs::MeshInstance>(committed.instance->RootEntity()));
     CHECK_EQ(committed.instance->ModuleEntities().size(), (size_t)2);
     CHECK_EQ(committed.instance->MovingPartEntities().size(), (size_t)1);
+
+    const ecs::Transform& committedHull = registry.Get<ecs::Transform>(
+        committed.instance->ModuleEntities()[0]);
+    CHECK_APPROX_EPS(committedHull.position.x, 2'000'100.0, 1.0e-6);
+    CHECK_APPROX_EPS(committedHull.position.y, 6'000'200.0, 1.0e-6);
+    CHECK_APPROX_EPS(committedHull.position.z, 12'000'300.0, 1.0e-6);
 
     for (size_t i = 0; i < committed.instance->ModuleEntities().size(); ++i)
     {
