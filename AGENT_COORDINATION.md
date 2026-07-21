@@ -1779,7 +1779,7 @@ are now integrated as well. The current order is:
 
 ### WS-026: Data-driven production assembly runtime
 
-- Status: READY
+- Status: MERGED
 - Outcome: load one shipped runtime-content manifest, its cooked assembly, and
   its cooked visual resources without asset-specific C++ scene construction;
   register every authored visual/collision/navigation/walkable locator in the
@@ -1851,9 +1851,15 @@ are now integrated as well. The current order is:
   builds and all four CTest contracts pass; the CPU suite passes 411 cases and
   17,608 checks; Debug and Release raster/stable-DXR/full-DXR smoke pass; Debug
   stable DXR passes with D3D12 GPU validation enabled.
-- Latest commit: `c20bb11` (`0f41d6d` claim)
-- Next action: fast-forward the verified range into clean `main`, rerun the
-  integrated-tree checks, push, and record closeout
+- Integration: clean `main` fast-forwarded through `3333ebd`; canonical-main
+  Debug all-target rebuild, all four CTest contracts, stable-DXR smoke, and the
+  1920x1080 nonblack capture passed after integration
+- Latest commit: `3333ebd` on `main` (`c20bb11` implementation,
+  `0f41d6d` claim)
+- Next action: begin a separately claimed Stage 5 lane that replaces the
+  corridor witness with modular production ship geometry and publishes the
+  first real walkable/interactable interior subsystem against these typed
+  assembly identities
 
 ## 20. Helper Commands
 
