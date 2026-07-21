@@ -1863,7 +1863,7 @@ are now integrated as well. The current order is:
 
 ### WS-027: Deterministic interactive-interior runtime
 
-- Status: READY FOR INTEGRATION
+- Status: MERGED
 - Outcome: execute the interaction, portal, socket, and moving-part topology
   already present in the cooked production assembly. The runtime owns stable
   interaction state indices and normalized motion progress, accepts bounded
@@ -1928,8 +1928,12 @@ are now integrated as well. The current order is:
   edge case in custom motion-rate preflight; it was corrected and pinned by a
   new regression before the final feature commit.
 - Latest commits: `62afa66` claim, `3b44ac8` implementation
-- Next action: recheck branch overlap and canonical `main`, fast-forward the two
-  WS-027 commits, repeat integrated tests/smoke, push, and record merged state
+- Integration: clean canonical `main` fast-forwarded through `716feb0`; its
+  Debug/Release all-target builds and both four-contract CTest matrices pass,
+  and the integrated Debug stable-DXR smoke passes with D3D12 GPU validation.
+- Next action: claim Stage 5B separately for cooked collision publication and a
+  deterministic capsule query/locomotion boundary; do not fold navmesh,
+  pressure, possession, or final geometry into that collision lane
 
 ## 20. Helper Commands
 
