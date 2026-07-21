@@ -1719,6 +1719,58 @@ are now integrated as well. The current order is:
 - Next action: retire the clean WS-024 worktree and local task branch after the
   closeout record reaches `origin/main`
 
+### WS-025: Transactional runtime assembly instantiation
+
+- Status: ACTIVE
+- Outcome: convert one immutable resolved assembly and its exact WS-024 catalog
+  lease into a fully preflighted scene-spawn plan, then commit the root, module,
+  and moving-part entities as one rollback-safe transaction. The returned
+  instance retains cooked provenance, stable index mappings, owner-system
+  bindings, and the catalog lease for its complete runtime lifetime.
+- Primary: Codex
+- Reviewer: Claude read-only scene/asset review after the feature commit, or the
+  documented manual-review fallback while the Claude usage limit remains active
+- Branch: `codex/transactional-assembly-instantiation`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-transactional-assembly-instantiation`
+- Base commit: `b5c042e`
+- Owned paths: new `src/scene/assembly_instantiator.{h,cpp}`, new focused
+  `tests/test_assembly_instantiator.cpp`, additive transaction-contract
+  documentation, and minimal source/test registration in `CMakeLists.txt`
+- Excluded paths: existing `src/scene/scene.{h,cpp}` and resource-manager/model-
+  loader behavior, `src/ecs/**`, `src/app.{h,cpp}`, `src/render/**`, shaders,
+  `src/sim/**`, asset loading/cooking/catalog mutation, and owning-system
+  destruction or GPU upload
+- Shared-file locks: Codex holds only additive WS-025 source/test registration
+  blocks in `CMakeLists.txt`; all runtime implementation is isolated in new files
+- Interface contract: preparation accepts one non-null immutable
+  `ResolvedAssemblyResources`, the concrete snapshot that supplied its exact
+  identities, a runtime resource adapter, a finite root transform, and explicit
+  limits. It resolves every captured identity back to a nonzero owner token,
+  asks the appropriate owner adapter to validate/prepare each visual, collision,
+  navigation, and walkable binding, computes deterministic world transforms,
+  and publishes an immutable plan only after every item succeeds. Commit creates
+  entities in cooked stable-index order and returns an instance only after all
+  required components and parent links exist; any exception, capacity failure,
+  or stale plan destroys every entity created by that attempt. Destruction is
+  explicit, reverse ordered, idempotent, and releases the catalog lease only
+  after owned entities are gone.
+- Dependencies: merged WS-022 cooked assembly, WS-023 resource resolution, and
+  WS-024 leased concrete catalog
+- Acceptance gates: exact lease/identity/token validation; deterministic module
+  and moving-part entity mappings; finite root/local transform composition;
+  all binding kinds and LODs preflight before scene mutation; commit success and
+  explicit destruction; injected adapter rejection/exception and entity-capacity
+  failure leave the scene unchanged; old snapshots remain pinned by live plans
+  and instances; Debug/Release all-target builds and CTest remain green
+- Negative controls: null/mismatched resources or lease, malformed counts or
+  indices, invalid transforms, invalid visual handles, adapter unknown status or
+  exception, configured limits, stale identities, and repeated destroy cannot
+  publish a partial plan or leak a partial entity graph
+- Latest commit: pending
+- Next action: create the isolated branch/worktree, freeze the prepare/commit API,
+  implement adversarial tests, and request non-editing review before integration
+
 ## 20. Helper Commands
 
 Create a task worktree:
