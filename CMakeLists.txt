@@ -176,6 +176,7 @@ set(SIM_SOURCES
     src/sim/relative_motion.cpp
     src/sim/star_system.cpp
     src/sim/system_instantiate.cpp
+    src/sim/soi_transition.cpp
     src/sim/simulation_system.cpp
     src/sim/snapshot_system.cpp
 )
@@ -203,6 +204,7 @@ set(SIM_HEADERS
     src/sim/relative_motion.h
     src/sim/star_system.h
     src/sim/system_instantiate.h
+    src/sim/soi_transition.h
     src/sim/simulation_system.h
     src/sim/snapshot_system.h
 )
@@ -285,6 +287,7 @@ set(TEST_SOURCES
     tests/test_relative_motion.cpp
     tests/test_star_system.cpp
     tests/test_system_instantiate.cpp
+    tests/test_soi_transition.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -705,6 +708,10 @@ add_executable(TheDawningTests
     # the astrodynamics stack a world StepSimulation drives.
     src/sim/system_instantiate.cpp
     src/sim/system_instantiate.h
+    # Patched-conics orchestration: reassign an on-rails body's primary + re-fit
+    # its orbit when it crosses a sphere of influence (Stage 7 consumer).
+    src/sim/soi_transition.cpp
+    src/sim/soi_transition.h
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
