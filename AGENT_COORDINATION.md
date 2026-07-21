@@ -1467,6 +1467,47 @@ are now integrated as well. The current order is:
 - Next action: select the next product workstream from the follow-on section in
   `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`.
 
+### WS-021: Modern controls and production Meshy interior contract
+
+- Status: ACTIVE
+- Outcome: make keyboard and mouse control behavior match modern space-sim
+  expectations, remove camera snapping, and establish a deterministic Meshy
+  production pipeline whose engine-owned assembly metadata can support complete
+  interactive ship and structure interiors
+- Primary: Codex
+- Reviewer: Claude read-only architecture/research pass
+- Branch: `codex/modern-controls-meshy-pipeline`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-modern-controls-meshy-pipeline`
+- Base commit: `a15cfeb`
+- Owned paths: `src/app.{h,cpp}`, `src/gameplay/playable_ship.h`, focused flight
+  tests, `tools/meshy/**`, additive asset-manifest validation/examples,
+  `docs/research/**`, `README.md`, and only the build/CI wiring needed to run the
+  new validators
+- Interface contract: arrow keys and WASD are equivalent local translation
+  inputs in flight and free-camera/player-style contexts; captured raw mouse
+  deltas command bounded ship pitch/yaw or free-camera look; keyboard angular
+  fallbacks remain available on separate keys; the chase camera follows with a
+  frame-rate-independent damped pose and snaps after teleports. Meshy owns
+  source visual geometry and textures only. The engine assembly manifest owns
+  meters, axes, modules, transforms, portals, sockets, walkable surfaces,
+  collision, navigation, pressure zones, interactions, rigid-part pivots, LODs,
+  and provenance
+- Acceptance gates: pure response/camera tests cover deadzone, sign, bounds,
+  convergence, angle wrapping, and teleport snap; existing flight behavior and
+  all CPU tests remain green; the manifest validator rejects disconnected or
+  incomplete interactive interiors; Meshy requests are content-addressed,
+  credential-safe, current-API compatible, and dry-run inspectable; Debug and
+  Release builds plus all six GPU smoke modes pass; clean Git state and
+  published `main`
+- Exclusions: no paid generation without an approved concrete asset request;
+  no claim that the current runtime already has an on-foot character, navmesh,
+  pressure simulation, or door/elevator systems; no monolithic AI-generated
+  exterior-plus-interior asset accepted as gameplay-authoritative topology
+- Next action: complete official-source research, freeze the input and assembly
+  schemas, implement the control/camera and offline validation slices, then ask
+  Claude to review the integrated diff before final validation
+
 ## 20. Helper Commands
 
 Create a task worktree:
