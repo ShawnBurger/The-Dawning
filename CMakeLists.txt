@@ -137,6 +137,7 @@ set(SIM_SOURCES
     src/sim/kepler.cpp
     src/sim/nbody.cpp
     src/sim/relativity.cpp
+    src/sim/atmosphere.cpp
 )
 
 set(SIM_HEADERS
@@ -148,6 +149,7 @@ set(SIM_HEADERS
     src/sim/kepler.h
     src/sim/nbody.h
     src/sim/relativity.h
+    src/sim/atmosphere.h
 )
 
 set(SCENE_SOURCES
@@ -185,6 +187,7 @@ set(TEST_SOURCES
     tests/test_kepler.cpp
     tests/test_nbody.cpp
     tests/test_relativity.cpp
+    tests/test_atmosphere.cpp
 )
 
 set(TEST_HEADERS
@@ -422,6 +425,13 @@ add_executable(TheDawningTests
     # than a copy. Do NOT add anything here that pulls in a D3D12 or render header.
     src/sim/relativity.cpp
     src/sim/relativity.h
+    # SIM STAGE 3 atmospheric flight. GPU-free on the same sanctioned footing:
+    # atmosphere.h includes only core/types.h, so tests/test_atmosphere.cpp drives
+    # the SHIPPED USSA76 model, the semi-implicit stiff-drag update and the firewalled
+    # Sutton-Graves heating rather than a copy. Do NOT add anything here that pulls
+    # in a D3D12 or render header.
+    src/sim/atmosphere.cpp
+    src/sim/atmosphere.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
