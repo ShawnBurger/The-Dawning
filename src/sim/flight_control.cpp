@@ -6,10 +6,80 @@
 
 #include "rigid_body.h" // InertiaDiagFromInverse — one shared I-from-inverse source
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cmath>
 #include <cstdint>
 
 namespace sim
 {
+
+namespace
+{
+
+constexpr size_t kWrenchAxes = 6;
+constexpr int kAllocationPasses = 32;
+
+bool IsFinite(const core::Vec3d& v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+bool IsFinite(const core::Vec3f& v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+bool TryWorldToBody(const core::Quatf& orientation,
+                    const core::Vec3d& world,
+                    core::Vec3d& body)
+{
+    const double x = static_cast<double>(orientation.x);
+    const double y = static_cast<double>(orientation.y);
+    const double z = static_cast<double>(orientation.z);
+    const double w = static_cast<double>(orientation.w);
+    const double lengthSq = x * x + y * y + z * z + w * w;
+    if (!std::isfinite(lengthSq) || !(lengthSq > 0.0) || !IsFinite(world))
+        return false;
+
+    const double invLength = 1.0 / std::sqrt(lengthSq);
+    const core::Vec3d qv{ -x * invLength, -y * invLength, -z * invLength };
+    const double qw = w * invLength;
+
+    const double scale = (std::max)({ std::fabs(world.x), std::fabs(world.y),
+                                      std::fabs(world.z) });
+    core::Vec3d operand = world;
+    constexpr double kDirectLimit = 1.0e150;
+    if (scale > kDirectLimit)
+        operand = world / scale;
+
+    const core::Vec3d uv = qv.Cross(operand);
+    const core::Vec3d uuv = qv.Cross(uv);
+    body = operand + (uv * qw + uuv) * 2.0;
+    if (scale > kDirectLimit)
+        body *= scale;
+    return IsFinite(body);
+}
+
+double NormalizeTarget(double target, double authority)
+{
+    if (!(authority > 0.0) || !std::isfinite(authority))
+        return 0.0;
+    if (target >= authority)
+        return 1.0;
+    if (target <= -authority)
+        return -1.0;
+    return target / authority;
+}
+
+struct AllocationColumn
+{
+    std::array<double, kWrenchAxes> value{};
+    bool usable = false;
+};
+
+} // namespace
 
 void AllocateThrusters(ecs::ThrusterSet& set,
                        const core::Vec3f& linearDemand,
@@ -43,6 +113,120 @@ void AllocateThrusters(ecs::ThrusterSet& set,
         // Zero demand -> both alignments 0 -> throttle EXACTLY 0 (negative control).
         t.throttle = core::Saturate(linAlign + angAlign);
     }
+}
+
+void AllocateThrustersForWrench(ecs::ThrusterSet& set,
+                                const core::Vec3d& desiredWorldForce,
+                                const core::Vec3f& desiredBodyTorque,
+                                const core::Quatf& orientation,
+                                const core::Vec3f& centreOfMass)
+{
+    const uint32_t n = (set.count < ecs::ThrusterSet::kMaxThrusters)
+                           ? set.count
+                           : ecs::ThrusterSet::kMaxThrusters;
+
+    // Start from zero every step so stale throttle cannot leak across mode
+    // switches or impossible requests.
+    for (uint32_t i = 0; i < n; ++i)
+        set.thrusters[i].throttle = 0.0f;
+
+    core::Vec3d desiredBodyForce;
+    if (!IsFinite(desiredBodyTorque) || !IsFinite(centreOfMass) ||
+        !TryWorldToBody(orientation, desiredWorldForce, desiredBodyForce))
+        return;
+
+    std::array<AllocationColumn, ecs::ThrusterSet::kMaxThrusters> columns{};
+    std::array<double, kWrenchAxes> authority{};
+
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        const ecs::Thruster& thruster = set.thrusters[i];
+        const double maxForce = static_cast<double>(thruster.maxForce);
+        if (!(maxForce > 0.0) || !std::isfinite(maxForce) ||
+            !IsFinite(thruster.localDirection) ||
+            !IsFinite(thruster.localPosition))
+            continue;
+
+        const core::Vec3d direction = core::Vec3d::FromFloat(thruster.localDirection);
+        const core::Vec3d lever = core::Vec3d::FromFloat(
+            thruster.localPosition - centreOfMass);
+        const core::Vec3d force = direction * maxForce;
+        const core::Vec3d torque = lever.Cross(force);
+        if (!IsFinite(force) || !IsFinite(torque))
+            continue;
+
+        AllocationColumn& column = columns[i];
+        column.value = { force.x, force.y, force.z,
+                         torque.x, torque.y, torque.z };
+        column.usable = true;
+        for (size_t axis = 0; axis < kWrenchAxes; ++axis)
+            authority[axis] += std::fabs(column.value[axis]);
+    }
+
+    const std::array<double, kWrenchAxes> rawTarget = {
+        desiredBodyForce.x, desiredBodyForce.y, desiredBodyForce.z,
+        static_cast<double>(desiredBodyTorque.x),
+        static_cast<double>(desiredBodyTorque.y),
+        static_cast<double>(desiredBodyTorque.z),
+    };
+    std::array<double, kWrenchAxes> target{};
+    for (size_t axis = 0; axis < kWrenchAxes; ++axis)
+        target[axis] = NormalizeTarget(rawTarget[axis], authority[axis]);
+
+    // Normalize each column by installed per-axis authority. Projected
+    // Gauss-Seidel coordinate descent minimizes the six-axis residual under
+    // 0 <= throttle <= 1. Fixed passes and nozzle order make it deterministic.
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        if (!columns[i].usable)
+            continue;
+        for (size_t axis = 0; axis < kWrenchAxes; ++axis)
+        {
+            if (authority[axis] > 0.0 && std::isfinite(authority[axis]))
+                columns[i].value[axis] /= authority[axis];
+            else
+                columns[i].value[axis] = 0.0;
+        }
+    }
+
+    std::array<double, ecs::ThrusterSet::kMaxThrusters> throttle{};
+    std::array<double, kWrenchAxes> realized{};
+    for (int pass = 0; pass < kAllocationPasses; ++pass)
+    {
+        bool changed = false;
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            if (!columns[i].usable)
+                continue;
+
+            double numerator = 0.0;
+            double denominator = 0.0;
+            for (size_t axis = 0; axis < kWrenchAxes; ++axis)
+            {
+                const double column = columns[i].value[axis];
+                numerator += column * (target[axis] - realized[axis]);
+                denominator += column * column;
+            }
+            if (!(denominator > 0.0) || !std::isfinite(denominator))
+                continue;
+
+            const double next = (std::clamp)(throttle[i] + numerator / denominator,
+                                              0.0, 1.0);
+            const double delta = next - throttle[i];
+            if (std::fabs(delta) <= 1.0e-12)
+                continue;
+
+            throttle[i] = next;
+            changed = true;
+            for (size_t axis = 0; axis < kWrenchAxes; ++axis)
+                realized[axis] += columns[i].value[axis] * delta;
+        }
+        if (!changed)
+            break;
+    }
+
+    for (uint32_t i = 0; i < n; ++i)
+        set.thrusters[i].throttle = static_cast<float>(throttle[i]);
 }
 
 AssistWrench ComputeFlightAssist(const ecs::RigidBody& body,

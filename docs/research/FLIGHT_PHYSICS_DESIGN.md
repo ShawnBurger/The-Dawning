@@ -97,11 +97,13 @@ The smallest thing that is a real flight model, not a toy:
   PART 1). No off-diagonal inertia, no fuel-mass-driven CoM/inertia shift. A
   diagonal-but-unequal tensor is still enough to exercise the full gyroscopic
   term and its hardest test (§9), so this simplification costs no test coverage.
-- Thruster allocation is **direct**, not solved. The player's six control axes
-  map to six force/torque demands; the demand is applied as a net
-  wrench directly. The Ship deep-dive's per-nozzle IFCS allocation (24 nozzles,
-  scoring/linear-programming) is deferred — it is a fidelity and
-  damage-modelling feature, not a prerequisite for flying.
+- Decoupled thruster allocation is **direct**: normalized pilot demand maps to
+  per-nozzle throttle by directional alignment. Coupled assist computes a desired
+  physical wrench, then a deterministic bounded projected allocator maps it onto
+  the installed nozzle bank. Both modes realize force only through
+  `ComputeWrench`; there is no reactionless net-wrench shortcut. A globally
+  optimal constrained IFCS allocator with explicit redundancy and damage policy
+  remains later scope.
 - No atmosphere (drag/lift/reentry heating). The slice is zero-g / vacuum plus
   optional uniform gravity. Atmospheric flight is a later stage.
 - No orbital mechanics (see §4). Near a planet the slice uses at most a single
@@ -366,14 +368,14 @@ copy free to diverge, and this ECS already has the right field in the right
 type. This mirrors exactly how `Velocity + Transform` works today.
 
 **Hand-off sequence inside `Scene::UpdateSystems(dt)`** (fixed step):
-1. `SystemFlightControl(dt)` — read input snapshot → per-ship desired
-   force/torque (the six control axes), write into the `RigidBody`
-   accumulators. (Input is sampled once per frame; see §7 on ordering.)
-2. `SystemThrusters(dt)` — for ships with a `Thruster` set, convert throttles
-   to net force/torque via `Σ dir·F·throttle` and `Σ leverArm × force`
-   (Ship deep-dive PART 2), add to the accumulators. (First slice may map
-   control demand straight to the wrench and treat thrusters as visual/fidelity;
-   both routes end at the same accumulators.)
+1. `SystemFlightControl(dt)` — read the input snapshot. Decoupled mode maps the
+   six normalized axes directly to throttle; coupled mode computes a desired
+   physical wrench and maps it through bounded per-nozzle allocation. Missing or
+   damaged banks therefore reduce authority rather than gaining ideal force.
+2. `SystemThrusters(dt)` — convert the resulting throttles to the realized body
+   wrench via `Σ dir·F·throttle` and `Σ leverArm × force` (Ship deep-dive PART 2),
+   then bridge body force to world force and add both to the accumulators. The
+   same throttle state feeds physics, exhaust visuals, and future damage systems.
 3. Add external accelerations (gravity §4, later).
 4. `SystemIntegrateRigidBodies(dt)` — semi-implicit Euler (§2), write
    `Transform.position` / `Transform.rotation`, zero the accumulators.
@@ -492,7 +494,9 @@ sim); **flag it now** so no one assumes today's float sim is lockstep-ready.
   app; testable end-to-end (§9.5) and by hand (fly it).
 - **Stage 3 — Damping + flight assist.** Add linear/angular damping and a
   "coupled" auto-brake (a P-controller toward zero velocity when input is
-  centred), plus a decoupled mode toggle. Testable: damping decay law (§9.3).
+  centred), plus a decoupled mode toggle. Allocate the desired wrench through
+  installed nozzles so saturation and damage reduce authority. Testable: pure
+  damping law (§9.3), bounded allocation, and coupled/decoupled ECS behavior.
 - **Stage 4 — Collision.** Write `src/sim/collision.{h,cpp}`: bounding-sphere
   broad+narrow, impulse response, projectile ray-sphere. Testable: elastic
   collision closed form + momentum conservation + ray-sphere boundary (§9.6).
