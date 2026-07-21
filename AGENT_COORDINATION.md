@@ -1779,7 +1779,7 @@ are now integrated as well. The current order is:
 
 ### WS-026: Data-driven production assembly runtime
 
-- Status: ACTIVE
+- Status: READY
 - Outcome: load one shipped runtime-content manifest, its cooked assembly, and
   its cooked visual resources without asset-specific C++ scene construction;
   register every authored visual/collision/navigation/walkable locator in the
@@ -1839,9 +1839,21 @@ are now integrated as well. The current order is:
   invalid primitive selection, stale/wrong owner token, catalog conflict,
   adapter rejection, GPU/resource registration failure, entity commit failure,
   and repeated shutdown cannot expose a partial assembly or outlive its owner
-- Latest commit: `0f41d6d` (claim); implementation commit pending
-- Next action: publish the verified implementation commit, request Claude's
-  read-only overlap/correctness review, then integrate and record closeout
+- Review: Claude read-only review was requested for `45697d8..c20bb11`, but the
+  CLI exited before reading files because its weekly limit resets July 24 at
+  05:00 America/Chicago. Manual fallback review found no unresolved defect;
+  rollback, path confinement, upload lifetime, catalog identity, ECS commit,
+  and teardown order were audited directly. Overlap against current `main`
+  after fetch is zero files.
+- Verification: deterministic assembly reproduction matched SHA-256
+  `2563abe5851471dd962d5fef88b1560a9d23285017a7d3e5100a6916e54b4c72`;
+  Git LFS fsck and source-manifest validation pass; Debug and Release all-target
+  builds and all four CTest contracts pass; the CPU suite passes 411 cases and
+  17,608 checks; Debug and Release raster/stable-DXR/full-DXR smoke pass; Debug
+  stable DXR passes with D3D12 GPU validation enabled.
+- Latest commit: `c20bb11` (`0f41d6d` claim)
+- Next action: fast-forward the verified range into clean `main`, rerun the
+  integrated-tree checks, push, and record closeout
 
 ## 20. Helper Commands
 
