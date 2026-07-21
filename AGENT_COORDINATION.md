@@ -2185,6 +2185,66 @@ are now integrated as well. The current order is:
   interior, and rendered identity, and remove the cube only after raster/DXR
   visual gates prove the hierarchy follows the ship coherently.
 
+### WS-031: Authoritative assembly-root presentation propagation
+
+- Status: ACTIVE
+- Outcome: make the committed production assembly root the one playable-ship
+  entity and propagate its live double-translation, rotation, and validated
+  scale into every module and moving-part render transform. Remove the
+  interactive prototype cube without changing the assembly-local interior,
+  collision, possession, or fixed-step contracts.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit from a stable implementation commit
+- Branch: `codex/assembly-root-presentation`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-assembly-root-presentation`
+- Base commit: `084b5a0`
+- Owned paths: focused assembly transform/presentation code and CPU tests;
+  additive local-pose fields and accessors in the prepared assembly plan;
+  minimal assembly instantiator, interior runtime, runtime host, App, CMake,
+  smoke-harness, README, and research-contract changes required to publish one
+  authoritative root and retire the interactive cube
+- Excluded paths: `src/sim/**`, `tests/test_lambert.cpp`, maneuver planning,
+  orbital mechanics, general ECS hierarchy propagation, replacement ship art,
+  Meshy generation, per-part production collision authoring, renderer PSOs,
+  shaders, descriptors, lighting, shadow policy, LOD selection, save-format
+  expansion, networking, pressure, EVA, navmesh, and animation systems
+- Shared-file locks: WS-031 owns only its additive CMake/test entries, focused
+  prepared-plan and host publication sites, player-ship construction and
+  presentation calls in `src/app.{h,cpp}`, exact smoke assertions, and its own
+  documentation. Claude retains all simulation and maneuver-planning files.
+- Interface contract: `AssemblyInstance::RootEntity()` is the sole playable
+  ship transform and receives rigid body, thruster, flight-control, frame, and
+  gravity components without a render mesh. Prepared modules and moving parts
+  retain immutable assembly-local poses. Interior and collision simulation
+  remain assembly-local. Each accepted fixed step stages complete root-composed
+  world poses for every render child, validates entity topology and all finite
+  arithmetic, and only then publishes the batch; rejection leaves every child
+  transform unchanged. Animated closures are composed from their current local
+  interior pose, never from a previously composed world pose, so root motion
+  cannot accumulate drift.
+- Dependencies: merged WS-025/026 assembly publication, WS-027 interior state,
+  WS-028 collision, WS-029 locomotion, WS-030 possession/root composition, the
+  existing flight rigid body and thruster feedback, and current Scene traversal
+- Acceptance gates: root entity equals player-ship entity; root has no
+  `MeshInstance`; modules and moving parts preserve authored local offsets under
+  translated and rolled roots; moving-part progress and root motion compose in
+  either order; a physics step moves the root and the full hierarchy together;
+  on-foot camera and interaction queries remain assembly-local; the interactive
+  `PlayerShip` cube is absent; smoke-only renderer probes are isolated from
+  gameplay identity; exact root/child smoke witnesses; Debug/Release all-target
+  builds and CPU suites; deterministic cooked-asset checks; raster, stable-DXR,
+  full-DXR, and D3D12 GPU-validation smoke; and manual capture inspection
+- Negative controls: malformed/nonfinite/nonunit root, zero/tiny/nonuniform
+  player root scale, missing/recycled root or child entity, mismatched module or
+  moving-part counts, stale plan/topology, invalid local transform, destroyed
+  assembly, and failed staging cannot partially move the rendered hierarchy or
+  transfer gameplay identity back to a placeholder entity
+- Next action: implement the CPU-only local-to-world presentation transaction,
+  wire it through the runtime host and fixed-step App path, replace the player
+  cube with the committed root, then audit and validate the complete lane before
+  integration.
+
 ## 20. Helper Commands
 
 Create a task worktree:
