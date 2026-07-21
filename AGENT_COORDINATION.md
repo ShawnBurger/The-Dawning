@@ -1590,6 +1590,57 @@ are now integrated as well. The current order is:
   keep interaction, pressure, navigation, lighting, and streaming behavior in
   their owning systems and join them only through cooked stable indices
 
+### WS-023: Transactional cooked-assembly resource resolution
+
+- Status: ACTIVE
+- Outcome: consume one immutable `CookedAssembly`, resolve every referenced
+  visual, collision, LOD, navmesh, walkable-surface, and moving-part locator
+  into a typed immutable catalog identity, and publish either a complete binding
+  graph or no graph. This creates the fail-closed resource boundary required
+  before a later lane may construct scene/ECS entities for production ships and
+  interactive interiors.
+- Primary: Codex
+- Reviewer: Claude read-only asset/runtime review after the feature commit
+- Branch: `codex/assembly-resource-resolution`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-assembly-resource-resolution`
+- Base commit: `51bd668`
+- Owned paths: new `src/asset/assembly_resource_resolver.{h,cpp}`, new focused
+  `tests/test_assembly_resource_resolver.cpp`, additive resource-resolution
+  contract documentation, and the minimal source/test registration in
+  `CMakeLists.txt`
+- Excluded paths: `src/app.{h,cpp}`, `src/scene/**`, `src/ecs/**`,
+  `src/gameplay/**`, `src/render/**`, shaders, `src/sim/**`, existing resource
+  manager/model-loader behavior, file or GPU loading, scene/ECS entity creation,
+  interaction/pressure/navigation execution, and Meshy generation
+- Shared-file locks: Codex holds only the additive WS-023 registration blocks in
+  `CMakeLists.txt`; all other shared integration files remain unclaimed
+- Interface contract: the resolver accepts a non-null immutable cooked assembly
+  and a const catalog query interface. It canonicalizes and deduplicates typed
+  locator requests, preserves cooked stable indices and source provenance, and
+  builds all bindings in private state before publishing an immutable result.
+  Locator text alone is never treated as a resource identity; invalid, missing,
+  stale, wrong-kind, aliased-incompatible, or exceptional catalog results fail
+  the whole operation with a bounded diagnostic and no partial result. The
+  resolver performs no file-system access, catalog mutation, scene mutation,
+  entity creation, GPU work, or owning-system behavior.
+- Dependencies: merged WS-022 cooked-assembly runtime contract
+- Acceptance gates: deterministic catalog request order; per-kind duplicate
+  locator deduplication; distinct handling of the same locator used for
+  different kinds; complete stable-index mappings for module visuals,
+  collisions, LODs, zone navmeshes/walkable surfaces, and moving-part visuals;
+  immutable publication only after all resolutions validate; Debug/Release all
+  targets and CTest suites remain green
+- Negative controls: null assembly, empty/invalid locator, zero or malformed
+  identity, kind mismatch, incompatible identity aliasing, missing resource,
+  catalog exception, and allocation failure cannot publish a partial graph;
+  no hidden file loading, source-path leakage, global cache mutation, or scene
+  side effects
+- Latest commit: pending
+- Next action: inspect existing handle conventions, implement and adversarially
+  test the isolated resolver, request Claude review, then integrate only after
+  both build matrices and GitHub CI pass
+
 ## 20. Helper Commands
 
 Create a task worktree:
