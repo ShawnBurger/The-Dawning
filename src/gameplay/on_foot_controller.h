@@ -30,6 +30,8 @@ struct OnFootCommand
 
 struct OnFootControllerConfig
 {
+    double maximumCapsuleRadiusMeters = 1.0;
+    double maximumCapsuleHalfSegmentMeters = 1.5;
     double walkSpeedMetersPerSecond = 4.5;
     double sprintSpeedMetersPerSecond = 6.5;
     double groundAccelerationMetersPerSecondSq = 24.0;
@@ -37,6 +39,7 @@ struct OnFootControllerConfig
     double airAccelerationMetersPerSecondSq = 6.0;
     double gravityMetersPerSecondSq = 18.0;
     double jumpSpeedMetersPerSecond = 6.0;
+    double maximumRiseSpeedMetersPerSecond = 30.0;
     double terminalFallSpeedMetersPerSecond = 55.0;
     double minimumTimeStepSeconds = 1.0e-6;
     double maximumTimeStepSeconds = 0.05;

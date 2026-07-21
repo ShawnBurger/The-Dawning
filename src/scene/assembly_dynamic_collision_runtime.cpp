@@ -12,7 +12,6 @@ namespace
 {
 
 constexpr uint64_t kDynamicIdentityBit = uint64_t{ 1 } << 63;
-constexpr double kEpsilon = 1.0e-10;
 constexpr double kMaximumMagnitude = 1.0e12;
 constexpr double kDegreesToRadians =
     3.141592653589793238462643383279502884 / 180.0;
@@ -110,59 +109,6 @@ bool BuildLocalModuleTransform(
                transform.rotation.y,
                transform.rotation.z }) &&
            std::isfinite(transform.rotation.w);
-}
-
-bool ReconstructMovingTransform(
-    const asset::AssemblyMovingPart& part,
-    const ecs::Transform& module,
-    double progress,
-    ecs::Transform& transformed)
-{
-    const core::Vec3f sourceAxis = ToFloat3(part.axis);
-    if (!std::isfinite(progress) || progress < 0.0 || progress > 1.0 ||
-        !Finite(sourceAxis) || sourceAxis.LengthSq() < 1.0e-8f ||
-        !Finite(part.travel) || std::abs(part.travel) <= kEpsilon)
-        return false;
-
-    transformed = module;
-    const core::Vec3f axis = sourceAxis.Normalized();
-    if (part.motionType == asset::AssemblyMotionType::Linear)
-    {
-        const core::Vec3f localTravel = ScaleLocal(
-            axis * static_cast<float>(part.travel * progress),
-            module.scale);
-        transformed.position += core::Vec3d::FromFloat(
-            module.rotation.Rotate(localTravel));
-    }
-    else if (part.motionType == asset::AssemblyMotionType::Rotational)
-    {
-        if (!Finite(ToFloat3(part.pivotMeters)))
-            return false;
-        const float radians = static_cast<float>(
-            part.travel * progress * kDegreesToRadians);
-        const core::Quatf localDelta =
-            core::Quatf::FromAxisAngle(axis, radians).Normalized();
-        const core::Quatf worldDelta = (
-            module.rotation * localDelta * module.rotation.Conjugate()).Normalized();
-        const core::Vec3f scaledPivot = ScaleLocal(
-            ToFloat3(part.pivotMeters), module.scale);
-        const core::Vec3d pivot = module.position + core::Vec3d::FromFloat(
-            module.rotation.Rotate(scaledPivot));
-        const core::Vec3f offset = (module.position - pivot).ToFloat();
-        transformed.position = pivot + core::Vec3d::FromFloat(
-            worldDelta.Rotate(offset));
-        transformed.rotation =
-            (worldDelta * module.rotation).Normalized();
-    }
-    else
-    {
-        return false;
-    }
-    return Finite(transformed.position) && Finite(transformed.scale) &&
-           std::isfinite(transformed.rotation.x) &&
-           std::isfinite(transformed.rotation.y) &&
-           std::isfinite(transformed.rotation.z) &&
-           std::isfinite(transformed.rotation.w);
 }
 
 bool SocketBasis(
@@ -384,6 +330,12 @@ bool AssemblyDynamicCollisionRuntime::RestorePublishedSnapshot(
         snapshot->revision == 0 ||
         snapshot->topologySha256 != m_assembly->sourceManifestSha256)
         return false;
+    const bool current = snapshot == m_snapshot;
+    const bool immediatePredecessor = m_snapshot &&
+        snapshot->revision < (std::numeric_limits<uint64_t>::max)() &&
+        snapshot->revision + 1 == m_snapshot->revision;
+    if (!current && !immediatePredecessor)
+        return false;
     m_snapshot = std::move(snapshot);
     return true;
 }
@@ -484,8 +436,9 @@ AssemblyDynamicCollisionResult AssemblyDynamicCollisionRuntime::BuildCandidate(
             }
 
             ecs::Transform moving;
-            if (!ReconstructMovingTransform(
+            if (!BuildAssemblyMovingPartTransform(
                     part,
+                    modules[part.moduleIndex],
                     modules[part.moduleIndex],
                     interior.InteractionMotionProgress(
                         portal.closureInteraction),
@@ -493,7 +446,7 @@ AssemblyDynamicCollisionResult AssemblyDynamicCollisionRuntime::BuildCandidate(
             {
                 return Failure(
                     AssemblyDynamicCollisionStatus::InvalidTopology,
-                    "moving closure transform cannot be reconstructed");
+                    "assembly-local closure transform is invalid");
             }
             InteriorCollisionBox panel;
             if (!BuildPanelBox(
@@ -535,11 +488,10 @@ AssemblyDynamicCollisionResult AssemblyDynamicCollisionRuntime::BuildCandidate(
         std::sort(dynamic.begin(), dynamic.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.stableId < rhs.stableId;
         });
-        if (m_staticWorld->BoxCount() >
-            m_config.combinedWorldLimits.maxBoxes -
-                (std::min)(
-                    m_config.combinedWorldLimits.maxBoxes,
-                    static_cast<uint64_t>(dynamic.size())))
+        const uint64_t dynamicCount = static_cast<uint64_t>(dynamic.size());
+        if (dynamicCount > m_config.combinedWorldLimits.maxBoxes ||
+            m_staticWorld->BoxCount() >
+                m_config.combinedWorldLimits.maxBoxes - dynamicCount)
         {
             return Failure(
                 AssemblyDynamicCollisionStatus::ResourceLimitExceeded,

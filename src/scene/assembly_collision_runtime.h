@@ -161,4 +161,7 @@ bool IsWalkableInteriorSurface(
     asset::CollisionSurfaceFlags surfaceFlags,
     double maximumSlopeRadians);
 
+bool IsValidInteriorLocomotionConfig(
+    const InteriorLocomotionConfig& config);
+
 } // namespace scene

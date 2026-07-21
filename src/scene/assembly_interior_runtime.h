@@ -68,6 +68,16 @@ struct AssemblyInteractionQuery
     float minimumForwardDot = 0.25f;
 };
 
+// Reconstructs a moving part from immutable closed/module poses expressed in
+// the same coordinate frame. Both presentation and collision use this motion
+// law; callers choose world or assembly-local base transforms explicitly.
+bool BuildAssemblyMovingPartTransform(
+    const asset::AssemblyMovingPart& part,
+    const ecs::Transform& module,
+    const ecs::Transform& closed,
+    double progress,
+    ecs::Transform& transformed);
+
 // Executes authored assembly interactions without owning ECS entities or GPU
 // resources. All moving transforms are reconstructed from immutable closed
 // poses, so stepping, reversal, and snapshot restoration never accumulate

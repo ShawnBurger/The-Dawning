@@ -366,6 +366,15 @@ TEST_CASE(AssemblyInterior_RejectsMalformedTopologyWithoutPublishingState)
         orphanResult.status,
         scene::AssemblyInteriorStatus::InvalidTopology);
     CHECK(!runtime.IsInitialized());
+
+    Fixture unrepresentableEndpoint;
+    unrepresentableEndpoint.assembly->movingParts[0].travel =
+        (std::numeric_limits<double>::max)();
+    const auto endpointResult = unrepresentableEndpoint.Initialize(runtime);
+    CHECK_EQ(
+        endpointResult.status,
+        scene::AssemblyInteriorStatus::InvalidTopology);
+    CHECK(!runtime.IsInitialized());
 }
 
 TEST_CASE(AssemblyInterior_StatusNamesRemainStable)

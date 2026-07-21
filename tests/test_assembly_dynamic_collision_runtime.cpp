@@ -192,6 +192,79 @@ TEST_CASE(DynamicInteriorCollision_SnapshotRestoreRebuildsExactClosureGeometry)
                      DynamicBox(*collisionClosed, true)->maximum.z, 1.0e-12);
 }
 
+TEST_CASE(DynamicInteriorCollision_RotatedPanelMatchesMotionAndStaysAssemblyLocal)
+{
+    DynamicFixture fixture;
+    fixture.assembly->modules[0].transform.positionMeters = { 3.0, 1.0, 4.0 };
+    fixture.assembly->modules[0].transform.rotationEulerDegrees =
+        { 0.0, 90.0, 0.0 };
+    fixture.assembly->modules[0].transform.scale = { 2.0, 1.5, 0.5 };
+    fixture.assembly->sockets[0].positionMeters = { 0.25, 0.5, 0.0 };
+    fixture.assembly->movingParts[0].motionType =
+        asset::AssemblyMotionType::Rotational;
+    fixture.assembly->movingParts[0].pivotMeters = { 0.7, 0.0, 0.0 };
+    fixture.assembly->movingParts[0].axis = { 0.0, 1.0, 0.0 };
+    fixture.assembly->movingParts[0].travel = 90.0;
+
+    ecs::Transform localModule;
+    localModule.position = { 3.0, 1.0, 4.0 };
+    localModule.rotation = core::Quatf::FromEuler(
+        0.0f, 0.5f * core::PI, 0.0f).Normalized();
+    localModule.scale = { 2.0f, 1.5f, 0.5f };
+    const core::Vec3d rootOffset{ 100.0, 0.0, 0.0 };
+    ecs::Transform worldModule = localModule;
+    worldModule.position += rootOffset;
+    fixture.modules[0].worldTransform = worldModule;
+    fixture.movingParts[0].worldTransform = worldModule;
+
+    CHECK(fixture.Initialize());
+    const auto closed = fixture.dynamic.Snapshot();
+    const scene::InteriorCollisionBox* guard = DynamicBox(*closed, true);
+    CHECK(guard != nullptr);
+    const core::Vec3d guardCenter =
+        (guard->minimum + guard->maximum) * 0.5;
+    const core::Vec3f closedSocket = localModule.rotation.Rotate({
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[0]) *
+            localModule.scale.x,
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[1]) *
+            localModule.scale.y,
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[2]) *
+            localModule.scale.z
+    });
+    CHECK_APPROX_EPS(guardCenter.x,
+                     localModule.position.x + closedSocket.x, 1.0e-6);
+    CHECK_APPROX_EPS(guardCenter.y,
+                     localModule.position.y + closedSocket.y, 1.0e-6);
+    CHECK_APPROX_EPS(guardCenter.z,
+                     localModule.position.z + closedSocket.z, 1.0e-6);
+
+    CHECK(fixture.interior.ActivateInteraction(0).Succeeded());
+    CHECK(fixture.interior.Advance(1.0).Succeeded());
+    CHECK(fixture.dynamic.Refresh(fixture.interior).Succeeded());
+    const auto snapshot = fixture.dynamic.Snapshot();
+    CHECK_EQ(snapshot->dynamicBoxes.size(), 1u);
+
+    const ecs::Transform* moving = fixture.interior.MovingPartTransform(0);
+    CHECK(moving != nullptr);
+    const core::Vec3f scaledSocket{
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[0]) *
+            moving->scale.x,
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[1]) *
+            moving->scale.y,
+        static_cast<float>(fixture.assembly->sockets[0].positionMeters[2]) *
+            moving->scale.z
+    };
+    const core::Vec3d expectedCenter = moving->position - rootOffset +
+        core::Vec3d::FromFloat(moving->rotation.Rotate(scaledSocket));
+    const scene::InteriorCollisionBox* panel = DynamicBox(*snapshot, false);
+    CHECK(panel != nullptr);
+    const core::Vec3d actualCenter =
+        (panel->minimum + panel->maximum) * 0.5;
+    CHECK_APPROX_EPS(actualCenter.x, expectedCenter.x, 1.0e-6);
+    CHECK_APPROX_EPS(actualCenter.y, expectedCenter.y, 1.0e-6);
+    CHECK_APPROX_EPS(actualCenter.z, expectedCenter.z, 1.0e-6);
+}
+
 TEST_CASE(DynamicInteriorCollision_TopologyMismatchLeavesPublishedSnapshotUntouched)
 {
     DynamicFixture fixture;
@@ -234,6 +307,23 @@ TEST_CASE(DynamicInteriorCollision_RejectsReservedIdentityMalformedBasisAndLimit
                  limited.assembly, limited.staticWorld,
                  limited.interior, config).status,
              scene::AssemblyDynamicCollisionStatus::ResourceLimitExceeded);
+
+    DynamicFixture badAperture;
+    CHECK(badAperture.InitializeInterior());
+    badAperture.assembly->minimumDoorWidthMeters = 0.0;
+    CHECK_EQ(badAperture.dynamic.Initialize(
+                 badAperture.assembly, badAperture.staticWorld,
+                 badAperture.interior).status,
+             scene::AssemblyDynamicCollisionStatus::InvalidTopology);
+
+    DynamicFixture combinedLimit;
+    CHECK(combinedLimit.InitializeInterior());
+    config = {};
+    config.combinedWorldLimits.maxBoxes = 2;
+    CHECK_EQ(combinedLimit.dynamic.Initialize(
+                 combinedLimit.assembly, combinedLimit.staticWorld,
+                 combinedLimit.interior, config).status,
+             scene::AssemblyDynamicCollisionStatus::ResourceLimitExceeded);
 }
 
 TEST_CASE(DynamicInteriorCollision_CombinedQueriesKeepStaticTieOrdering)
@@ -262,7 +352,6 @@ TEST_CASE(DynamicInteriorCollision_ShutdownAndRestoreRejectStaleOwnership)
     fixture.dynamic.Shutdown();
     CHECK(!fixture.dynamic.IsInitialized());
     CHECK(!fixture.dynamic.IsCurrent(live));
-    CHECK(!fixture.dynamic.RestorePublishedSnapshot(live));
     CHECK_EQ(fixture.dynamic.Refresh(fixture.interior).status,
              scene::AssemblyDynamicCollisionStatus::NotInitialized);
 }

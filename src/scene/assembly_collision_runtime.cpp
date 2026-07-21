@@ -14,6 +14,7 @@ namespace
 
 constexpr double kEpsilon = 1.0e-10;
 constexpr double kMaximumQueryMagnitude = 1.0e12;
+constexpr uint32_t kMaximumLocomotionIterations = 1024;
 constexpr double kDegreesToRadians =
     3.141592653589793238462643383279502884 / 180.0;
 
@@ -328,7 +329,10 @@ bool ValidConfig(const InteriorLocomotionConfig& config)
            Finite(config.maximumSlopeRadians) && config.maximumSlopeRadians >= 0.0 &&
            config.maximumSlopeRadians < 0.5 * 3.14159265358979323846 &&
            config.maximumSlideIterations > 0 &&
-           config.maximumDepenetrationIterations > 0;
+           config.maximumSlideIterations <= kMaximumLocomotionIterations &&
+           config.maximumDepenetrationIterations > 0 &&
+           config.maximumDepenetrationIterations <=
+               kMaximumLocomotionIterations;
 }
 
 struct StepResult
@@ -456,6 +460,12 @@ bool IsWalkableInteriorSurface(
     return normal.y / length >= std::cos(maximumSlopeRadians);
 }
 
+bool IsValidInteriorLocomotionConfig(
+    const InteriorLocomotionConfig& config)
+{
+    return ValidConfig(config);
+}
+
 InteriorCollisionStatus InteriorCollisionWorld::OverlapCapsule(
     const InteriorCapsule& capsule,
     double inflation,
@@ -540,7 +550,8 @@ InteriorCapsuleMotion InteriorCollisionWorld::MoveCapsule(
     InteriorCapsuleMotion result;
     result.center = source.center;
     if (!ValidCapsule(source) || !Bounded(displacement) ||
-        !Bounded(source.center + displacement) || !ValidConfig(config))
+        !Bounded(source.center + displacement) ||
+        !IsValidInteriorLocomotionConfig(config))
         return result;
 
     InteriorCapsule capsule = source;

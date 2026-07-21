@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <new>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -706,6 +707,36 @@ AssemblyInteriorResult AssemblyRuntimeHost::RefreshDynamicCollision()
     return result;
 }
 
+AssemblyInteriorResult AssemblyRuntimeHost::CaptureInteriorForMutation(
+    AssemblyInteriorSnapshot& snapshot) const
+{
+    try
+    {
+        snapshot = m_interior.CaptureSnapshot();
+        if (!m_assembly ||
+            snapshot.topologySha256 != m_assembly->sourceManifestSha256 ||
+            snapshot.interactions.size() != m_interior.InteractionCount())
+        {
+            return InteriorFailure(
+                AssemblyInteriorStatus::InternalError,
+                "interior rollback snapshot is incomplete");
+        }
+        return { AssemblyInteriorStatus::Success };
+    }
+    catch (const std::bad_alloc&)
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::AllocationFailure,
+            "allocation failure while staging interior rollback");
+    }
+    catch (...)
+    {
+        return InteriorFailure(
+            AssemblyInteriorStatus::InternalError,
+            "unexpected failure while staging interior rollback");
+    }
+}
+
 AssemblyInteriorResult AssemblyRuntimeHost::RollbackInteriorMutation(
     const AssemblyInteriorSnapshot& interior,
     std::shared_ptr<const AssemblyInteriorCollisionSnapshot> collision,
@@ -748,8 +779,11 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
-    const AssemblyInteriorSnapshot previousInterior =
-        m_interior.CaptureSnapshot();
+    AssemblyInteriorSnapshot previousInterior;
+    const AssemblyInteriorResult captured =
+        CaptureInteriorForMutation(previousInterior);
+    if (!captured.Succeeded())
+        return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult activated =
         m_interior.ActivateInteraction(stableIndex);
@@ -769,8 +803,11 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateInteraction(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
-    const AssemblyInteriorSnapshot previousInterior =
-        m_interior.CaptureSnapshot();
+    AssemblyInteriorSnapshot previousInterior;
+    const AssemblyInteriorResult captured =
+        CaptureInteriorForMutation(previousInterior);
+    if (!captured.Succeeded())
+        return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult activated = m_interior.ActivateInteraction(id);
     if (!activated.Succeeded() || !activated.changed)
@@ -789,8 +826,11 @@ AssemblyInteriorResult AssemblyRuntimeHost::ActivateNearestInteraction(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
-    const AssemblyInteriorSnapshot previousInterior =
-        m_interior.CaptureSnapshot();
+    AssemblyInteriorSnapshot previousInterior;
+    const AssemblyInteriorResult captured =
+        CaptureInteriorForMutation(previousInterior);
+    if (!captured.Succeeded())
+        return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult activated = m_interior.ActivateNearest(query);
     if (!activated.Succeeded() || !activated.changed)
@@ -810,8 +850,11 @@ AssemblyInteriorResult AssemblyRuntimeHost::AdvanceInterior(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
-    const AssemblyInteriorSnapshot previousInterior =
-        m_interior.CaptureSnapshot();
+    AssemblyInteriorSnapshot previousInterior;
+    const AssemblyInteriorResult captured =
+        CaptureInteriorForMutation(previousInterior);
+    if (!captured.Succeeded())
+        return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult advanced = m_interior.Advance(dt, config);
     if (!advanced.Succeeded() || !advanced.changed)
@@ -843,8 +886,11 @@ AssemblyInteriorResult AssemblyRuntimeHost::ApplyInteriorSnapshot(
     const AssemblyInteriorResult validated = ValidateInteriorEntities(scene);
     if (!validated.Succeeded())
         return validated;
-    const AssemblyInteriorSnapshot previousInterior =
-        m_interior.CaptureSnapshot();
+    AssemblyInteriorSnapshot previousInterior;
+    const AssemblyInteriorResult captured =
+        CaptureInteriorForMutation(previousInterior);
+    if (!captured.Succeeded())
+        return captured;
     const auto previousCollision = m_dynamicCollision.Snapshot();
     const AssemblyInteriorResult applied = m_interior.ApplySnapshot(snapshot);
     if (!applied.Succeeded() || !applied.changed)

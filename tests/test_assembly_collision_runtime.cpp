@@ -94,6 +94,15 @@ TEST_CASE(InteriorCollisionQueries_RejectUnsafeArithmeticRanges)
     std::vector<scene::InteriorCapsuleOverlap> overlaps;
     CHECK_EQ(world->OverlapCapsule(capsule, 1.0e13, overlaps),
              scene::InteriorCollisionStatus::InvalidArgument);
+
+    scene::InteriorLocomotionConfig excessiveIterations;
+    excessiveIterations.maximumSlideIterations = 1025;
+    CHECK_EQ(world->MoveCapsule(capsule, {}, excessiveIterations).status,
+             scene::InteriorCollisionStatus::InvalidArgument);
+    excessiveIterations = {};
+    excessiveIterations.maximumDepenetrationIterations = 1025;
+    CHECK_EQ(world->MoveCapsule(capsule, {}, excessiveIterations).status,
+             scene::InteriorCollisionStatus::InvalidArgument);
 }
 
 TEST_CASE(InteriorCapsuleSweep_IsContinuousAndUsesRoundedCornerDistance)

@@ -98,7 +98,7 @@ public:
     {
         return m_collisionWorld.get();
     }
-    const std::shared_ptr<const AssemblyInteriorCollisionSnapshot>&
+    std::shared_ptr<const AssemblyInteriorCollisionSnapshot>
         InteractiveCollisionSnapshot() const
     {
         return m_dynamicCollision.Snapshot();
@@ -108,6 +108,8 @@ public:
 private:
     AssemblyInteriorResult ValidateInteriorEntities(Scene& scene) const;
     AssemblyInteriorResult ApplyInteriorTransforms(Scene& scene) const;
+    AssemblyInteriorResult CaptureInteriorForMutation(
+        AssemblyInteriorSnapshot& snapshot) const;
     AssemblyInteriorResult RefreshDynamicCollision();
     AssemblyInteriorResult RollbackInteriorMutation(
         const AssemblyInteriorSnapshot& interior,

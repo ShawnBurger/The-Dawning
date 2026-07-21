@@ -142,6 +142,93 @@ TEST_CASE(OnFootController_UnobstructedAccelerationIsPartitionInvariant)
                      split.velocity.z, 1.0e-12);
 }
 
+TEST_CASE(OnFootController_SpeedCapsBrakingGravityAndJumpArePartitionInvariant)
+{
+    const auto floor = FloorSnapshot();
+    gameplay::OnFootControllerConfig config;
+    config.maximumTimeStepSeconds = 0.5;
+    gameplay::OnFootCommand forward;
+    forward.moveForward = 1.0;
+
+    gameplay::OnFootState accelerated = StandingState();
+    accelerated.velocity.z = 3.0;
+    const auto capWhole = gameplay::StepOnFootController(
+        floor, accelerated, forward, 0.2, config);
+    CHECK(capWhole.Succeeded());
+    gameplay::OnFootState capSplit = accelerated;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto part = gameplay::StepOnFootController(
+            floor, capSplit, forward, 0.05, config);
+        CHECK(part.Succeeded());
+        capSplit = part.state;
+    }
+    CHECK_APPROX_EPS(capWhole.state.capsule.center.z,
+                     capSplit.capsule.center.z, 1.0e-12);
+    CHECK_APPROX_EPS(capWhole.state.velocity.z,
+                     capSplit.velocity.z, 1.0e-12);
+
+    gameplay::OnFootState braking = StandingState();
+    braking.velocity.z = 4.5;
+    const auto brakeWhole = gameplay::StepOnFootController(
+        floor, braking, {}, 0.2, config);
+    CHECK(brakeWhole.Succeeded());
+    gameplay::OnFootState brakeSplit = braking;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto part = gameplay::StepOnFootController(
+            floor, brakeSplit, {}, 0.05, config);
+        CHECK(part.Succeeded());
+        brakeSplit = part.state;
+    }
+    CHECK_APPROX_EPS(brakeWhole.state.capsule.center.z,
+                     brakeSplit.capsule.center.z, 1.0e-12);
+    CHECK_APPROX_EPS(brakeWhole.state.velocity.z,
+                     brakeSplit.velocity.z, 1.0e-12);
+
+    const auto distantFloor = Snapshot({
+        Box(1, { -10.0, -1001.0, -10.0 }, { 10.0, -1000.0, 10.0 },
+            asset::CollisionSurfaceFlags::Walkable)
+    });
+    const gameplay::OnFootState airborne = StandingState({ 0.0, 20.0, 0.0 });
+    const auto gravityWhole = gameplay::StepOnFootController(
+        distantFloor, airborne, {}, 0.05, config);
+    CHECK(gravityWhole.Succeeded());
+    gameplay::OnFootState gravitySplit = airborne;
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto part = gameplay::StepOnFootController(
+            distantFloor, gravitySplit, {}, 0.01, config);
+        CHECK(part.Succeeded());
+        gravitySplit = part.state;
+    }
+    CHECK_APPROX_EPS(gravityWhole.state.capsule.center.y,
+                     gravitySplit.capsule.center.y, 1.0e-12);
+    CHECK_APPROX_EPS(gravityWhole.state.velocity.y,
+                     gravitySplit.velocity.y, 1.0e-12);
+
+    gameplay::OnFootCommand jump;
+    jump.jumpDown = true;
+    const gameplay::OnFootState grounded = StandingState();
+    const auto jumpWhole = gameplay::StepOnFootController(
+        floor, grounded, jump, 0.05, config);
+    CHECK(jumpWhole.Succeeded());
+    gameplay::OnFootState jumpSplit = grounded;
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto part = gameplay::StepOnFootController(
+            floor, jumpSplit, jump, 0.01, config);
+        CHECK(part.Succeeded());
+        jumpSplit = part.state;
+    }
+    CHECK(jumpWhole.jumped);
+    CHECK(!jumpSplit.grounded);
+    CHECK_APPROX_EPS(jumpWhole.state.capsule.center.y,
+                     jumpSplit.capsule.center.y, 1.0e-12);
+    CHECK_APPROX_EPS(jumpWhole.state.velocity.y,
+                     jumpSplit.velocity.y, 1.0e-12);
+}
+
 TEST_CASE(OnFootController_JumpIsGroundVerifiedAndRisingEdgeTriggered)
 {
     const auto floor = FloorSnapshot();
@@ -168,6 +255,24 @@ TEST_CASE(OnFootController_JumpIsGroundVerifiedAndRisingEdgeTriggered)
     CHECK(rejectedJump.Succeeded());
     CHECK(!rejectedJump.jumped);
     CHECK(rejectedJump.state.velocity.y < 0.0);
+}
+
+TEST_CASE(OnFootController_LowCeilingCancelsUpwardVelocity)
+{
+    const auto room = Snapshot({
+        Box(1, { -10.0, -0.2, -10.0 }, { 10.0, 0.0, 10.0 },
+            asset::CollisionSurfaceFlags::Walkable),
+        Box(2, { -10.0, 1.72, -10.0 }, { 10.0, 2.0, 10.0 })
+    });
+    gameplay::OnFootCommand jump;
+    jump.jumpDown = true;
+    const auto result = gameplay::StepOnFootController(
+        room, StandingState(), jump, 0.05);
+    CHECK(result.Succeeded());
+    CHECK(result.jumped);
+    CHECK(result.blocked);
+    CHECK_APPROX_EPS(result.state.velocity.y, 0.0, 1.0e-12);
+    CHECK(result.state.capsule.center.y < 0.91);
 }
 
 TEST_CASE(OnFootController_GravityClampsAtTerminalSpeedAndLands)
@@ -221,6 +326,25 @@ TEST_CASE(OnFootController_ContinuousSweepCannotTunnelThroughClosedDoor)
     CHECK(result.state.velocity.z < 2.0);
 }
 
+TEST_CASE(OnFootController_NewerIntrudingClosureDepenetratesAndReportsBlocked)
+{
+    const auto intruding = Snapshot({
+        Box(1, { -10.0, -0.2, -10.0 }, { 10.0, 0.0, 10.0 },
+            asset::CollisionSurfaceFlags::Walkable),
+        Box((uint64_t{ 1 } << 63),
+            { 1.0, 0.0, -1.0 }, { 1.2, 2.1, 1.0 })
+    }, 1, 2);
+    gameplay::OnFootState state = StandingState({ 0.9, 0.82, 0.0 });
+    state.collisionTopologySha256 = intruding.topologySha256;
+    state.collisionRevision = 1;
+    const auto result = gameplay::StepOnFootController(
+        intruding, state, {}, 1.0 / 60.0);
+    CHECK(result.Succeeded());
+    CHECK(result.blocked);
+    CHECK(result.state.capsule.center.x < 0.64);
+    CHECK_EQ(result.state.collisionRevision, 2u);
+}
+
 TEST_CASE(OnFootController_SlidesAlongWallsAndKeepsAirControlBounded)
 {
     const auto world = Snapshot({
@@ -260,6 +384,11 @@ TEST_CASE(OnFootController_InvalidAndStaleInputsAreExactlyAtomic)
     CHECK_EQ(result.status, gameplay::OnFootControllerStatus::InvalidArgument);
     CHECK(SameState(result.state, source));
 
+    result = gameplay::StepOnFootController(
+        snapshot, source, {}, 0.051);
+    CHECK_EQ(result.status, gameplay::OnFootControllerStatus::InvalidArgument);
+    CHECK(SameState(result.state, source));
+
     invalid = {};
     invalid.moveForward = 1.0;
     invalid.viewForward = { 0.0, 1.0, 0.0 };
@@ -267,6 +396,28 @@ TEST_CASE(OnFootController_InvalidAndStaleInputsAreExactlyAtomic)
         snapshot, source, invalid, 1.0 / 60.0);
     CHECK_EQ(result.status, gameplay::OnFootControllerStatus::InvalidArgument);
     CHECK(SameState(result.state, source));
+
+    gameplay::OnFootControllerConfig invalidConfig;
+    invalidConfig.locomotion.maximumSlideIterations = 0;
+    result = gameplay::StepOnFootController(
+        snapshot, source, {}, 1.0 / 60.0, invalidConfig);
+    CHECK_EQ(result.status, gameplay::OnFootControllerStatus::InvalidArgument);
+    CHECK(SameState(result.state, source));
+
+    gameplay::OnFootState oversized = source;
+    oversized.capsule.radius = 2.0;
+    result = gameplay::StepOnFootController(
+        snapshot, oversized, {}, 1.0 / 60.0);
+    CHECK_EQ(result.status, gameplay::OnFootControllerStatus::InvalidArgument);
+    CHECK(SameState(result.state, oversized));
+
+    gameplay::OnFootState fastRise = source;
+    fastRise.capsule.center.y = 5.0;
+    fastRise.velocity.y = 1.0e9;
+    result = gameplay::StepOnFootController(
+        snapshot, fastRise, {}, 1.0 / 60.0);
+    CHECK(result.Succeeded());
+    CHECK(result.state.velocity.y <= 30.0);
 
     source.collisionTopologySha256 = snapshot.topologySha256;
     source.collisionRevision = 4;

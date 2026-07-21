@@ -131,6 +131,56 @@ const char* AssemblyInteriorStatusName(AssemblyInteriorStatus status)
     }
 }
 
+bool BuildAssemblyMovingPartTransform(
+    const asset::AssemblyMovingPart& part,
+    const ecs::Transform& module,
+    const ecs::Transform& closed,
+    double progress,
+    ecs::Transform& transformed)
+{
+    const core::Vec3f axisSource = ToFloat3(part.axis);
+    if (!IsFinite(module) || !IsFinite(closed) || !IsFinite(axisSource) ||
+        axisSource.LengthSq() < 1.0e-8f ||
+        !std::isfinite(part.travel) ||
+        std::abs(part.travel) <= kProgressEpsilon ||
+        !std::isfinite(progress) || progress < 0.0 || progress > 1.0 ||
+        (part.motionType != asset::AssemblyMotionType::Linear &&
+         part.motionType != asset::AssemblyMotionType::Rotational))
+    {
+        return false;
+    }
+
+    transformed = closed;
+    const core::Vec3f axis = axisSource.Normalized();
+    if (part.motionType == asset::AssemblyMotionType::Linear)
+    {
+        const core::Vec3f localTravel = ScaleLocal(
+            axis * static_cast<float>(part.travel * progress),
+            module.scale);
+        transformed.position = closed.position + core::Vec3d::FromFloat(
+            module.rotation.Rotate(localTravel));
+    }
+    else
+    {
+        if (!IsFinite(ToFloat3(part.pivotMeters)))
+            return false;
+        const float radians = static_cast<float>(
+            part.travel * progress * (core::PI / 180.0));
+        const core::Quatf localDelta =
+            core::Quatf::FromAxisAngle(axis, radians).Normalized();
+        const core::Quatf worldDelta = (
+            module.rotation * localDelta *
+            module.rotation.Conjugate()).Normalized();
+        const core::Vec3d pivot = LocalPointToWorld(module, part.pivotMeters);
+        const core::Vec3f offset = (closed.position - pivot).ToFloat();
+        transformed.position = pivot + core::Vec3d::FromFloat(
+            worldDelta.Rotate(offset));
+        transformed.rotation =
+            (worldDelta * closed.rotation).Normalized();
+    }
+    return IsFinite(transformed);
+}
+
 AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
     std::shared_ptr<const asset::CookedAssembly> assembly,
     std::span<const PreparedAssemblyModule> modules,
@@ -194,6 +244,26 @@ AssemblyInteriorResult AssemblyInteriorRuntime::Initialize(
                 return Failure(
                     AssemblyInteriorStatus::InvalidTopology,
                     "prepared moving-part topology is invalid",
+                    static_cast<uint32_t>(i));
+            }
+            ecs::Transform closedEndpoint;
+            ecs::Transform openEndpoint;
+            if (!BuildAssemblyMovingPartTransform(
+                    source,
+                    stagedModules[source.moduleIndex].worldTransform,
+                    prepared.worldTransform,
+                    0.0,
+                    closedEndpoint) ||
+                !BuildAssemblyMovingPartTransform(
+                    source,
+                    stagedModules[source.moduleIndex].worldTransform,
+                    prepared.worldTransform,
+                    1.0,
+                    openEndpoint))
+            {
+                return Failure(
+                    AssemblyInteriorStatus::InvalidTopology,
+                    "prepared moving-part endpoint transform is invalid",
                     static_cast<uint32_t>(i));
             }
             stagedTransforms.push_back(prepared.worldTransform);
@@ -748,37 +818,12 @@ void AssemblyInteriorRuntime::RebuildMovingTransforms()
             m_modules[part.moduleIndex].worldTransform;
         const ecs::Transform& closed =
             m_movingParts[i].worldTransform;
-        ecs::Transform transformed = closed;
         const double progress =
             m_interactions[part.interactionIndex].motionProgress;
-        const core::Vec3f axis = ToFloat3(part.axis).Normalized();
-
-        if (part.motionType == asset::AssemblyMotionType::Linear)
-        {
-            const core::Vec3f localTravel = ScaleLocal(
-                axis * static_cast<float>(part.travel * progress),
-                module.scale);
-            transformed.position = closed.position + core::Vec3d::FromFloat(
-                module.rotation.Rotate(localTravel));
-        }
-        else
-        {
-            const float radians = static_cast<float>(
-                part.travel * progress * (core::PI / 180.0));
-            const core::Quatf localDelta =
-                core::Quatf::FromAxisAngle(axis, radians).Normalized();
-            const core::Quatf worldDelta = (
-                module.rotation * localDelta *
-                module.rotation.Conjugate()).Normalized();
-            const core::Vec3d pivot =
-                LocalPointToWorld(module, part.pivotMeters);
-            const core::Vec3f offset = (closed.position - pivot).ToFloat();
-            transformed.position = pivot + core::Vec3d::FromFloat(
-                worldDelta.Rotate(offset));
-            transformed.rotation =
-                (worldDelta * closed.rotation).Normalized();
-        }
-        m_movingTransforms[i] = transformed;
+        ecs::Transform transformed = closed;
+        if (BuildAssemblyMovingPartTransform(
+                part, module, closed, progress, transformed))
+            m_movingTransforms[i] = transformed;
     }
 }
 

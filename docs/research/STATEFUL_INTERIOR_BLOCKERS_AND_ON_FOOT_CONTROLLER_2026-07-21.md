@@ -48,7 +48,8 @@ collision shapes. Stage 5C therefore publishes a conservative prototype panel:
 - thickness: a bounded runtime constant;
 - orientation: the socket's authored forward/up basis;
 - motion: the owning moving part's exact authored linear or rotational motion
-  reconstructed from its immutable assembly-local closed transform.
+  through the same reconstruction law as Stage 5A, seeded with an immutable
+  assembly-local closed transform rather than the root-composed render pose.
 
 The panel remains physical at every progress value, including fully open. A
 second stationary guard occupies the portal aperture whenever
@@ -61,6 +62,11 @@ The provisional shape is an explicit limitation, not a production-art claim.
 The asset pipeline follow-on must cook per-part convex/compound shapes and
 portal aperture geometry. Replacing the prototype source shape must not change
 snapshot identity, query ordering, gating, or controller contracts.
+
+Moving panels are rebuilt at fixed-step endpoints. Portal guards prevent
+crossing during closure motion and the next controller query depenetrates a
+panel that moved into a capsule, but Stage 5C does not claim a swept old-pose to
+new-pose crush/push response. That requires an explicit moving-obstacle policy.
 
 ## Stable Identity And Query Ordering
 
@@ -84,6 +90,7 @@ The on-foot state contains:
 
 - one upright assembly-local capsule;
 - assembly-local velocity;
+- the accepted collision topology digest and publication revision;
 - grounded state and stable ground shape ID;
 - whether jump was held on the preceding accepted fixed step.
 
@@ -134,9 +141,11 @@ Rejected conditions include:
 - movement demand outside `[-1, 1]`;
 - degenerate view with nonzero movement;
 - invalid capsule dimensions or speed/acceleration ordering;
+- player-scale capsule and upward/fall speed bounds;
 - stale/mismatched dynamic topology;
 - malformed socket bases, moving-part ownership, transforms, axes, or travel;
 - dynamic shape/combined-world limit overflow or duplicate identity;
+- pathological slide or depenetration iteration limits;
 - Stage 5B unresolved penetration or query failure.
 
 Authored interaction transitions in the host use rollback. If rebuilding the
@@ -152,9 +161,9 @@ The host exposes the live combined collision snapshot and the pure controller
 is ready for the explicit possession transition workstream.
 
 Smoke mode drives a deterministic assembly-local capsule toward the closed
-outer hatch, verifies it is blocked, opens the authored hatch through the host,
-refreshes collision, and verifies the same capsule can cross the former guard.
-It emits:
+inner door and verifies it is blocked. It then opens the outer hatch to retain
+the Stage 5A witness, opens the inner door through the same host transaction,
+and verifies a fresh capsule can cross the former inner guard. It emits:
 
 ```text
 [SMOKE] on_foot_controller=ok closed=blocked open=traversable blockers=2

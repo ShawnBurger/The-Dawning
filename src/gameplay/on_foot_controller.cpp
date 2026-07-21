@@ -55,7 +55,9 @@ bool ValidConfig(const OnFootControllerConfig& config)
         return std::isfinite(value) && value > 0.0 &&
                value <= kMaximumControllerRate;
     };
-    return positiveRate(config.walkSpeedMetersPerSecond) &&
+    return positiveRate(config.maximumCapsuleRadiusMeters) &&
+           positiveRate(config.maximumCapsuleHalfSegmentMeters) &&
+           positiveRate(config.walkSpeedMetersPerSecond) &&
            positiveRate(config.sprintSpeedMetersPerSecond) &&
            config.sprintSpeedMetersPerSecond >=
                config.walkSpeedMetersPerSecond &&
@@ -64,12 +66,16 @@ bool ValidConfig(const OnFootControllerConfig& config)
            positiveRate(config.airAccelerationMetersPerSecondSq) &&
            positiveRate(config.gravityMetersPerSecondSq) &&
            positiveRate(config.jumpSpeedMetersPerSecond) &&
+           positiveRate(config.maximumRiseSpeedMetersPerSecond) &&
+           config.maximumRiseSpeedMetersPerSecond >=
+               config.jumpSpeedMetersPerSecond &&
            positiveRate(config.terminalFallSpeedMetersPerSecond) &&
            std::isfinite(config.minimumTimeStepSeconds) &&
            std::isfinite(config.maximumTimeStepSeconds) &&
            config.minimumTimeStepSeconds > 0.0 &&
            config.maximumTimeStepSeconds >= config.minimumTimeStepSeconds &&
-           config.maximumTimeStepSeconds <= 1.0;
+           config.maximumTimeStepSeconds <= 1.0 &&
+           scene::IsValidInteriorLocomotionConfig(config.locomotion);
 }
 
 struct VectorIntegration
@@ -178,6 +184,14 @@ OnFootStepResult StepOnFootController(
     {
         return Failure(OnFootControllerStatus::InvalidArgument, source);
     }
+    if (source.capsule.radius > config.maximumCapsuleRadiusMeters ||
+        source.capsule.halfSegment >
+            config.maximumCapsuleHalfSegmentMeters ||
+        source.capsule.radius >
+            kMaximumMagnitude - config.locomotion.skinWidth)
+    {
+        return Failure(OnFootControllerStatus::InvalidArgument, source);
+    }
     if (source.collisionRevision != 0 &&
         source.collisionTopologySha256 != collision.topologySha256)
     {
@@ -214,9 +228,12 @@ OnFootStepResult StepOnFootController(
     const core::Vec3d movementDirection =
         right * planarDemand.x + forward * planarDemand.z;
 
+    scene::InteriorLocomotionConfig probeConfig = config.locomotion;
+    if (source.velocity.y > 0.0)
+        probeConfig.groundProbeDistance = 0.0;
     const scene::InteriorCapsuleMotion probe =
         collision.collisionWorld->MoveCapsule(
-            source.capsule, {}, config.locomotion);
+            source.capsule, {}, probeConfig);
     if (!probe.Succeeded())
     {
         return Failure(
@@ -264,9 +281,10 @@ OnFootStepResult StepOnFootController(
     }
     else if (!grounded)
     {
-        const double start = (std::max)(
+        const double start = (std::clamp)(
             source.velocity.y,
-            -config.terminalFallSpeedMetersPerSecond);
+            -config.terminalFallSpeedMetersPerSecond,
+            config.maximumRiseSpeedMetersPerSecond);
         vertical = IntegrateToward(
             start,
             -config.terminalFallSpeedMetersPerSecond,
@@ -332,7 +350,7 @@ OnFootStepResult StepOnFootController(
     result.state.jumpHeld = command.jumpDown;
     result.achievedDisplacement = motion.center - source.capsule.center;
     result.jumped = jumped;
-    result.blocked = motion.blocked;
+    result.blocked = probe.depenetrated || probe.blocked || motion.blocked;
     result.stepped = motion.stepped;
     return result;
 }

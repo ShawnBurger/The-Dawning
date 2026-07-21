@@ -86,13 +86,13 @@ public:
         const std::shared_ptr<const AssemblyInteriorCollisionSnapshot>& snapshot)
         const { return snapshot && snapshot == m_snapshot; }
 
-    // Used by the host only to complete a higher-level rollback without a
-    // second allocation. The lease must come from this topology.
+private:
+    // Completes a host-level rollback without a second allocation. Only the
+    // current publication or its immediate predecessor can be restored.
     bool RestorePublishedSnapshot(
         std::shared_ptr<const AssemblyInteriorCollisionSnapshot> snapshot)
         noexcept;
 
-private:
     AssemblyDynamicCollisionResult BuildCandidate(
         const AssemblyInteriorRuntime& interior,
         uint64_t revision,
@@ -103,6 +103,8 @@ private:
     std::shared_ptr<const InteriorCollisionWorld> m_staticWorld;
     std::shared_ptr<const AssemblyInteriorCollisionSnapshot> m_snapshot;
     AssemblyDynamicCollisionConfig m_config;
+
+    friend class AssemblyRuntimeHost;
 };
 
 } // namespace scene
