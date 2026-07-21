@@ -1663,6 +1663,56 @@ are now integrated as well. The current order is:
   and owning-system handoff rules for visual, collision, navigation, pressure,
   interaction, portal, and moving-part state without collapsing their ownership.
 
+### WS-024: Leased runtime assembly resource catalog
+
+- Status: ACTIVE
+- Outcome: provide the first concrete `AssemblyResourceCatalog` implementation
+  and an immutable lease/snapshot that keeps resolver identities and owning-
+  system tokens stable across concurrent registration, replacement, removal,
+  and later scene preparation. A future assembly transaction can therefore
+  resolve and prepare against one catalog epoch without racing asset churn.
+- Primary: Codex
+- Reviewer: Claude read-only asset/runtime review after the feature commit
+- Branch: `codex/leased-assembly-resource-catalog`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-leased-assembly-resource-catalog`
+- Base commit: `ecf4dcd`
+- Owned paths: new `src/asset/assembly_resource_catalog.{h,cpp}`, new focused
+  `tests/test_assembly_resource_catalog.cpp`, additive catalog/lifetime contract
+  documentation, and minimal source/test registration in `CMakeLists.txt`
+- Excluded paths: `src/app.{h,cpp}`, `src/scene/**`, `src/ecs/**`,
+  `src/gameplay/**`, `src/render/**`, shaders, `src/sim/**`, existing resource
+  manager/model-loader behavior, file/GPU loading, entity creation, and owning-
+  system resource destruction
+- Shared-file locks: Codex holds only the additive WS-024 registration blocks in
+  `CMakeLists.txt`; all other shared integration files remain unclaimed
+- Interface contract: the mutable store validates and registers `(kind,
+  locator, content SHA-256, owner token)` records, assigns nonzero monotonic
+  catalog values and generations, and never interprets owner tokens. Acquiring a
+  snapshot copies one deterministic immutable epoch that implements the existing
+  const resolver interface and can translate only exact current identities back
+  to their typed owner tokens. Replacement and removal invalidate future live
+  lookups without changing earlier snapshots; stale, missing, wrong-kind,
+  conflicting, exhausted-generation, and limit failures publish no mutation.
+  The store and snapshots perform no file, scene, ECS, GPU, physics, navigation,
+  pressure, interaction, or gameplay work.
+- Dependencies: merged WS-023 resource-resolution contract
+- Acceptance gates: deterministic value assignment and snapshot order;
+  idempotent identical registration; generation-advancing replacement; explicit
+  stale tombstones after removal; immutable snapshots unaffected by later store
+  mutations; exact identity-to-owner-token translation; thread-safe concurrent
+  live lookup/snapshot acquisition; Debug/Release all targets and CTest remain
+  green
+- Negative controls: empty/unsafe/oversized locator, unknown kind, zero digest,
+  zero owner token, duplicate incompatible registration, stale generation,
+  wrong kind/content, record/string limits, generation exhaustion, allocation
+  failure, and concurrent mutation cannot expose a partial record or corrupt a
+  prior snapshot
+- Latest commit: pending
+- Next action: implement and adversarially test the isolated store/snapshot,
+  request Claude review, then integrate only after both build matrices and CI
+  pass
+
 ## 20. Helper Commands
 
 Create a task worktree:
