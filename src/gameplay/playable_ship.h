@@ -1,0 +1,232 @@
+#pragma once
+// =============================================================================
+// gameplay/playable_ship.h - pure player-ship configuration and presentation
+// =============================================================================
+// This header is deliberately GPU- and platform-free. The app translates its
+// keyboard/mouse state into PilotInputSnapshot, while tests can drive the exact
+// same mapping, fighter rig, chase-camera pose, and throttle feedback.
+// =============================================================================
+
+#include "../core/types.h"
+#include "../ecs/components.h"
+
+#include <cmath>
+#include <cstdint>
+
+namespace gameplay
+{
+
+struct PilotInputSnapshot
+{
+    bool thrustForward = false;
+    bool thrustBackward = false;
+    bool strafeLeft = false;
+    bool strafeRight = false;
+    bool liftUp = false;
+    bool liftDown = false;
+
+    bool pitchUp = false;
+    bool pitchDown = false;
+    bool yawLeft = false;
+    bool yawRight = false;
+    bool rollLeft = false;
+    bool rollRight = false;
+
+    // Pointer axes are normalized pilot demand, not raw pixels. Positive pitch
+    // is nose-down (+X body rotation); positive yaw is nose-right (+Y).
+    float pointerPitch = 0.0f;
+    float pointerYaw = 0.0f;
+    bool toggleMode = false;
+};
+
+inline float ClampDemand(float value)
+{
+    if (!std::isfinite(value)) return 0.0f;
+    if (value < -1.0f) return -1.0f;
+    if (value > 1.0f) return 1.0f;
+    return value;
+}
+
+inline float ClampThrottle(float value)
+{
+    if (!std::isfinite(value) || value <= 0.0f) return 0.0f;
+    if (value >= 1.0f) return 1.0f;
+    return value;
+}
+
+inline float DigitalAxis(bool positive, bool negative)
+{
+    return static_cast<float>(positive ? 1 : 0) -
+           static_cast<float>(negative ? 1 : 0);
+}
+
+inline void ApplyPilotInput(const PilotInputSnapshot& input,
+                            ecs::FlightControl& control)
+{
+    control.linearDemand = {
+        DigitalAxis(input.strafeRight, input.strafeLeft),
+        DigitalAxis(input.liftUp, input.liftDown),
+        DigitalAxis(input.thrustForward, input.thrustBackward),
+    };
+
+    control.angularDemand = {
+        ClampDemand(DigitalAxis(input.pitchDown, input.pitchUp) + input.pointerPitch),
+        ClampDemand(DigitalAxis(input.yawRight, input.yawLeft) + input.pointerYaw),
+        DigitalAxis(input.rollRight, input.rollLeft),
+    };
+
+    if (input.toggleMode)
+    {
+        control.mode = control.mode == ecs::FlightMode::Coupled
+            ? ecs::FlightMode::Decoupled
+            : ecs::FlightMode::Coupled;
+    }
+}
+
+inline void ClearThrusterThrottles(ecs::ThrusterSet& set)
+{
+    const uint32_t count = set.count < ecs::ThrusterSet::kMaxThrusters
+        ? set.count
+        : ecs::ThrusterSet::kMaxThrusters;
+    for (uint32_t i = 0; i < count; ++i)
+        set.thrusters[i].throttle = 0.0f;
+}
+
+inline ecs::RigidBody MakeFighterRigidBody()
+{
+    constexpr double mass = 12000.0;
+    constexpr double width = 3.0;
+    constexpr double height = 0.9;
+    constexpr double length = 4.4;
+    constexpr double oneTwelfthMass = mass / 12.0;
+
+    ecs::RigidBody body;
+    body.invMass = 1.0 / mass;
+    body.invInertiaDiag = {
+        static_cast<float>(1.0 / (oneTwelfthMass * (height * height + length * length))),
+        static_cast<float>(1.0 / (oneTwelfthMass * (width * width + length * length))),
+        static_cast<float>(1.0 / (oneTwelfthMass * (width * width + height * height))),
+    };
+    return body;
+}
+
+inline ecs::Thruster MakeThruster(const core::Vec3f& position,
+                                  const core::Vec3f& direction,
+                                  float maxForce)
+{
+    ecs::Thruster thruster;
+    thruster.localPosition = position;
+    thruster.localDirection = direction;
+    thruster.maxForce = maxForce;
+    return thruster;
+}
+
+inline ecs::ThrusterSet MakeFighterThrusterSet()
+{
+    ecs::ThrusterSet set;
+    auto add = [&set](const core::Vec3f& position,
+                      const core::Vec3f& direction,
+                      float maxForce)
+    {
+        if (set.count < ecs::ThrusterSet::kMaxThrusters)
+            set.thrusters[set.count++] = MakeThruster(position, direction, maxForce);
+    };
+
+    // Translation through the centre of mass: starboard/port, up/down,
+    // main/retro. The line of action of each one passes through the origin.
+    add({ -1.5f,  0.0f,  0.0f }, {  1,  0,  0 }, 120000.0f);
+    add({  1.5f,  0.0f,  0.0f }, { -1,  0,  0 }, 120000.0f);
+    add({  0.0f, -0.45f, 0.0f }, {  0,  1,  0 }, 120000.0f);
+    add({  0.0f,  0.45f, 0.0f }, {  0, -1,  0 }, 120000.0f);
+    add({  0.0f,  0.0f, -2.2f }, {  0,  0,  1 }, 240000.0f);
+    add({  0.0f,  0.0f,  2.2f }, {  0,  0, -1 }, 160000.0f);
+
+    constexpr float rcsForce = 25000.0f;
+
+    // Pitch couples (+X, then -X).
+    add({ 0,  0.45f, 0 }, { 0, 0,  1 }, rcsForce);
+    add({ 0, -0.45f, 0 }, { 0, 0, -1 }, rcsForce);
+    add({ 0,  0.45f, 0 }, { 0, 0, -1 }, rcsForce);
+    add({ 0, -0.45f, 0 }, { 0, 0,  1 }, rcsForce);
+
+    // Yaw couples (+Y, then -Y).
+    add({ 0, 0,  2.2f }, {  1, 0, 0 }, rcsForce);
+    add({ 0, 0, -2.2f }, { -1, 0, 0 }, rcsForce);
+    add({ 0, 0,  2.2f }, { -1, 0, 0 }, rcsForce);
+    add({ 0, 0, -2.2f }, {  1, 0, 0 }, rcsForce);
+
+    // Roll couples (+Z, then -Z).
+    add({  1.5f, 0, 0 }, { 0,  1, 0 }, rcsForce);
+    add({ -1.5f, 0, 0 }, { 0, -1, 0 }, rcsForce);
+    add({  1.5f, 0, 0 }, { 0, -1, 0 }, rcsForce);
+    add({ -1.5f, 0, 0 }, { 0,  1, 0 }, rcsForce);
+
+    return set;
+}
+
+struct ThrusterVisualState
+{
+    ecs::Transform transform;
+    float emissiveStrength = 0.0f;
+    bool visible = false;
+};
+
+inline core::Quatf RotationFromPositiveZ(const core::Vec3f& direction)
+{
+    const core::Vec3f target = direction.Normalized();
+    const float dot = core::Vec3f{ 0.0f, 0.0f, 1.0f }.Dot(target);
+    if (dot > 0.9999f) return core::Quatf::Identity();
+    if (dot < -0.9999f)
+        return core::Quatf::FromAxisAngle({ 0.0f, 1.0f, 0.0f }, core::PI);
+
+    const core::Vec3f cross = core::Vec3f{ 0.0f, 0.0f, 1.0f }.Cross(target);
+    return core::Quatf{ cross.x, cross.y, cross.z, 1.0f + dot }.Normalized();
+}
+
+inline ThrusterVisualState BuildThrusterVisualState(const ecs::Transform& ship,
+                                                     const ecs::Thruster& thruster)
+{
+    ThrusterVisualState visual;
+    const float throttle = ClampThrottle(thruster.throttle);
+    visual.visible = throttle > 0.001f;
+    visual.emissiveStrength = visual.visible ? 3.0f + 17.0f * throttle : 0.0f;
+
+    const core::Vec3f exhaustDirection = -thruster.localDirection.Normalized();
+    const float length = 0.15f + 1.35f * throttle;
+    const core::Vec3f localCentre =
+        thruster.localPosition + exhaustDirection * (0.08f + length * 0.5f);
+    visual.transform.position =
+        ship.position + core::Vec3d::FromFloat(ship.rotation.Rotate(localCentre));
+    visual.transform.rotation =
+        (ship.rotation * RotationFromPositiveZ(exhaustDirection)).Normalized();
+    visual.transform.scale = { 0.10f + 0.08f * throttle,
+                               0.10f + 0.08f * throttle,
+                               length };
+    return visual;
+}
+
+struct ChaseCameraPose
+{
+    core::Vec3d position = {};
+    float yawDegrees = 0.0f;
+    float pitchDegrees = 0.0f;
+};
+
+inline ChaseCameraPose BuildChaseCameraPose(const ecs::Transform& ship,
+                                            float distance = 8.0f,
+                                            float height = 2.4f,
+                                            float lookDownDegrees = 8.0f)
+{
+    const core::Vec3f forward = ship.rotation.Rotate({ 0.0f, 0.0f, 1.0f }).Normalized();
+    const core::Vec3f up = ship.rotation.Rotate({ 0.0f, 1.0f, 0.0f }).Normalized();
+
+    ChaseCameraPose pose;
+    pose.position = ship.position - core::Vec3d::FromFloat(forward) * distance +
+                    core::Vec3d::FromFloat(up) * height;
+    pose.yawDegrees = std::atan2(forward.x, forward.z) * core::RAD_TO_DEG;
+    const float vertical = ClampDemand(forward.y);
+    pose.pitchDegrees = std::asin(vertical) * core::RAD_TO_DEG - lookDownDegrees;
+    return pose;
+}
+
+} // namespace gameplay

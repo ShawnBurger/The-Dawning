@@ -22,7 +22,10 @@
 
 #include "core/types.h"
 #include "ecs/components.h"
+#include "ecs/registry.h"
+#include "gameplay/playable_ship.h"
 #include "sim/flight_control.h"
+#include "sim/physics_system.h"
 #include "sim/rigid_body.h"
 #include "sim/thrusters.h"
 
@@ -309,4 +312,185 @@ TEST_CASE(Assist_VelocityDemand_ConvergesToDemandNotZero)
 
     // The discriminator: it settled NEAR the demand (>= 99 m/s), NOT near zero.
     CHECK(body.linearVelocity.x > 99.0);
+}
+
+// -----------------------------------------------------------------------------
+// PLAYABLE SHIP - the platform-neutral snapshot is the production input contract.
+// The mapping covers all six axes, resolves opposing keys to zero, clamps pointer
+// demand, and toggles mode only on the edge supplied by the app.
+// -----------------------------------------------------------------------------
+TEST_CASE(PlayableShip_InputSnapshotMapsAllAxesAndTogglesMode)
+{
+    ecs::FlightControl control;
+    gameplay::PilotInputSnapshot input;
+    input.thrustForward = true;
+    input.strafeLeft = true;
+    input.liftUp = true;
+    input.pitchUp = true;
+    input.pointerPitch = -0.4f;
+    input.pointerYaw = 4.0f;
+    input.rollRight = true;
+    input.toggleMode = true;
+
+    gameplay::ApplyPilotInput(input, control);
+
+    CHECK_EQ(control.linearDemand.x, -1.0f);
+    CHECK_EQ(control.linearDemand.y, 1.0f);
+    CHECK_EQ(control.linearDemand.z, 1.0f);
+    CHECK_EQ(control.angularDemand.x, -1.0f);
+    CHECK_EQ(control.angularDemand.y, 1.0f);
+    CHECK_EQ(control.angularDemand.z, 1.0f);
+    CHECK_EQ(static_cast<uint32_t>(control.mode),
+             static_cast<uint32_t>(ecs::FlightMode::Decoupled));
+
+    gameplay::PilotInputSnapshot opposed;
+    opposed.thrustForward = opposed.thrustBackward = true;
+    opposed.strafeLeft = opposed.strafeRight = true;
+    opposed.liftUp = opposed.liftDown = true;
+    opposed.pitchUp = opposed.pitchDown = true;
+    opposed.yawLeft = opposed.yawRight = true;
+    opposed.rollLeft = opposed.rollRight = true;
+    gameplay::ApplyPilotInput(opposed, control);
+
+    CHECK_EQ(control.linearDemand.x, 0.0f);
+    CHECK_EQ(control.linearDemand.y, 0.0f);
+    CHECK_EQ(control.linearDemand.z, 0.0f);
+    CHECK_EQ(control.angularDemand.x, 0.0f);
+    CHECK_EQ(control.angularDemand.y, 0.0f);
+    CHECK_EQ(control.angularDemand.z, 0.0f);
+    CHECK_EQ(static_cast<uint32_t>(control.mode),
+             static_cast<uint32_t>(ecs::FlightMode::Decoupled));
+}
+
+// No input must actively overwrite stale demand with exact zeros. Otherwise a
+// released key would leave the ship accelerating indefinitely.
+TEST_CASE(PlayableShip_NoInputClearsDemandExactly)
+{
+    ecs::FlightControl control;
+    control.linearDemand = { 0.8f, -0.6f, 0.4f };
+    control.angularDemand = { -0.2f, 0.3f, 1.0f };
+    control.mode = ecs::FlightMode::Decoupled;
+
+    gameplay::ApplyPilotInput(gameplay::PilotInputSnapshot{}, control);
+
+    CHECK_EQ(control.linearDemand.x, 0.0f);
+    CHECK_EQ(control.linearDemand.y, 0.0f);
+    CHECK_EQ(control.linearDemand.z, 0.0f);
+    CHECK_EQ(control.angularDemand.x, 0.0f);
+    CHECK_EQ(control.angularDemand.y, 0.0f);
+    CHECK_EQ(control.angularDemand.z, 0.0f);
+    CHECK_EQ(static_cast<uint32_t>(control.mode),
+             static_cast<uint32_t>(ecs::FlightMode::Decoupled));
+}
+
+// The production fighter rig must make every commanded degree of freedom
+// reachable. This is a sign/coverage check, not a balance claim about the greedy
+// allocator: exact allocation remains a later IFCS stage.
+TEST_CASE(PlayableShip_FighterRigCoversSixDegreesOfFreedom)
+{
+    const core::Vec3f linearAxes[3] = {
+        { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 },
+    };
+    for (const float sign : { -1.0f, 1.0f })
+    {
+        for (const core::Vec3f& axis : linearAxes)
+        {
+            const core::Vec3f demand = axis * sign;
+            ecs::ThrusterSet rig = gameplay::MakeFighterThrusterSet();
+            sim::AllocateThrusters(rig, demand, kZeroF, kZeroF);
+            const sim::Wrench wrench = sim::ComputeWrench(rig, kZeroF);
+            CHECK(wrench.force.Dot(demand) > 0.0f);
+        }
+    }
+
+    const core::Vec3f angularAxes[3] = {
+        { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 },
+    };
+    for (const float sign : { -1.0f, 1.0f })
+    {
+        for (const core::Vec3f& axis : angularAxes)
+        {
+            const core::Vec3f demand = axis * sign;
+            ecs::ThrusterSet rig = gameplay::MakeFighterThrusterSet();
+            sim::AllocateThrusters(rig, kZeroF, demand, kZeroF);
+            const sim::Wrench wrench = sim::ComputeWrench(rig, kZeroF);
+            CHECK(wrench.torque.Dot(demand) > 0.0f);
+        }
+    }
+}
+
+// End-to-end: the same input mapper used by App writes FlightControl, the shipped
+// ECS system allocates real nozzle throttles, and the presentation state reads
+// that exact throttle. A fabricated VFX intensity could pass a "ship moved"
+// assertion; checking the main nozzle's field closes that gap.
+TEST_CASE(PlayableShip_DecoupledInputDrivesBodyAndActualThrusterFeedback)
+{
+    ecs::Registry registry;
+    const ecs::Entity ship = registry.Create();
+    registry.Assign<ecs::Transform>(ship, ecs::Transform{});
+    registry.Assign<ecs::RigidBody>(ship, gameplay::MakeFighterRigidBody());
+    registry.Assign<ecs::ThrusterSet>(ship, gameplay::MakeFighterThrusterSet());
+
+    ecs::FlightControl control;
+    control.mode = ecs::FlightMode::Decoupled;
+    gameplay::PilotInputSnapshot input;
+    input.thrustForward = true;
+    gameplay::ApplyPilotInput(input, control);
+    registry.Assign<ecs::FlightControl>(ship, control);
+
+    sim::StepFlightPhysics(registry, kDt);
+
+    const auto& body = registry.Get<ecs::RigidBody>(ship);
+    const auto& thrusters = registry.Get<ecs::ThrusterSet>(ship);
+    CHECK(body.linearVelocity.z > 0.0);
+    CHECK_EQ(thrusters.thrusters[4].throttle, 1.0f);
+
+    const gameplay::ThrusterVisualState feedback =
+        gameplay::BuildThrusterVisualState(registry.Get<ecs::Transform>(ship),
+                                           thrusters.thrusters[4]);
+    CHECK(feedback.visible);
+    CHECK_APPROX(feedback.emissiveStrength, 20.0f);
+
+    ecs::ThrusterSet cleared = thrusters;
+    gameplay::ClearThrusterThrottles(cleared);
+    for (uint32_t i = 0; i < cleared.count; ++i)
+        CHECK_EQ(cleared.thrusters[i].throttle, 0.0f);
+}
+
+TEST_CASE(PlayableShip_ChaseCameraAndExhaustFollowShipPose)
+{
+    ecs::Transform ship;
+    ship.position = { 100.0, 20.0, -50.0 };
+    ship.rotation = core::Quatf::FromAxisAngle({ 0, 1, 0 }, 90.0f * core::DEG_TO_RAD);
+
+    const gameplay::ChaseCameraPose camera = gameplay::BuildChaseCameraPose(ship);
+    CHECK_APPROX_EPS(camera.position.x, 92.0, 1e-5);
+    CHECK_APPROX_EPS(camera.position.y, 22.4, 1e-5);
+    CHECK_APPROX_EPS(camera.position.z, -50.0, 1e-5);
+    CHECK_APPROX(camera.yawDegrees, 90.0f);
+    CHECK_APPROX(camera.pitchDegrees, -8.0f);
+
+    ecs::Thruster thruster = gameplay::MakeThruster(
+        { 0, 0, -2.2f }, { 0, 0, 1 }, 100.0f);
+    thruster.throttle = 0.5f;
+    const gameplay::ThrusterVisualState exhaust =
+        gameplay::BuildThrusterVisualState(ecs::Transform{}, thruster);
+    CHECK(exhaust.visible);
+    CHECK_APPROX(exhaust.transform.scale.z, 0.825f);
+    CHECK_APPROX(exhaust.transform.position.z, -2.6925f);
+    CHECK_APPROX(exhaust.emissiveStrength, 11.5f);
+
+    thruster.throttle = -0.5f;
+    const gameplay::ThrusterVisualState invalidNegative =
+        gameplay::BuildThrusterVisualState(ecs::Transform{}, thruster);
+    CHECK(!invalidNegative.visible);
+    CHECK_EQ(invalidNegative.emissiveStrength, 0.0f);
+    CHECK(invalidNegative.transform.scale.z > 0.0f);
+
+    thruster.throttle = 2.0f;
+    const gameplay::ThrusterVisualState clampedHigh =
+        gameplay::BuildThrusterVisualState(ecs::Transform{}, thruster);
+    CHECK(clampedHigh.visible);
+    CHECK_APPROX(clampedHigh.emissiveStrength, 20.0f);
+    CHECK_APPROX(clampedHigh.transform.scale.z, 1.5f);
 }

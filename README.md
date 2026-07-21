@@ -85,6 +85,12 @@ is the expected size, is not essentially black, is not blown out, has a
 reasonable fraction of non-black pixels, and contains more than a handful of
 distinct colours.
 
+For a deterministic playable-ship capture, launch the executable with
+`--smoke --smoke-flight --smoke-capture`. The opt-in profile switches to
+decoupled flight and holds forward thrust over the final twelve fixed steps, so
+the capture and `[SMOKE] playable_ship=ok` marker exercise physical nozzle
+throttle, ship motion, chase-camera ownership, and exhaust feedback together.
+
 In raster mode the harness additionally probes the shadow map itself, reading
 back a 256x256 window from its centre and asserting that the depth pass
 rasterised something. `shadow_map=ok` only proves the resource was created;
@@ -293,7 +299,11 @@ The camera basis exists in `CBPerFrame` specifically to close that gap. Toggling
 - `F1`: toggle raster/path tracing.
 - `F2`: toggle path tracing quality.
 - `F3`: toggle the debug overlay.
-- `WASD` + mouse: move the camera after clicking into the window.
+- `WASD`: forward/back thrust and left/right strafe.
+- `Space` / `Ctrl`: lift up/down.
+- Mouse or arrow keys: pitch and yaw after clicking into the window.
+- `Q` / `E`: roll left/right.
+- `V`: toggle coupled flight assist / decoupled Newtonian flight.
 - `ESC`: release mouse capture, then quit.
 
 ## Development Rule
