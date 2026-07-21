@@ -1937,7 +1937,7 @@ are now integrated as well. The current order is:
 
 ### WS-028: Cooked interior collision and capsule locomotion runtime
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: publish concrete, versioned cooked collision resources for authored
   assembly module collision locators, build an immutable CPU collision world
   from the prepared assembly transforms, and expose deterministic capsule
@@ -1985,12 +1985,29 @@ are now integrated as well. The current order is:
   missing/corrupt package, invalid transform/scale, zero-size shape, starting
   penetration, excessive step, steep slope, corner contact, and bounded-
   iteration exhaustion cannot silently publish or produce an invalid pose
-- Progress: custom-physics contract frozen; deterministic compiler/loader,
-  assembly-local world, capsule overlap/sweep/slide/slope/step/depenetration,
-  runtime-content schema 2, concrete host publication, and raster smoke witness
-  are implemented on the task branch
-- Next action: finish Release and DXR validation, run read-only review, then
-  integrate and close the workstream
+- Integrated commits: `b00afd9` (claim), `e682ae9` (implementation), and
+  `c3ad2d8` (manual-review hardening), fast-forwarded to `main`
+- Delivered: deterministic `.tdcollision` source/compiler/loader/inspector;
+  three reproducible authenticated reference packages; runtime-content schema 2
+  concrete collision paths; payload-hash owner identities; an immutable
+  assembly-local box world; exact upright-capsule overlap and continuous sweep;
+  bounded depenetration, collide-and-slide, grounding, slope, and step queries;
+  host publication/teardown; custom-physics architecture contract; and exact
+  runtime smoke evidence (`packages=3 boxes=12 frame=assembly_local`)
+- Review: Claude read-only review was attempted at `e682ae9` but unavailable due
+  its weekly service limit. The documented manual fallback found one builder-
+  API gap: zero module scale could survive as a floating residual after rotation.
+  `c3ad2d8` added explicit transform validation and expanded malformed-header,
+  arithmetic-range, stable-tie, tangent-away, unresolved-penetration, zero-limit,
+  and invalid-scale controls.
+- Verification: all Debug and Release targets built; CTest passed 5/5 in both
+  configurations; the CPU executable passed 436 cases and 17,838 checks; all
+  three cooked packages reproduced byte-for-byte; Release raster and full-DXR
+  smoke passed; stable DXR passed with D3D12 GPU validation; earlier Debug and
+  Release stable/full matrix runs also passed.
+- Next action: claim Stage 5C as a separate lane for state-driven moving
+  collision blockers and the on-foot controller that consumes this query API,
+  without extending into dynamic rigid-body or final production geometry work.
 
 ## 20. Helper Commands
 
