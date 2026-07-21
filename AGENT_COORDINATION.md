@@ -1526,6 +1526,47 @@ are now integrated as well. The current order is:
   navigation, pressure, collision, and local lighting to the simulation/editor
   layers before accepting production ship or structure interiors.
 
+### WS-022: Deterministic cooked-assembly runtime contract
+
+- Status: ACTIVE
+- Outcome: compile a validated `.tdasset.json` assembly manifest into a compact,
+  versioned runtime artifact and load it fail-closed while preserving stable
+  module, zone, portal, socket, interaction, and moving-part identity. This is
+  the data boundary required before scene/ECS entity construction can safely
+  connect interactive interiors.
+- Primary: Codex
+- Reviewer: Claude read-only asset/runtime review after the feature commit
+- Branch: `codex/cooked-assembly-runtime-contract`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-cooked-assembly-runtime-contract`
+- Base commit: `2046fc8`
+- Owned paths: new `src/asset/cooked_assembly.{h,cpp}`, new focused C++ tests,
+  `tools/compile_asset_manifest.py`, focused Python tests, additive assembly
+  documentation, and the minimal source/test registration in `CMakeLists.txt`
+- Excluded paths: `src/app.{h,cpp}`, `src/scene/**`, `src/ecs/**`,
+  `src/gameplay/**`, `src/render/**`, shaders, `src/sim/**`, Meshy generation,
+  existing importer behavior, and runtime entity spawning
+- Shared-file locks: Codex holds only the additive WS-022 registration blocks in
+  `CMakeLists.txt`; all other shared integration files remain unclaimed
+- Interface contract: the offline compiler consumes only manifests accepted by
+  `tools/validate_asset_manifest.py`, canonicalizes ordering, rejects duplicate
+  or dangling identity, and emits a checksummed/versioned artifact. The C++
+  loader performs no JSON parsing, file-system asset resolution, scene mutation,
+  or GPU work; it either returns the complete immutable assembly graph or a
+  diagnostic with no partial state.
+- Dependencies: WS-021 schema version 1 and its reference ship manifest
+- Acceptance gates: deterministic byte-for-byte compilation; Python-to-C++
+  round trip preserves all graph identity and references; truncated, corrupt,
+  wrong-version, oversized, duplicate-ID, and dangling-reference artifacts are
+  rejected; Debug/Release builds and all CTest suites remain green
+- Negative controls: no source URL or credential persisted; no runtime JSON
+  dependency; no monolithic exterior/interior promotion; no entity creation or
+  interaction simulation hidden inside the loader
+- Latest commit: none
+- Next action: create the isolated worktree, study the existing cooked-model
+  conventions, freeze the binary layout, and implement the compiler/loader with
+  adversarial round-trip tests before requesting review
+
 ## 20. Helper Commands
 
 Create a task worktree:
