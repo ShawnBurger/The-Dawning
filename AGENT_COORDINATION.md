@@ -607,8 +607,9 @@ registered or edited.
   `etaContact`, out-of-range restitution/contact parameters, negative `maxLevel`,
   and the hard level-30 backstop cannot cause undefined casts, energy injection,
   impractical stepping, or a false `hitDepthCap` diagnostic.
-- Codex will re-run and integrate only after Claude's files stop changing and the
-  branch is explicitly handed back or becomes stable and clean.
+- Claude stabilized and committed the slice as `1749f74`; its clean branch is
+  backed up at `origin/claude/sim-collision`. WS-015 owns the independent
+  integration review from that immutable checkpoint.
 
 ### WS-001: Coordination contract
 
@@ -1131,6 +1132,39 @@ registered or edited.
 - Next action: retire the clean local feature worktree after pushing `main`, then
   re-audit Claude's collision branch and register a non-overlapping
   collision/close-encounter policy lane
+
+### WS-015: Collision policy integration review
+
+- Status: ACTIVE
+- Outcome: integrate Claude's Stage-5 collision policy onto current `main` only
+  after adversarial coverage proves swept elastic contacts and public config
+  limits cannot violate anti-tunneling, energy, or bounded-work claims
+- Primary: Claude (`1749f74`); integrator/reviewer: Codex
+- Branch: `codex/review-sim-collision`
+- Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-collision`
+- Base commit: `5171cbf`; source checkpoint: `1749f74`
+- Owned paths: `src/sim/collision.h`, `src/sim/collision.cpp`,
+  `src/sim/nbody.h`, `tests/test_collision.cpp`, collision entries in
+  `CMakeLists.txt`, and collision-policy contracts in research documentation
+- Excluded paths: ECS reconciliation, app/scene wiring, renderer/shaders/assets,
+  flight control, atmosphere, relativity, FTL, and unrelated shared files
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve Claude's power-of-two `StepNBody` subdivision,
+  deterministic body-ID reduction, central impulse, and volume-additive merge;
+  harden validation and swept contact response without inventing an ECS callsite
+- Dependencies: merged N-body foundation and Claude's clean published checkpoint
+- Acceptance gates: Claude's eight cases plus watched high-restitution full-crossing
+  bounce and invalid/extreme config cases; finite bounded subdivision; restitution
+  cannot inject energy; truthful depth-cap diagnostics; deterministic permutation;
+  Debug/Release CPU suites and combined six-mode smoke after integration
+- Negative controls: endpoint-only approach classification must miss the swept
+  elastic crossing; zero/non-finite subdivision denominators and out-of-range
+  restitution/max depth must fail or exceed the bounded-work contract before fix
+- Latest commit: Claude source `1749f74`; review branch not yet created
+- Review note: Codex owns this pass so no reciprocal Claude review blocks it; any
+  additional Claude review is optional manual debt under Shawn's instruction
+- Next action: create the review worktree from current `main`, cherry-pick the
+  source checkpoint, establish watched failures, then harden and verify
 
 ## 20. Helper Commands
 
