@@ -2,9 +2,14 @@
 // =============================================================================
 // core/log.h — Logging System
 // =============================================================================
-// Outputs to Visual Studio Output window via OutputDebugStringA.
-// NOT thread-safe — call only from the main thread until a job system exists.
-// Supports Info/Warn/Error levels with printf-style formatting.
+// Outputs to Visual Studio Output window via OutputDebugStringA, stderr, and a log
+// file beside the executable. Supports Info/Warn/Error levels with printf formatting.
+//
+// THREAD-SAFE for the message calls (Info/Warn/Error[f] and ErrorCount): the error
+// counter is atomic and each log line is emitted under a mutex, so worker threads
+// (core::JobSystem) may log concurrently without tearing lines or losing error
+// counts. Init()/Shutdown() are lifecycle calls and remain main-thread-only.
+// (RULE 8 in CLAUDE.md predates the job system and should be updated to match.)
 // =============================================================================
 
 #include <cstdint>

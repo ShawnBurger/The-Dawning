@@ -4,10 +4,12 @@
 
 #include "log.h"
 #include <windows.h>
+#include <atomic>
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
 #include <cstdint>
+#include <mutex>
 
 namespace core { namespace Log {
 
@@ -15,7 +17,24 @@ static LARGE_INTEGER s_startTime;
 static LARGE_INTEGER s_frequency;
 static bool s_initialized = false;
 static FILE* s_file = nullptr;
-static uint32_t s_errorCount = 0;
+// THREAD-SAFETY: a plain ++ on the error count from two threads is a data race (UB
+// by the C++ standard); it is atomic. The output mutex below makes a whole log LINE
+// atomic across all three sinks (debugger + stderr + file) so concurrent callers do
+// not interleave within a line. NOTE ON TESTABILITY: the surrounding output I/O
+// (OutputDebugStringA is a syscall, the CRT locks FILE* for fputs) already serialises
+// concurrent Error() calls in practice, so a unit test CANNOT observe the counter
+// race even fully unsynchronised - there is no watched failure for this on MSVC (no
+// ThreadSanitizer). The hardening removes the UB by construction (verified by
+// inspection), and test_log.cpp only asserts that concurrent logging is crash-free
+// and the count is exact - it does NOT claim to discriminate the atomic.
+static std::atomic<uint32_t> s_errorCount{ 0 };
+
+// Function-local static avoids any static-init-order dependence.
+static std::mutex& OutputMutex()
+{
+    static std::mutex m;
+    return m;
+}
 
 static void BuildLogPath(char* outPath, size_t outPathSize)
 {
@@ -80,17 +99,17 @@ static void Output(LogLevel level, const char* msg)
 
     const char* prefix = "[INFO]";
     if (level == LogLevel::Warn)  prefix = "[WARN]";
-    if (level == LogLevel::Error) { prefix = "[ERR ]"; ++s_errorCount; }
+    if (level == LogLevel::Error) { prefix = "[ERR ]"; s_errorCount.fetch_add(1, std::memory_order_relaxed); }
 
-    char buffer[640];
+    char buffer[640]; // per-call, on the stack: formatting is already thread-safe
     snprintf(buffer, sizeof(buffer), "[%8.3f] %s %s\n", elapsed, prefix, msg);
     buffer[sizeof(buffer) - 1] = '\0';
 
+    // One line, emitted atomically across all sinks so concurrent callers do not
+    // interleave within a line.
+    std::lock_guard<std::mutex> lk(OutputMutex());
     OutputDebugStringA(buffer);
-
-    // Also write to stderr for console builds
-    fputs(buffer, stderr);
-
+    fputs(buffer, stderr); // also to stderr for console builds
     if (s_file)
     {
         fputs(buffer, s_file);
@@ -102,7 +121,7 @@ void Info(const char* msg)  { Output(LogLevel::Info, msg); }
 void Warn(const char* msg)  { Output(LogLevel::Warn, msg); }
 void Error(const char* msg) { Output(LogLevel::Error, msg); }
 
-uint32_t ErrorCount() { return s_errorCount; }
+uint32_t ErrorCount() { return s_errorCount.load(std::memory_order_relaxed); }
 
 void Infof(const char* fmt, ...)
 {

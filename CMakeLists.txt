@@ -191,6 +191,7 @@ set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_math.cpp
     tests/test_job_system.cpp
+    tests/test_log.cpp
     tests/test_ecs.cpp
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
@@ -441,6 +442,10 @@ add_executable(TheDawningTests
     # pool (deterministic ParallelFor result, exactly-once, race-free, Wait barrier).
     src/core/job_system.h
     src/core/job_system.cpp
+    # Logger: tests/test_log.cpp drives its thread-safety (atomic error count under
+    # concurrent Error() from the job system).
+    src/core/log.h
+    src/core/log.cpp
     # CPU evaluation of the procedural sky. GPU-free for the same reason
     # shadow_cascades.cpp is, but NOT on the same footing: it is a hand-written
     # MIRROR of shaders/sky_common.hlsli rather than shipped code, and the engine
