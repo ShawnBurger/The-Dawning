@@ -579,17 +579,13 @@ The first parallel split is complete: Claude's active-system N-body core and
 relativity foundation plus Codex's playable-ship and cooked-content slices are
 on `main`. The current order is:
 
-1. WS-009 is merged and verified; publish it and retire the clean worktree.
-2. Codex reviews WS-010, Claude's atmosphere implementation, then WS-011 FTL;
-   both reached `main` without pre-registration or independent review.
+1. WS-012 closed the WS-010 atmosphere findings and is published and retired.
+2. Codex reviews WS-011, Claude's FTL implementation, before any engine callsite.
 3. Route coupled flight assist through real actuator limits so both flight modes
    expose physical thruster state.
 4. Add collision/close-encounter policy before production N-body activation.
-5. Do not start another simulation stage until WS-010 and WS-011 review debt is
-   resolved and the next lane is registered before editing.
-
-WS-012 is the active Codex review-fix lane for the concrete WS-010 findings.
-It may proceed while WS-011 remains queued because its owned files are disjoint.
+5. Do not start another simulation stage until WS-011 review debt is resolved and
+   the next lane is registered before editing.
 
 ### WS-001: Coordination contract
 
@@ -892,8 +888,9 @@ It may proceed while WS-011 remains queued because its owned files are disjoint.
 - Residual risk: `RelativisticBody::restMass` and `RigidBody::invMass` remain a
   documented but unenforced duplication until the production system callsite is
   built; that wiring must establish one synchronization owner.
-- Next action: publish the integration and retire the clean worktree after
-  confirming `04470b0` is reachable from `origin/main`
+- Next action: the Git worktree registration and local branch are retired. A
+  host-blocked inert directory remains as cleanup residue from the timed-out
+  Claude process; it is not a registered worktree and owns no branch.
 
 ### WS-010: Atmospheric-flight implementation review
 
@@ -919,9 +916,14 @@ It may proceed while WS-011 remains queued because its owned files are disjoint.
   cross-product order, and base-pressure precompute mutations must fail
 - Latest commit: `45cf4db`, integrated through `fa4f983`
 - Review note: the feature reached `main` without the required pre-registration
-  or independent Codex review.
-- Next action: Codex performs a findings-first numerical/API review before any
-  atmosphere callsite is integrated
+  or independent Codex review. The completed review found that the exact-zero
+  branch hard-cut a still-positive density at the ceiling, raw vector norms and
+  aerodynamic products could emit NaN/Inf, invalid coefficients could reverse
+  drag into acceleration, and the quadratic update was mislabeled as nonlinear
+  backward Euler. WS-012 fixes and watches each finding.
+- Next action: preserve the reviewed external-force ownership when the first
+  production atmosphere callsite is registered; do not apply drag both as force
+  and as the contractive airspeed substep
 
 ### WS-011: FTL and atomic-teleport implementation review
 
@@ -955,7 +957,7 @@ It may proceed while WS-011 remains queued because its owned files are disjoint.
 
 ### WS-012: Atmospheric-flight review hardening
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: close the ceiling-continuity, finite-domain, and public-contract gaps
   found during the independent WS-010 review without adding a production callsite
 - Primary: Codex
@@ -981,12 +983,26 @@ It may proceed while WS-011 remains queued because its owned files are disjoint.
 - Negative controls: the reviewed hard-cut implementation must fail the new
   ceiling-continuity test, and invalid model/force/heating inputs must not emit
   NaN/Inf or reverse aerodynamic dissipation
-- Latest commit: none; tests are written first against `347d5a3`
-- Review note: Claude review is requested after the fix commit; under Shawn's
-  explicit direction, a failed or unavailable automated review is recorded as
-  deferred manual review debt and does not block evidence-backed integration
-- Next action: create the isolated worktree, prove the findings against the
-  reviewed implementation, then correct and verify them
+- Latest commit: `d46b54c` on the review branch, merged to `main` by `31e5416`
+- Review note: the bounded read-only Claude review produced no output and was
+  terminated with its child tree after 120 seconds. Shawn explicitly allowed
+  this step to be deferred; it remains manual reciprocal-review debt rather than
+  reviewer approval.
+- Acceptance result: the three watched tests first produced 35 failed checks
+  against the reviewed implementation while all 281 prior cases stayed green.
+  The corrected branch and combined `main` pass 284 cases and 15,726 checks in
+  Debug and Release plus raster, stable-DXR, and full-DXR smoke in both builds.
+  The raster witness still observes 73,708 shadow fade pixels, pair mask 7, and
+  nonzero adjacent-cascade signal. The feature commit and merge are reachable
+  from `origin/main`; the clean worktree and local branch are retired, while the
+  remote review branch remains for audit.
+- Residual risk: atmosphere still has no production callsite. That future lane
+  must apply the contractive airspeed update exactly once, restore the rotating
+  atmosphere velocity in the correct frame, and serialize `ceilingFadeWidth`
+  when atmosphere models become persistent. The terminal taper intentionally
+  modifies Earth USSA76 only within its final 5 km simulation boundary interval.
+- Next action: complete WS-011 FTL review; perform the deferred manual Claude
+  review later without reopening the already-proven integration gate
 
 ## 20. Helper Commands
 
