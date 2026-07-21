@@ -588,8 +588,9 @@ on `main`. The current order is:
 4. Add collision/close-encounter policy before production N-body activation.
 5. Register the next lane and verify its paths do not overlap Claude before editing.
 
-WS-013 completed the concrete WS-011 review findings. No Codex simulation lane is
-active until the next product-integration slice is registered.
+WS-013 completed the concrete WS-011 review findings. WS-014 is the active Codex
+product-integration lane; its owned paths do not overlap Claude's stale collision
+worktree, which currently has no commits beyond its merged ancestor.
 
 ### WS-001: Coordination contract
 
@@ -1059,6 +1060,46 @@ active until the next product-integration slice is registered.
 - Next action: register the highest-priority non-overlapping product-integration
   lane after checking Claude's live branches; perform the deferred manual review
   later without reopening the already-proven integration gate
+
+### WS-014: Coupled flight assist through physical actuators
+
+- Status: ACTIVE
+- Outcome: remove the ideal-reaction-wrench shortcut so coupled flight assist is
+  limited by, and visibly reflected in, the ship's actual thruster bank
+- Primary: Codex
+- Reviewer: Claude
+- Branch: `codex/coupled-actuator-control`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-coupled-actuator-control`
+- Base commit: `68ca26e`
+- Owned paths: `src/sim/flight_control.h`, `src/sim/flight_control.cpp`,
+  `src/sim/physics_system.h`, `src/sim/physics_system.cpp`,
+  `tests/test_flight_control.cpp`, `tests/test_physics_system.cpp`, and the
+  actuator-control contract in `docs/research/FLIGHT_PHYSICS_DESIGN.md`
+- Excluded paths: ECS component layout, gameplay/input mapping, app/scene wiring,
+  renderer/shaders/assets, collision, orbital/relativity/atmosphere/FTL modules,
+  CMake, and other shared documentation
+- Shared-file locks: `AGENT_COORDINATION.md` remains integration-owned
+- Interface contract: preserve `ComputeFlightAssist` as the pure desired-wrench
+  law and preserve decoupled demand allocation; add a deterministic bounded
+  desired-wrench allocator whose only realized output is per-nozzle throttle and
+  whose net force/torque comes back through `ComputeWrench`
+- Dependencies: merged rigid-body/thruster/flight-control core and the playable
+  ship's production `ThrusterSet` feedback path
+- Acceptance gates: coupled bodies without thrusters receive no imaginary force;
+  actual acceleration is capped by installed thrust; per-nozzle throttle is the
+  visible feedback source; asymmetric, weakened, or missing actuators degrade the
+  realized wrench; zero demand still brakes only when the bank can produce the
+  required opposing wrench; decoupled behavior remains unchanged; allocation is
+  finite and deterministic; Debug/Release CPU suites and combined six-mode smoke
+- Negative controls: direct accumulation of `AssistWrench`, a coupled ship that
+  accelerates beyond installed thrust, and unchanged throttle feedback under
+  coupled braking must each fail a watched test
+- Latest commit: none; tests are written first against the ideal-wrench shortcut
+- Review note: request one bounded Claude review after the fix commit; a failed
+  attempt becomes deferred manual review debt per Shawn's instruction
+- Next action: create the isolated worktree, prove the shortcut and feedback gaps,
+  then add the bounded allocator without changing the existing input contract
 
 ## 20. Helper Commands
 
