@@ -23,4 +23,5 @@ CMakeLists.txt text eol=lf
 *.dds binary
 assets/runtime/*.tdmodel filter=lfs diff=lfs merge=lfs -text
 assets/runtime/*.tdassembly binary
+assets/runtime/*.tdcollision binary
 *.tdcontent text eol=lf

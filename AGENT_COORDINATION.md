@@ -1985,8 +1985,12 @@ are now integrated as well. The current order is:
   missing/corrupt package, invalid transform/scale, zero-size shape, starting
   penetration, excessive step, steep slope, corner contact, and bounded-
   iteration exhaustion cannot silently publish or produce an invalid pose
-- Next action: freeze the cooked collision and query contracts from repository
-  evidence plus primary physics-engine guidance before implementation
+- Progress: custom-physics contract frozen; deterministic compiler/loader,
+  assembly-local world, capsule overlap/sweep/slide/slope/step/depenetration,
+  runtime-content schema 2, concrete host publication, and raster smoke witness
+  are implemented on the task branch
+- Next action: finish Release and DXR validation, run read-only review, then
+  integrate and close the workstream
 
 ## 20. Helper Commands
 

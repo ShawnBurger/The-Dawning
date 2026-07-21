@@ -23,9 +23,11 @@ Meshy or reads `MESHY_API_KEY`.
 `reference_ship.tdcontent` is the first Stage 4 runtime-content manifest. It
 maps every typed locator in `reference_ship.tdassembly` to an owner record. Its
 visual records deliberately reuse the corridor prototype while final exterior,
-airlock, cockpit, LOD, and moving-part art is still unbuilt. Collision,
-navigation, and walkable records are contract-only preflight witnesses; they do
-not claim that physics bodies, pathfinding, or walkable gameplay are live.
+airlock, cockpit, LOD, and moving-part art is still unbuilt. Each collision
+record resolves to an authenticated `.tdcollision` package and publishes into
+the immutable assembly-local interior collision world. Navigation and walkable
+records remain contract-only preflight witnesses; they do not claim that
+pathfinding or the complete on-foot controller is live.
 
 The executable reads the generic `.tdcontent` manifest and therefore needs no
 asset-specific C++ change when a binding moves to a new cooked model. Runtime

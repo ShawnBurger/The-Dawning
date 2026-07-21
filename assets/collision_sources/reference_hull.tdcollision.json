@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "collision_id": "reference.hull",
+  "boxes": [
+    {"id": "ceiling", "center_m": [0, 1.45, 0], "half_extents_m": [2.25, 0.05, 1.0], "walkable": false},
+    {"id": "floor", "center_m": [0, -0.55, 0], "half_extents_m": [2.25, 0.05, 1.0], "walkable": true},
+    {"id": "wall_left", "center_m": [-2.2, 0.45, 0], "half_extents_m": [0.05, 1.0, 1.0], "walkable": false},
+    {"id": "wall_right", "center_m": [2.2, 0.45, 0], "half_extents_m": [0.05, 1.0, 1.0], "walkable": false}
+  ]
+}

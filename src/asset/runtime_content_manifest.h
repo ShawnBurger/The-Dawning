@@ -11,16 +11,18 @@
 namespace asset
 {
 
-constexpr uint32_t kRuntimeContentManifestVersion = 1u;
+constexpr uint32_t kRuntimeContentManifestVersion = 2u;
 
 struct RuntimeContentBinding
 {
     AssemblyResourceKind kind = AssemblyResourceKind::Visual;
     std::string locator;
     std::filesystem::path cookedModelPath;
+    std::filesystem::path cookedCollisionPath;
     uint32_t primitiveIndex = 0;
 
     bool IsVisual() const { return kind == AssemblyResourceKind::Visual; }
+    bool IsCollision() const { return kind == AssemblyResourceKind::Collision; }
 };
 
 struct RuntimeContentManifest

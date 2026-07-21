@@ -1,7 +1,7 @@
 # Runtime Content Assembly Contract
 
 Date: 2026-07-21
-Status: implemented by WS-026
+Status: implemented by WS-026; collision binding extended by WS-028
 Manifest extension: `.tdcontent`
 
 ## Purpose
@@ -9,11 +9,13 @@ Manifest extension: `.tdcontent`
 Stage 4 connects reviewed production content to the live ECS without putting
 asset-specific construction back into `App`. One strict text manifest selects a
 cooked assembly, maps every typed virtual locator in that assembly to a cooked
-model primitive or a contract owner, and supplies the root transform.
+model primitive, a cooked collision package, or a contract owner, and supplies
+the root transform.
 
 ```text
 reviewed .tdasset.json -> deterministic .tdassembly
 source GLB            -> deterministic .tdmodel
+collision JSON        -> deterministic .tdcollision
                                   |
                          versioned .tdcontent
                                   |
@@ -34,7 +36,7 @@ change.
 
 ## Manifest Grammar
 
-The first non-comment line is `tdcontent 1`. Required singleton records are:
+The first non-comment line is `tdcontent 2`. Required singleton records are:
 
 ```text
 scene "stable.scene.id"
@@ -46,7 +48,7 @@ Bindings use typed virtual locators:
 
 ```text
 visual "visual://locator" "relative/model.tdmodel" primitiveIndex
-collision "collision://locator"
+collision "collision://locator" "relative/collision.tdcollision"
 navigation "nav://locator"
 walkable "walk://locator"
 end
@@ -75,6 +77,8 @@ Parsing is fail-closed and bounded before publication:
   zone walkable surface, and moving-part visual authored in the cooked assembly
   appears once, with no unauthored binding;
 - every visual selects an existing primitive in a verified cooked model.
+- every collision binding resolves to an authenticated, bounded cooked package
+  before owner registration or scene mutation.
 
 The manifest is an engine-owned deployment description, not a security
 signature. Downloadable content still requires an authenticated package catalog
@@ -83,7 +87,10 @@ before admission.
 ## Ownership And Publication
 
 `BeginLoad` records model uploads but creates no entities. Each unique cooked
-model is loaded once and each locator receives a stable 1-based owner token.
+model and collision package is loaded once and each locator receives a stable
+1-based owner token. Visual identities derive from source model content and
+primitive index; collision identities use the authenticated collision payload
+hash rather than a hash of the locator string.
 Catalog identity includes kind, generation, and a SHA-256 content identity. The
 owner table is sealed before WS-025 preparation and rejects stale, wrong-kind,
 wrong-generation, or unbound access.
@@ -105,10 +112,10 @@ roll back resources in reverse registration order.
 all visuals and commits six entities: one assembly root, three modules, and two
 moving parts. This is a lifecycle and ownership witness, not final ship art.
 
-Collision, navigation, and walkable bindings currently prove typed catalog
-preflight only. They do not create physics shapes, navmesh instances, pressure
-volumes, interaction state, or animated doors. Runtime LOD selection is also a
-later stage.
+The three collision bindings publish twelve authored boxes into one immutable
+assembly-local interior collision world. Navigation and walkable bindings still
+prove typed catalog preflight only. They do not create navmesh instances or
+pressure volumes. Runtime LOD selection is also a later stage.
 
 ## Verification
 
@@ -119,6 +126,7 @@ and stale-token rejection. The smoke harness requires these exact live markers:
 ```text
 runtime_content_prepared=ok scene=ship.reference.runtime bindings=21 models=1
 runtime_assembly_committed=ok asset=ship.reference.fighter modules=3 moving_parts=2 entities=6
+interior_collision_ready=ok packages=3 boxes=12 frame=assembly_local
 ```
 
 Raster, stable DXR, and full-quality DXR must all pass. A GPU-validation run

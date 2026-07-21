@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assembly_collision_runtime.h"
 #include "assembly_interior_runtime.h"
 #include "assembly_runtime_resources.h"
 #include "model_loader.h"
@@ -7,6 +8,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,6 +24,7 @@ enum class AssemblyRuntimeHostStatus : uint8_t
     AssemblyFailure,
     CoverageFailure,
     ModelFailure,
+    CollisionFailure,
     ResourceFailure,
     CatalogFailure,
     PreparationFailure,
@@ -90,6 +93,10 @@ public:
     bool IsLive() const { return m_instance && m_instance->IsAlive(); }
     const AssemblyInstance* Instance() const { return m_instance.get(); }
     const AssemblyInteriorRuntime& Interior() const { return m_interior; }
+    const InteriorCollisionWorld* CollisionWorld() const
+    {
+        return m_collisionWorld.get();
+    }
     const asset::RuntimeContentManifest& Manifest() const { return m_manifest; }
 
 private:
@@ -104,6 +111,9 @@ private:
     asset::RuntimeContentManifest m_manifest;
     std::shared_ptr<const asset::CookedAssembly> m_assembly;
     std::vector<LoadedModelResources> m_models;
+    std::map<std::string, std::shared_ptr<const asset::CookedCollision>>
+        m_collisions;
+    std::shared_ptr<const InteriorCollisionWorld> m_collisionWorld;
     std::shared_ptr<AssemblyRuntimeResourceOwners> m_owners;
     std::unique_ptr<asset::AssemblyResourceCatalogStore> m_catalog;
     std::shared_ptr<const PreparedAssemblyPlan> m_plan;

@@ -309,15 +309,36 @@ RuntimeContentManifestResult ParseRuntimeContentManifest(
                     return Failure(status, std::move(error));
                 }
             }
-            else if (directive == "collision" || directive == "navigation" ||
-                     directive == "walkable")
+            else if (directive == "collision")
             {
                 RuntimeContentBinding binding;
-                binding.kind = directive == "collision"
-                    ? AssemblyResourceKind::Collision
-                    : directive == "navigation"
-                        ? AssemblyResourceKind::NavigationMesh
-                        : AssemblyResourceKind::WalkableSurface;
+                binding.kind = AssemblyResourceKind::Collision;
+                std::string path;
+                if (!ReadQuoted(line, binding.locator) || !ReadQuoted(line, path) ||
+                    !AtEnd(line) ||
+                    !IsValidRelativePath(path, limits.maxStringBytes))
+                {
+                    return Failure(RuntimeContentManifestStatus::InvalidData,
+                                   LineError(lineNumber, "invalid collision binding"));
+                }
+                binding.cookedCollisionPath = std::filesystem::path(path);
+                std::string error;
+                if (!AddBinding(manifest, identities, std::move(binding), limits,
+                                lineNumber, error))
+                {
+                    const RuntimeContentManifestStatus status =
+                        manifest.bindings.size() >= limits.maxBindings
+                            ? RuntimeContentManifestStatus::ResourceLimitExceeded
+                            : RuntimeContentManifestStatus::InvalidData;
+                    return Failure(status, std::move(error));
+                }
+            }
+            else if (directive == "navigation" || directive == "walkable")
+            {
+                RuntimeContentBinding binding;
+                binding.kind = directive == "navigation"
+                    ? AssemblyResourceKind::NavigationMesh
+                    : AssemblyResourceKind::WalkableSurface;
                 if (!ReadQuoted(line, binding.locator) || !AtEnd(line))
                 {
                     return Failure(RuntimeContentManifestStatus::InvalidSyntax,

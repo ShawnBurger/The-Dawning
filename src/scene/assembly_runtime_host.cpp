@@ -159,6 +159,7 @@ const char* AssemblyRuntimeHostStatusName(AssemblyRuntimeHostStatus status)
     case AssemblyRuntimeHostStatus::AssemblyFailure: return "assembly failure";
     case AssemblyRuntimeHostStatus::CoverageFailure: return "coverage failure";
     case AssemblyRuntimeHostStatus::ModelFailure: return "model failure";
+    case AssemblyRuntimeHostStatus::CollisionFailure: return "collision failure";
     case AssemblyRuntimeHostStatus::ResourceFailure: return "resource failure";
     case AssemblyRuntimeHostStatus::CatalogFailure: return "catalog failure";
     case AssemblyRuntimeHostStatus::PreparationFailure: return "preparation failure";
@@ -177,7 +178,8 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
     const std::filesystem::path& manifestPath)
 {
     if (m_pending || m_instance || m_plan || m_catalog || m_owners ||
-        m_interior.IsInitialized() || !m_models.empty())
+        m_interior.IsInitialized() || !m_models.empty() ||
+        !m_collisions.empty() || m_collisionWorld)
     {
         return Failure(
             AssemblyRuntimeHostStatus::InvalidState,
@@ -233,6 +235,68 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
             ReleaseState(scene, device, renderer);
             return Failure(AssemblyRuntimeHostStatus::CoverageFailure, error);
         }
+
+        std::map<std::filesystem::path,
+                 std::shared_ptr<const asset::CookedCollision>> collisionByPath;
+        for (const asset::RuntimeContentBinding& binding : m_manifest.bindings)
+        {
+            if (!binding.IsCollision())
+                continue;
+            std::filesystem::path collisionPath;
+            if (!ResolveConfinedContentPath(
+                    m_manifest.contentRoot,
+                    binding.cookedCollisionPath,
+                    collisionPath))
+            {
+                ReleaseState(scene, device, renderer);
+                return Failure(
+                    AssemblyRuntimeHostStatus::ManifestFailure,
+                    "cooked collision path escapes the content root: " +
+                        binding.locator);
+            }
+
+            auto found = collisionByPath.find(collisionPath);
+            if (found == collisionByPath.end())
+            {
+                const asset::CookedCollisionResult loaded =
+                    asset::LoadCookedCollisionFile(collisionPath);
+                if (!loaded.Succeeded() ||
+                    !IsNonZero(loaded.collision->payloadSha256))
+                {
+                    const std::string error = loaded.error.empty()
+                        ? asset::CookedCollisionStatusName(loaded.status)
+                        : loaded.error;
+                    ReleaseState(scene, device, renderer);
+                    return Failure(
+                        AssemblyRuntimeHostStatus::CollisionFailure,
+                        "cooked collision resource failed to load for " +
+                            binding.locator + ": " + error);
+                }
+                found = collisionByPath.emplace(
+                    collisionPath, loaded.collision).first;
+            }
+            if (!m_collisions.emplace(binding.locator, found->second).second)
+            {
+                ReleaseState(scene, device, renderer);
+                return Failure(
+                    AssemblyRuntimeHostStatus::CollisionFailure,
+                    "duplicate collision owner locator: " + binding.locator);
+            }
+        }
+
+        const InteriorCollisionWorldBuildResult collisionWorld =
+            BuildAssemblyCollisionWorld(*m_assembly, m_collisions);
+        if (!collisionWorld.Succeeded())
+        {
+            const std::string error = collisionWorld.error.empty()
+                ? InteriorCollisionStatusName(collisionWorld.status)
+                : collisionWorld.error;
+            ReleaseState(scene, device, renderer);
+            return Failure(
+                AssemblyRuntimeHostStatus::CollisionFailure,
+                "assembly collision publication failed: " + error);
+        }
+        m_collisionWorld = collisionWorld.world;
 
         std::map<std::filesystem::path, size_t> modelIndices;
         m_models.reserve(m_manifest.bindings.size());
@@ -319,6 +383,21 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::BeginLoad(
                     VisualDigest(model.sourceSha256, binding.primitiveIndex);
                 ownerRegistration.visual.mesh = primitive->mesh;
                 ownerRegistration.visual.material = primitive->material;
+            }
+            else if (binding.IsCollision())
+            {
+                const auto collision = m_collisions.find(binding.locator);
+                if (collision == m_collisions.end() || !collision->second ||
+                    !IsNonZero(collision->second->payloadSha256))
+                {
+                    ReleaseState(scene, device, renderer);
+                    return Failure(
+                        AssemblyRuntimeHostStatus::CollisionFailure,
+                        "collision owner disappeared during registration: " +
+                            binding.locator);
+                }
+                ownerRegistration.contentSha256 =
+                    collision->second->payloadSha256;
             }
             else
             {
@@ -499,6 +578,10 @@ AssemblyRuntimeHostResult AssemblyRuntimeHost::CommitAfterUploadRetirement(
         m_interior.InteractionCount(),
         m_interior.PortalCount(),
         m_interior.MovingPartCount());
+    core::Log::Infof(
+        "[SMOKE] interior_collision_ready=ok packages=%zu boxes=%zu frame=assembly_local",
+        m_collisions.size(),
+        m_collisionWorld ? m_collisionWorld->BoxCount() : 0u);
     return { AssemblyRuntimeHostStatus::Success, {} };
 }
 
@@ -658,6 +741,8 @@ void AssemblyRuntimeHost::ReleaseState(
     for (auto it = m_models.rbegin(); it != m_models.rend(); ++it)
         ReleaseLoadedModelResources(*it, scene, device, renderer);
     m_models.clear();
+    m_collisionWorld.reset();
+    m_collisions.clear();
     m_assembly.reset();
     m_manifest = {};
     m_pending = false;

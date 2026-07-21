@@ -10,13 +10,13 @@ namespace
 {
 
 constexpr std::string_view kValidManifest =
-    "tdcontent 1\n"
+    "tdcontent 2\n"
     "scene \"ship.reference.runtime\"\n"
     "assembly \"reference_ship.tdassembly\"\n"
     "root 10 20 30 0 90 0 1 2 3\n"
     "visual \"source://reference/hull.glb\" \"corridor_section.tdmodel\" 0\n"
     "visual \"visual://hull_lod0\" \"corridor_section.tdmodel\" 0\n"
-    "collision \"collision://hull\"\n"
+    "collision \"collision://hull\" \"reference_hull.tdcollision\"\n"
     "navigation \"nav://cockpit\"\n"
     "walkable \"walk://cockpit_floor\"\n"
     "end\n";
@@ -34,7 +34,7 @@ TEST_CASE(RuntimeContentManifest_ParsesTypedBindingsAndRootTransform)
         asset::ParseRuntimeContentManifest(kValidManifest);
 
     CHECK(result.Succeeded());
-    CHECK_EQ(result.manifest.schemaVersion, 1u);
+    CHECK_EQ(result.manifest.schemaVersion, 2u);
     CHECK_EQ(result.manifest.sceneId, std::string("ship.reference.runtime"));
     CHECK_EQ(result.manifest.cookedAssemblyPath.generic_string(),
              std::string("reference_ship.tdassembly"));
@@ -44,6 +44,8 @@ TEST_CASE(RuntimeContentManifest_ParsesTypedBindingsAndRootTransform)
     CHECK_EQ(result.manifest.bindings[0].primitiveIndex, 0u);
     CHECK_EQ(result.manifest.bindings[2].kind,
              asset::AssemblyResourceKind::Collision);
+    CHECK_EQ(result.manifest.bindings[2].cookedCollisionPath.generic_string(),
+             std::string("reference_hull.tdcollision"));
     CHECK_EQ(result.manifest.bindings[3].kind,
              asset::AssemblyResourceKind::NavigationMesh);
     CHECK_EQ(result.manifest.bindings[4].kind,
@@ -56,31 +58,43 @@ TEST_CASE(RuntimeContentManifest_ParsesTypedBindingsAndRootTransform)
 TEST_CASE(RuntimeContentManifest_RejectsMalformedUnsafeAndAmbiguousRecords)
 {
     CHECK(Rejected(""));
-    CHECK(Rejected("tdcontent 2\n"));
+    CHECK(Rejected("tdcontent 1\n"));
     CHECK(Rejected("scene \"missing.header\"\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
         "root 0 0 0 0 0 0 1 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
         "root 0 0 0 0 0 0 1 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\n"
         "visual \"visual://a\" \"b.tdmodel\" 0\nend\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"../a.tdassembly\"\n"
+        "tdcontent 2\nscene \"x\"\nassembly \"../a.tdassembly\"\n"
         "root 0 0 0 0 0 0 1 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\nend\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"C:/a.tdassembly\"\n"
+        "tdcontent 2\nscene \"x\"\nassembly \"C:/a.tdassembly\"\n"
         "root 0 0 0 0 0 0 1 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\nend\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"a.tdassembly\"\n"
-        "root 0 0 0 0 0 0 1 1 1\ncollision \"visual://wrong\"\nend\n"));
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "root 0 0 0 0 0 0 1 1 1\n"
+        "collision \"visual://wrong\" \"a.tdcollision\"\nend\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
         "root 0 0 0 0 0 0 0 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\nend\n"));
     CHECK(Rejected(
-        "tdcontent 1\nscene x\nassembly \"a.tdassembly\"\n"
+        "tdcontent 2\nscene x\nassembly \"a.tdassembly\"\n"
         "root 0 0 0 0 0 0 1 1 1\nvisual \"visual://a\" \"a.tdmodel\" 0\nend\n"));
     CHECK(Rejected(std::string(kValidManifest) + "scene \"after.end\"\n"));
+    CHECK(Rejected(
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "root 0 0 0 0 0 0 1 1 1\ncollision \"collision://a\"\nend\n"));
+    CHECK(Rejected(
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "root 0 0 0 0 0 0 1 1 1\n"
+        "collision \"collision://a\" \"../a.tdcollision\"\nend\n"));
+    CHECK(Rejected(
+        "tdcontent 2\nscene \"x\"\nassembly \"a.tdassembly\"\n"
+        "root 0 0 0 0 0 0 1 1 1\n"
+        "navigation \"nav://a\" \"unexpected.bin\"\nend\n"));
 
     std::string withNul(kValidManifest);
     withNul.insert(withNul.begin() + 4, '\0');

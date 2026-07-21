@@ -48,6 +48,7 @@ set(ASSET_SOURCES
     src/asset/assembly_resource_catalog.cpp
     src/asset/assembly_resource_resolver.cpp
     src/asset/cooked_assembly.cpp
+    src/asset/cooked_collision.cpp
     src/asset/cooked_model.cpp
     src/asset/gltf_importer.cpp
     src/asset/runtime_content_manifest.cpp
@@ -58,6 +59,7 @@ set(ASSET_HEADERS
     src/asset/assembly_resource_catalog.h
     src/asset/assembly_resource_resolver.h
     src/asset/cooked_assembly.h
+    src/asset/cooked_collision.h
     src/asset/cooked_model.h
     src/asset/model_data.h
     src/asset/gltf_importer.h
@@ -181,6 +183,7 @@ set(SIM_HEADERS
 )
 
 set(SCENE_SOURCES
+    src/scene/assembly_collision_runtime.cpp
     src/scene/assembly_interior_runtime.cpp
     src/scene/assembly_instantiator.cpp
     src/scene/assembly_runtime_host.cpp
@@ -191,6 +194,7 @@ set(SCENE_SOURCES
 )
 
 set(SCENE_HEADERS
+    src/scene/assembly_collision_runtime.h
     src/scene/assembly_interior_runtime.h
     src/scene/assembly_instantiator.h
     src/scene/assembly_runtime_host.h
@@ -211,11 +215,13 @@ set(TEST_SOURCES
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
     tests/test_assembly_interior_runtime.cpp
+    tests/test_assembly_collision_runtime.cpp
     tests/test_assembly_instantiator.cpp
     tests/test_assembly_runtime_resources.cpp
     tests/test_assembly_resource_catalog.cpp
     tests/test_assembly_resource_resolver.cpp
     tests/test_cooked_assembly.cpp
+    tests/test_cooked_collision.cpp
     tests/test_asset_compiler.cpp
     tests/test_gltf_importer.cpp
     tests/test_runtime_content_manifest.cpp
@@ -287,9 +293,16 @@ add_executable(TheDawningAssemblyInspector
     ${ASSET_HEADERS}
 )
 
+add_executable(TheDawningCollisionInspector
+    tools/collision_inspector.cpp
+    ${ASSET_SOURCES}
+    ${ASSET_HEADERS}
+)
+
 target_include_directories(TheDawningAssetInspector PRIVATE src)
 target_include_directories(TheDawningAssetCompiler PRIVATE src)
 target_include_directories(TheDawningAssemblyInspector PRIVATE src)
+target_include_directories(TheDawningCollisionInspector PRIVATE src)
 
 set_target_properties(TheDawningAssetInspector PROPERTIES
     VS_GLOBAL_VcpkgApplocalDeps false
@@ -300,6 +313,10 @@ set_target_properties(TheDawningAssetCompiler PROPERTIES
 )
 
 set_target_properties(TheDawningAssemblyInspector PROPERTIES
+    VS_GLOBAL_VcpkgApplocalDeps false
+)
+
+set_target_properties(TheDawningCollisionInspector PROPERTIES
     VS_GLOBAL_VcpkgApplocalDeps false
 )
 
@@ -422,6 +439,12 @@ if(MSVC)
         /WX
         /permissive-
     )
+
+    target_compile_options(TheDawningCollisionInspector PRIVATE
+        /W4
+        /WX
+        /permissive-
+    )
 endif()
 
 # =============================================================================
@@ -491,6 +514,10 @@ add_executable(TheDawningTests
     # reconstruction. GPU-free: it owns no ECS entities or render resources.
     src/scene/assembly_interior_runtime.cpp
     src/scene/assembly_interior_runtime.h
+    # Assembly-local static collision publication and deterministic capsule
+    # query/locomotion. GPU-free and intentionally separate from sim/collision.
+    src/scene/assembly_collision_runtime.cpp
+    src/scene/assembly_collision_runtime.h
     src/scene/assembly_runtime_resources.cpp
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h
@@ -658,6 +685,15 @@ if(Python3_Interpreter_FOUND)
                 --inspector $<TARGET_FILE:TheDawningAssemblyInspector>
     )
     set_tests_properties(cooked_assembly_contract PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    add_test(
+        NAME cooked_collision_contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cooked_collision.py
+                --inspector $<TARGET_FILE:TheDawningCollisionInspector>
+    )
+    set_tests_properties(cooked_collision_contract PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 else()
