@@ -138,6 +138,7 @@ set(SIM_SOURCES
     src/sim/nbody.cpp
     src/sim/relativity.cpp
     src/sim/atmosphere.cpp
+    src/sim/ftl.cpp
 )
 
 set(SIM_HEADERS
@@ -150,6 +151,7 @@ set(SIM_HEADERS
     src/sim/nbody.h
     src/sim/relativity.h
     src/sim/atmosphere.h
+    src/sim/ftl.h
 )
 
 set(SCENE_SOURCES
@@ -188,6 +190,7 @@ set(TEST_SOURCES
     tests/test_nbody.cpp
     tests/test_relativity.cpp
     tests/test_atmosphere.cpp
+    tests/test_ftl.cpp
 )
 
 set(TEST_HEADERS
@@ -432,6 +435,13 @@ add_executable(TheDawningTests
     # in a D3D12 or render header.
     src/sim/atmosphere.cpp
     src/sim/atmosphere.h
+    # SIM STAGE 4 FTL / warp / wormhole. GPU-free on the same sanctioned footing:
+    # ftl.h includes only reference_frame.h + core/types.h, so tests/test_ftl.cpp
+    # drives the SHIPPED atomic teleport (retained-state set), the double velocity
+    # rotation and the warp moving-origin rather than a copy. Do NOT add anything
+    # here that pulls in a D3D12 or render header.
+    src/sim/ftl.cpp
+    src/sim/ftl.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )
