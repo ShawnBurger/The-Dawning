@@ -1416,7 +1416,7 @@ are now integrated as well. The current order is:
 
 ### WS-020: Whole-repository runtime wiring and snapshot bridge
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: make the WS-019 scheduler the production fixed-step callsite, supply
   the missing ECS-to-save snapshot transaction, and correct concrete integration
   defects found by a source-level audit of every runtime subsystem
@@ -1425,7 +1425,8 @@ are now integrated as well. The current order is:
 - Branch: `codex/repository-runtime-audit`
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-repository-runtime-audit`
-- Base commit: `9f66d4d`
+- Base commit: `481b788`
+- Feature commit: `08fa46e`
 - Owned paths: additive `src/sim/snapshot_system.{h,cpp}` and tests; current-main
   `src/scene/scene.{h,cpp}` and `src/app.{h,cpp}` scheduler/save host wiring;
   exact resource/lifecycle/build/tool corrections proved by this audit; CMake,
@@ -1450,8 +1451,21 @@ are now integrated as well. The current order is:
 - Exclusions: no speculative networking, AI, combat, terrain, economy, or content
   implementation; no destructive cleanup of any Claude worktree; no asset or
   shader visual redesign without a reproduced runtime defect
-- Next action: create the isolated worktree, audit host/timer/save ownership, and
-  implement the smallest end-to-end runtime and snapshot transaction
+- Completion: production `App -> Scene -> StepSimulation` scheduling and the
+  topology-preserving ECS snapshot transaction are wired. Timer, frame graph,
+  CRC, collision binding, resource-pool, model-load rollback, DXC deployment,
+  CI, smoke, and status-document defects found by the repository audit are
+  corrected. Multi-entity FTL/atmosphere phases roll back on late rejection,
+  and collision body-ID remaps repair persistent clock-primary bindings.
+- Validation: Debug and Release build all four targets; each CPU suite passes
+  362 cases and 17,033 checks. Debug/Release raster, stable DXR, and full DXR
+  smoke pass with 1920x1080 captures at 99.9-100% nonblack and all structured
+  scheduler, snapshot, descriptor, shadow, IBL, and draw-record probes green.
+- Review: Claude's read-only background review was requested, but the CLI
+  session limit prevented it from starting. Per the agreed fallback, this is
+  recorded as deferred manual review rather than blocking the validated work.
+- Next action: select the next product workstream from the follow-on section in
+  `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`.
 
 ## 20. Helper Commands
 
