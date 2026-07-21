@@ -170,10 +170,11 @@ emits:
 
 ```text
 [SMOKE] pilot_possession_ready=ok context=ship seat=occupied spawn=pilot_exit_spawn
-[SMOKE] pilot_possession=ok exit=on_foot reentry=ship seat=occupied root=composed
+[SMOKE] pilot_possession=ok exit=on_foot step=advanced reentry=ship seat=occupied root=composed
 ```
 
-The harness asserts both markers and the individual transition/root fields.
+The harness asserts both markers and the individual transition, fixed-step, and
+root fields.
 
 ## Acceptance Matrix
 

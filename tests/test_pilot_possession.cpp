@@ -144,6 +144,13 @@ TEST_CASE(PilotPossession_ComposesSocketFramesThroughModuleTransform)
     CheckVec3d(result.binding.seat.position, { 12.0, 21.2, 30.0 });
     CheckVec3f(result.binding.spawn.forward, { 1.0f, 0.0f, 0.0f });
     CheckVec3f(result.binding.spawn.up, { 0.0f, 1.0f, 0.0f });
+
+    fixture.assembly.modules[0].transform.rotationEulerDegrees[1] =
+        360000000090.0;
+    const auto wrapped = gameplay::ResolvePilotSeatBinding(fixture.assembly);
+    CHECK(wrapped.Succeeded());
+    CheckVec3d(wrapped.binding.seat.position, { 12.0, 21.2, 30.0 });
+    CheckVec3f(wrapped.binding.spawn.forward, { 1.0f, 0.0f, 0.0f });
 }
 
 TEST_CASE(PilotPossession_ExitAndEntryStageCompleteAtomicCandidates)

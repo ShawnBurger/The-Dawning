@@ -203,7 +203,6 @@ bool BuildModuleTransform(
     const asset::AssemblyTransform& source,
     ecs::Transform& transform)
 {
-    core::Vec3f eulerDegrees;
     core::Vec3f scale;
     const core::Vec3d position{
         source.positionMeters[0],
@@ -211,19 +210,24 @@ bool BuildModuleTransform(
         source.positionMeters[2]
     };
     if (!BoundedLocal(position) ||
-        !ToFloat3(source.rotationEulerDegrees, eulerDegrees) ||
+        !Finite(source.rotationEulerDegrees[0]) ||
+        !Finite(source.rotationEulerDegrees[1]) ||
+        !Finite(source.rotationEulerDegrees[2]) ||
         !ToFloat3(source.scale, scale) || scale.x <= 0.0f ||
         scale.y <= 0.0f || scale.z <= 0.0f)
     {
         return false;
     }
     transform.position = position;
-    const float pitch = std::remainder(eulerDegrees.x, 360.0f) *
-        core::DEG_TO_RAD;
-    const float yaw = std::remainder(eulerDegrees.y, 360.0f) *
-        core::DEG_TO_RAD;
-    const float roll = std::remainder(eulerDegrees.z, 360.0f) *
-        core::DEG_TO_RAD;
+    const float pitch = static_cast<float>(
+        std::remainder(source.rotationEulerDegrees[0], 360.0) *
+        core::DEG_TO_RAD);
+    const float yaw = static_cast<float>(
+        std::remainder(source.rotationEulerDegrees[1], 360.0) *
+        core::DEG_TO_RAD);
+    const float roll = static_cast<float>(
+        std::remainder(source.rotationEulerDegrees[2], 360.0) *
+        core::DEG_TO_RAD);
     transform.rotation = core::Quatf::FromEuler(pitch, yaw, roll).Normalized();
     transform.scale = scale;
     return Finite(transform.position) && Finite(transform.rotation);

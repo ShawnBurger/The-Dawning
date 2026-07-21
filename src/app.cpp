@@ -879,6 +879,19 @@ bool App::ValidateSmokePossessionRoundTrip()
         return false;
     }
 
+    const core::Vec3d localBeforeStep =
+        m_playerPossession.onFoot.capsule.center;
+    m_onFootCommand = {};
+    m_onFootCommand.moveForward = 1.0;
+    if (!UpdateOnFootSimulation(kSmokeFixedDeltaSeconds) ||
+        m_playerPossession.onFoot.capsule.center.z <=
+            localBeforeStep.z + 1.0e-8)
+    {
+        core::Log::Error("Smoke on-foot possession did not advance a fixed step");
+        return false;
+    }
+    m_onFootCommand = {};
+
     ecs::Transform root;
     const gameplay::OnFootCameraResult camera = BuildPlayerShipRoot(root)
         ? gameplay::BuildOnFootCameraPose(
@@ -907,7 +920,7 @@ bool App::ValidateSmokePossessionRoundTrip()
         return false;
     }
     core::Log::Info(
-        "[SMOKE] pilot_possession=ok exit=on_foot reentry=ship seat=occupied root=composed");
+        "[SMOKE] pilot_possession=ok exit=on_foot step=advanced reentry=ship seat=occupied root=composed");
     return true;
 }
 
@@ -1535,12 +1548,6 @@ void App::UpdateWindowTitle(const core::TimeStep& timeStep)
 
 void App::UpdatePlayerInput()
 {
-    auto& registry = m_scene.GetRegistry();
-    auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
-    auto* thrusters = registry.TryGet<ecs::ThrusterSet>(m_playerShip);
-    if (!control || !thrusters)
-        return;
-
     const auto& input = core::input::GetState();
     const gameplay::LocalMovementInput movement =
         gameplay::ResolveMovementBindings({
@@ -1584,6 +1591,19 @@ void App::UpdatePlayerInput()
     if (!gameplay::OwnsShipInput(m_playerPossession))
     {
         ClearPlayerShipInput();
+        m_pendingPointerDeltaX = 0.0f;
+        m_pendingPointerDeltaY = 0.0f;
+        return;
+    }
+
+    auto& registry = m_scene.GetRegistry();
+    auto* control = registry.TryGet<ecs::FlightControl>(m_playerShip);
+    auto* thrusters = registry.TryGet<ecs::ThrusterSet>(m_playerShip);
+    if (!control || !thrusters)
+    {
+        ClearPlayerShipInput();
+        m_pendingPointerDeltaX = 0.0f;
+        m_pendingPointerDeltaY = 0.0f;
         return;
     }
 
@@ -1724,6 +1744,9 @@ gameplay::PilotPossessionStatus App::TryExitPilotSeat()
 {
     if (!m_possessionReady)
         return gameplay::PilotPossessionStatus::NotInitialized;
+    ecs::Transform root;
+    if (!BuildPlayerShipRoot(root))
+        return gameplay::PilotPossessionStatus::InternalError;
     const auto collision = m_runtimeAssembly.InteractiveCollisionSnapshot();
     if (!collision)
         return gameplay::PilotPossessionStatus::CollisionFailure;
@@ -1763,6 +1786,9 @@ gameplay::PilotPossessionStatus App::TryEnterPilotSeat()
 {
     if (!m_possessionReady)
         return gameplay::PilotPossessionStatus::NotInitialized;
+    ecs::Transform root;
+    if (!BuildPlayerShipRoot(root))
+        return gameplay::PilotPossessionStatus::InternalError;
     const auto collision = m_runtimeAssembly.InteractiveCollisionSnapshot();
     if (!collision)
         return gameplay::PilotPossessionStatus::CollisionFailure;
