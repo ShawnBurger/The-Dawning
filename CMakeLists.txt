@@ -138,6 +138,7 @@ set(SIM_SOURCES
     src/sim/nbody.cpp
     src/sim/relativity.cpp
     src/sim/atmosphere.cpp
+    src/sim/atmosphere_system.cpp
     src/sim/ftl.cpp
     src/sim/ftl_system.cpp
     src/sim/collision.cpp
@@ -153,6 +154,7 @@ set(SIM_HEADERS
     src/sim/nbody.h
     src/sim/relativity.h
     src/sim/atmosphere.h
+    src/sim/atmosphere_system.h
     src/sim/ftl.h
     src/sim/ftl_system.h
     src/sim/collision.h
@@ -194,6 +196,7 @@ set(TEST_SOURCES
     tests/test_nbody.cpp
     tests/test_relativity.cpp
     tests/test_atmosphere.cpp
+    tests/test_atmosphere_system.cpp
     tests/test_ftl.cpp
     tests/test_ftl_system.cpp
     tests/test_collision.cpp
@@ -441,6 +444,10 @@ add_executable(TheDawningTests
     # in a D3D12 or render header.
     src/sim/atmosphere.cpp
     src/sim/atmosphere.h
+    # Frame-aware ECS adapter for atmospheric drag/lift. GPU-free and linked
+    # here so its transactional registry updates exercise the shipped code.
+    src/sim/atmosphere_system.cpp
+    src/sim/atmosphere_system.h
     # SIM STAGE 4 FTL / warp / wormhole. GPU-free on the same sanctioned footing:
     # ftl.h includes only reference_frame.h + core/types.h, so tests/test_ftl.cpp
     # drives the SHIPPED atomic teleport (retained-state set), the double velocity
