@@ -1190,7 +1190,7 @@ registered or edited.
 
 ### WS-016: ECS reference-frame and atomic FTL adapter
 
-- Status: ACTIVE
+- Status: COMPLETE
 - Outcome: adapt a live ECS flight body into the reviewed `TeleportState` kernel
   and commit the complete accepted transition back atomically in a destination
   reference frame
@@ -1198,7 +1198,7 @@ registered or edited.
 - Reviewer: Claude (optional/deferred if the bounded CLI review is unavailable)
 - Branch: `codex/ftl-ecs-adapter`
 - Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-ftl-ecs-adapter`
-- Base commit: registration commit created from `515b95d`
+- Base commit: `9bb4f29`
 - Owned paths: append-only frame binding in `src/ecs/components.h`, new
   `src/sim/ftl_system.{h,cpp}`, `tests/test_ftl_system.cpp`, their exact CMake
   entries, and the FTL adapter contract in research documentation
@@ -1220,13 +1220,27 @@ registered or edited.
 - Negative controls: direct local-position copying must fail the distant-frame
   known answer; partial component writes before `TryApplyTeleport` rejection must
   fail transactional snapshots
-- Latest commit: registration pending
+- Latest commits: feature `912891f`; integrated `main` `54b8c4d`
+- Review note: the bounded Claude CLI review was unavailable in this session
+  (the repository wrapper misparsed `-p`, and the direct read-only invocation
+  produced no result before timeout). Per Shawn's explicit fallback, reciprocal
+  review is deferred manual debt and did not block the already-established
+  local review and validation gates.
+- Acceptance result: `SpatialFrame` adds an opt-in frame-local convention without
+  changing legacy world-space entities. `TryTeleportEntity` validates required
+  components and frame bounds, resolves source pose and velocity through
+  `FrameGraph`, rotates optional relativistic momentum, stages the complete
+  destination-frame state, promotes an optional gravitational body off rails,
+  and commits only after every conversion succeeds. Rejections are registry
+  no-ops and publish no host obligations. Debug and Release each pass 309 cases
+  and 16,294 checks. Raster, stable-DXR, and full-DXR smoke pass in both
+  configurations with nonblank 1920x1080 captures.
 - Residual risk: this lane deliberately returns host reset obligations rather than
   touching renderer/timer state. A later app lane must invoke it inside one fixed
   step, reset path accumulation without resetting the RNG seed, drain queued fixed
   steps, and provide authored mouth/frame data and player interaction.
-- Next action: publish registration, create the isolated worktree, establish the
-  watched adapter tests, implement, and run the combined integration matrix
+- Next action: register the production fixed-step FTL callsite lane, keeping
+  authored traversal/input separate from the already-tested transition adapter
 
 ## 20. Helper Commands
 
