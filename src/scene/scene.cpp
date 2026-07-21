@@ -4,8 +4,8 @@
 
 #include "scene.h"
 #include "../ecs/systems.h"
-#include "../sim/physics_system.h"
 #include "../core/log.h"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -42,6 +42,14 @@ void HashSceneValue(uint64_t& hash, const T& value)
 void Scene::Init()
 {
     m_resources.Init();
+    m_frames.RebuildFromFrames({});
+    m_activeFrame = m_frames.CreateFrame(sim::kInvalidFrame, sim::WorldPos{});
+    m_masterFrame = m_activeFrame;
+    m_coordinateTime = 0.0;
+    m_simTick = 0;
+    m_ftlCommands.clear();
+    m_atmosphereBindings.clear();
+    m_clockGravityBindings.clear();
     core::Log::Info("Scene initialized");
 }
 
@@ -102,18 +110,131 @@ ecs::Entity Scene::CreateSpinner(const char* name,
 
 void Scene::DestroyEntity(ecs::Entity entity)
 {
+    ClearAtmosphereBinding(entity);
+    ClearClockGravityBinding(entity);
+    std::erase_if(m_ftlCommands,
+                  [&](const sim::FtlCommand& command)
+                  { return command.entity == entity; });
     m_registry.Destroy(entity);
 }
 
 // =============================================================================
 // Phase 1: Update Systems
 // =============================================================================
-void Scene::UpdateSystems(double dt)
+sim::SimulationStepResult Scene::UpdateSystems(double dt)
 {
+    sim::SimulationStepConfig config;
+    config.activeFrame = m_activeFrame;
+    config.masterFrame = m_masterFrame;
+    config.coordinateTime = m_coordinateTime;
+    config.flightAssist = m_flightAssist;
+    config.closeEncounters = m_closeEncounters;
+    config.ftlCommands = m_ftlCommands;
+    config.atmosphereBindings = m_atmosphereBindings;
+    config.clockGravityBindings = m_clockGravityBindings;
+
+    sim::SimulationStepResult result =
+        sim::StepSimulation(m_registry, m_frames, dt, config);
+    m_ftlCommands.clear();
+    if (!result.accepted)
+        return result;
+
+    // Legacy Velocity/RotationSpeed components remain useful for simple render
+    // props. Their systems explicitly skip RigidBody-owned transforms.
     SystemVelocity(dt);
     SystemRotation(dt);
-    SystemFlightPhysics(dt);
-    // Future systems: collision, gravity, AI, etc.
+    m_coordinateTime += dt;
+    ++m_simTick;
+
+    // Collisions can destroy entities below Scene::DestroyEntity. Keep the
+    // host-owned persistent bindings synchronized with the resulting registry.
+    std::erase_if(m_atmosphereBindings,
+                  [&](const sim::AtmosphereBinding& binding)
+                  { return !m_registry.IsAlive(binding.entity); });
+    std::erase_if(m_clockGravityBindings,
+                  [&](const sim::ClockGravityBinding& binding)
+                  { return !m_registry.IsAlive(binding.entity); });
+    for (sim::ClockGravityBinding& binding : m_clockGravityBindings)
+    {
+        const auto remap = std::find_if(
+            result.bodyIdRemaps.begin(), result.bodyIdRemaps.end(),
+            [&](const auto& candidate)
+            { return candidate.first == binding.primaryBodyId; });
+        if (remap != result.bodyIdRemaps.end())
+            binding.primaryBodyId = remap->second;
+    }
+    return result;
+}
+
+void Scene::QueueFtlCommand(const sim::FtlCommand& command)
+{
+    m_ftlCommands.push_back(command);
+}
+
+void Scene::SetAtmosphereBinding(const sim::AtmosphereBinding& binding)
+{
+    const auto it = std::find_if(
+        m_atmosphereBindings.begin(), m_atmosphereBindings.end(),
+        [&](const sim::AtmosphereBinding& current)
+        { return current.entity == binding.entity; });
+    if (it == m_atmosphereBindings.end())
+        m_atmosphereBindings.push_back(binding);
+    else
+        *it = binding;
+}
+
+void Scene::ClearAtmosphereBinding(ecs::Entity entity)
+{
+    std::erase_if(m_atmosphereBindings,
+                  [&](const sim::AtmosphereBinding& binding)
+                  { return binding.entity == entity; });
+}
+
+void Scene::SetClockGravityBinding(const sim::ClockGravityBinding& binding)
+{
+    const auto it = std::find_if(
+        m_clockGravityBindings.begin(), m_clockGravityBindings.end(),
+        [&](const sim::ClockGravityBinding& current)
+        { return current.entity == binding.entity; });
+    if (it == m_clockGravityBindings.end())
+        m_clockGravityBindings.push_back(binding);
+    else
+        *it = binding;
+}
+
+void Scene::ClearClockGravityBinding(ecs::Entity entity)
+{
+    std::erase_if(m_clockGravityBindings,
+                  [&](const sim::ClockGravityBinding& binding)
+                  { return binding.entity == entity; });
+}
+
+sim::SnapshotBuildResult Scene::BuildSimulationSnapshot(double fixedDt) const
+{
+    return sim::BuildSnapshot(m_registry, m_frames, m_coordinateTime, fixedDt,
+                              m_simTick, m_masterFrame);
+}
+
+sim::SnapshotApplyResult Scene::ApplySimulationSnapshot(
+    const sim::SimSnapshot& snapshot)
+{
+    sim::SnapshotApplyResult result =
+        sim::ApplySnapshot(m_registry, m_frames, snapshot);
+    if (!result.accepted)
+        return result;
+
+    m_coordinateTime = snapshot.coordinateTimeEpoch;
+    m_simTick = snapshot.simTick;
+    m_masterFrame = snapshot.masterFrame;
+    m_activeFrame = snapshot.masterFrame;
+    m_ftlCommands.clear();
+    InvalidatePathTraceHistory();
+    return result;
+}
+
+void Scene::InvalidatePathTraceHistory()
+{
+    m_pathTracer.InvalidateAccumulation();
 }
 
 // =============================================================================
@@ -130,21 +251,6 @@ void Scene::SystemVelocity(double dt)
 void Scene::SystemRotation(double dt)
 {
     ecs::systems::IntegrateRotations(m_registry, dt);
-}
-
-// =============================================================================
-// System: Flight physics — six-DOF rigid bodies (Transform + RigidBody)
-// =============================================================================
-// Runs the Stage-2 control->allocation/assist->wrench->integrate pipeline once
-// per fixed step. This is called from UpdateSystems, which app.cpp drains on the
-// RULE-6 fixed-timestep accumulator (`while (ConsumeFixedStep()) UpdateSystems(
-// GetFixedDt())`), so it advances by a constant dt independent of the render
-// frame. RigidBody owns its Transform even if a legacy Velocity or RotationSpeed
-// component remains during an ownership transition; those systems explicitly
-// skip rigid bodies so the pose is integrated exactly once.
-void Scene::SystemFlightPhysics(double dt)
-{
-    sim::StepFlightPhysics(m_registry, dt);
 }
 
 // =============================================================================

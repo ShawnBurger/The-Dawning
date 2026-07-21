@@ -10,6 +10,9 @@ Do not merge old snapshots directly into this source tree.
 - CMake project targeting C++20.
 - D3D12 raster renderer with ECS-driven scene rendering.
 - Optional DXR path tracing path when the GPU and runtime DLLs support it.
+- Deterministic 60 Hz simulation scheduler covering flight, passive orbits,
+  gravity, atmosphere, collisions, FTL transitions, and relativistic clocks.
+- Canonical simulation snapshots with validated, atomic ECS application.
 - Deterministic `.tdmodel` runtime loading with a real PBR corridor asset shipped
   through Git LFS; raw glTF/GLB remains an offline import/cooking format.
 - Layer 4 material work is partially landed: albedo/normal textures,
@@ -145,45 +148,29 @@ The thresholds are deliberately loose — they catch catastrophic failure, not
 appearance regressions, because pinning down appearance would flake on any
 legitimate lighting change. Pass `-NoCapture` to skip this section.
 
-**Captures are not byte-reproducible, and raster is far worse than RT.** The
-scene animates on wall-clock `dt` (`Scene::SystemRotation`), so the final
-captured frame lands at a rotation angle that depends on exact elapsed time.
-Measured on this machine, same build, two consecutive runs:
+**Captures are not guaranteed to be byte-reproducible.** Smoke simulation and
+legacy scene animation now advance on a fixed synthetic timestep, and the
+harness removes known stale test-scene textures before launch. That makes the
+scene inputs reproducible, but GPU scheduling, driver behavior, and stochastic
+path-tracing samples can still produce small per-pixel differences.
+
+Historical measurements from before fixed-step smoke animation showed:
 
 | mode | channels differing | max delta |
 |---|---|---|
 | raster | 0.55% | **109** |
 | rt-stable | 0.21% | **1** |
 
-Raster captures an instantaneous frame, so a fractional-degree rotation shifts
-high-contrast silhouettes by a whole pixel. Path tracing accumulates over many
-frames, which averages that away almost entirely.
-
 The practical consequences:
 
-- The aggregate thresholds above are unaffected — mean luminance and bucket
+- The aggregate thresholds above are intentionally loose: mean luminance and
   counts are stable to 0.1 across runs.
-- **A byte-level or reference-image comparison is not valid for the raster path
-  as things stand.** A max delta of 109 is the noise floor, not a regression.
-  Any such test needs the animation driven by a fixed synthetic timestep under
-  `--smoke` rather than wall clock, so the captured frame is reproducible.
-  That, plus pinning the texture set below, are the two prerequisites.
-
-**Capture statistics are also not comparable across checkouts.** They depend on which
-textures happen to be present in `build\<Config>\assets\textures\`, which is
-build output rather than tracked source. `assets/textures/` in the repository
-contains only a README, so a clean clone falls through to procedurally generated
-checker textures — but a checkout whose build directory has accumulated real
-PNG/DDS/KTX files will load those instead and render measurably differently. On
-this machine the same commit measures mean luminance 127.5 in a fresh worktree
-and 124.4 in a checkout carrying leftover PNGs.
-
-That is fine for the loose thresholds above, which only ask "did it draw
-something plausible". It is a hard blocker for the reference-image comparison
-that would otherwise be the natural next step: such a test needs the texture set
-pinned as tracked input first, otherwise it will flake on nothing but build-
-directory history. Treat "commit real texture assets, or make the procedural
-fallback deterministic and mandatory under `--smoke`" as its prerequisite.
+- Byte-level comparison remains unsuitable as a cross-machine gate without a
+  characterized per-adapter tolerance. The structured GPU probes are the
+  authoritative correctness checks; pixels are a catastrophic-output check.
+- The harness deletes the known test-scene texture names from the build output,
+  forcing deterministic procedural fallbacks. Other intentionally loaded assets
+  must be pinned before adding any future reference-image comparison.
 
 Use `-RasterOnly` for the raster path, `-FullQuality` for the higher
 path-tracing quality mode, and `-Config Release` to test a Release build.
@@ -191,13 +178,16 @@ path-tracing quality mode, and `-Config Release` to test a Release build.
 ## Path Tracing Runtime
 
 Raster mode builds and runs without extra DLLs. For DXR/path tracing shader
-compilation at runtime, copy these next to `TheDawningV3.exe`:
+compilation, CMake discovers the newest x64 Windows SDK runtime and copies these
+next to every built `TheDawningV3.exe` configuration:
 
 - `dxcompiler.dll`
 - `dxil.dll`
 
-They can come from the Microsoft DirectX Shader Compiler release or the
-Microsoft.Direct3D.DXC NuGet package.
+For a standalone DirectX Shader Compiler release or a
+Microsoft.Direct3D.DXC NuGet layout, configure with
+`-DDAWNING_DXC_RUNTIME_DIR=<directory-containing-both-dlls>`. CMake warns when
+no valid pair is available; raster remains usable but DXR is unavailable.
 
 ## Material System Status
 

@@ -62,6 +62,7 @@ private:
     void UpdatePlayerShipInput();
     void UpdatePlayerShipVisuals();
     void UpdateCamera(const core::TimeStep& timeStep);
+    bool AdvanceSimulation(double dt);
     bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
 
@@ -121,6 +122,7 @@ private:
     bool m_verifyRTIBLConsumeThisFrame = false;
     bool m_smokeRTIBLControlRequested  = false;
     bool m_smokeRTIBLConsumeRequested  = false;
+    bool m_smokeSnapshotVerified = false;
     uint32_t m_smokeResizeRequests = 0;
     scene::TextureHandle m_smokeDescriptorTexture;
     scene::MeshHandle m_smokeGrowthMesh;

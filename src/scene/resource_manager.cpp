@@ -53,6 +53,12 @@ void ResourceManager::Shutdown(render::D3D12Device& device, render::Renderer& re
 // =============================================================================
 MeshHandle ResourceManager::AddMesh(render::Mesh&& mesh, const char* name)
 {
+    if (!mesh.IsValid())
+    {
+        core::Log::Error("Refusing to register an invalid mesh");
+        return {};
+    }
+
     uint32_t index;
     uint32_t gen;
 
@@ -64,6 +70,11 @@ MeshHandle ResourceManager::AddMesh(render::Mesh&& mesh, const char* name)
     }
     else
     {
+        if (m_meshSlots.size() > MeshHandle::kIndexMask)
+        {
+            core::Log::Error("Mesh handle index space exhausted");
+            return {};
+        }
         index = static_cast<uint32_t>(m_meshSlots.size());
         m_meshSlots.emplace_back();
         gen = 0;
@@ -145,6 +156,11 @@ MaterialHandle ResourceManager::AddMaterial(const MaterialData& material)
     }
     else
     {
+        if (m_materialSlots.size() > MaterialHandle::kIndexMask)
+        {
+            core::Log::Error("Material handle index space exhausted");
+            return {};
+        }
         index = static_cast<uint32_t>(m_materialSlots.size());
         m_materialSlots.emplace_back();
         gen = 0;
@@ -173,22 +189,50 @@ bool ResourceManager::IsValidMaterial(MaterialHandle handle) const
     return m_materialSlots[idx].alive && m_materialSlots[idx].generation == handle.Generation();
 }
 
+void ResourceManager::RemoveMaterial(MaterialHandle handle)
+{
+    if (!IsValidMaterial(handle)) return;
+    const uint32_t idx = handle.Index();
+    MaterialSlot& slot = m_materialSlots[idx];
+    const bool canRecycle =
+        MaterialHandle::CanRecycleGeneration(slot.generation);
+    slot.alive = false;
+    slot.generation = MaterialHandle::NextGeneration(slot.generation);
+    slot.data = {};
+    if (canRecycle)
+        m_materialFreeList.push_back(idx);
+    --m_materialAliveCount;
+}
+
 // =============================================================================
 // Texture Pool
 // =============================================================================
 TextureHandle ResourceManager::AddTexture(render::Texture&& texture, const char* name)
 {
+    if (!texture.IsValid())
+    {
+        core::Log::Error("Refusing to register an invalid texture");
+        return {};
+    }
+
     uint32_t index;
     uint32_t gen;
+    bool reused = false;
 
     if (!m_textureFreeList.empty())
     {
         index = m_textureFreeList.back();
         m_textureFreeList.pop_back();
         gen = m_textureSlots[index].generation;
+        reused = true;
     }
     else
     {
+        if (m_textureSlots.size() > TextureHandle::kIndexMask)
+        {
+            core::Log::Error("Texture handle index space exhausted");
+            return {};
+        }
         index = static_cast<uint32_t>(m_textureSlots.size());
         m_textureSlots.emplace_back();
         gen = 0;
@@ -198,6 +242,10 @@ TextureHandle ResourceManager::AddTexture(render::Texture&& texture, const char*
     if (!slot.texture.Adopt(std::move(texture)))
     {
         core::Log::Errorf("Texture slot %u still owns an unretired resource", index);
+        if (reused)
+            m_textureFreeList.push_back(index);
+        else
+            m_textureSlots.pop_back();
         return TextureHandle{};
     }
     slot.generation = gen;

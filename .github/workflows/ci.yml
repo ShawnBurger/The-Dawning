@@ -12,9 +12,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  windows-debug:
-    name: Windows / MSVC / Debug
+  windows-build:
+    name: Windows / MSVC / ${{ matrix.config }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
 
     steps:
       - name: Checkout
@@ -52,8 +56,8 @@ jobs:
         shell: pwsh
 
       # Builds both TheDawningV3.exe and TheDawningTests.exe.
-      - name: Build (Debug)
-        run: cmake --build build --config Debug
+      - name: Build (${{ matrix.config }})
+        run: cmake --build build --config ${{ matrix.config }}
 
       - name: Unit tests
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure

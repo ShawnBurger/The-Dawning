@@ -226,7 +226,8 @@ class FrameGraph
 {
 public:
     // Create a frame with the given parent (kInvalidFrame for the root) and
-    // global-space origin/velocity. Returns its FrameId.
+    // global-space origin/velocity. Returns kInvalidFrame for an invalid parent,
+    // non-finite state, address overflow, or exhausted FrameId space.
     FrameId CreateFrame(FrameId parent, const WorldPos& originInGlobal,
                         const Vec3d& velocityInGlobal = Vec3d{});
 

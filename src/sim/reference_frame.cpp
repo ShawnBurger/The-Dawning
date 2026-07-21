@@ -5,7 +5,7 @@
 #include "reference_frame.h"
 
 #include <cmath>
-#include <cstdlib>
+#include <limits>
 
 namespace sim
 {
@@ -34,11 +34,30 @@ void CanonicalizeAxis(int64_t& sector, double& off)
     if (!(q >= -kMaxSafeCarry && q <= kMaxSafeCarry))
         return;
     const int64_t carry = static_cast<int64_t>(q);
-    sector += carry;
-    off -= static_cast<double>(carry) * kSectorSize;
+    if ((carry > 0 && sector > (std::numeric_limits<int64_t>::max)() - carry) ||
+        (carry < 0 && sector < (std::numeric_limits<int64_t>::min)() - carry))
+        return;
 
-    if (off < 0.0)              { off += kSectorSize; sector -= 1; }
-    else if (off >= kSectorSize){ off -= kSectorSize; sector += 1; }
+    int64_t nextSector = sector + carry;
+    double nextOffset = off - static_cast<double>(carry) * kSectorSize;
+
+    if (nextOffset < 0.0)
+    {
+        if (nextSector == (std::numeric_limits<int64_t>::min)())
+            return;
+        nextOffset += kSectorSize;
+        --nextSector;
+    }
+    else if (nextOffset >= kSectorSize)
+    {
+        if (nextSector == (std::numeric_limits<int64_t>::max)())
+            return;
+        nextOffset -= kSectorSize;
+        ++nextSector;
+    }
+
+    sector = nextSector;
+    off = nextOffset;
 }
 
 bool AxisCanonical(double off)
@@ -59,9 +78,11 @@ WorldPos WorldPos::FromOffset(const Vec3d& offsetFromOrigin)
 
 bool ValidSector(const WorldPos& p)
 {
-    return std::llabs(p.sx) <= kMaxSectorCoord
-        && std::llabs(p.sy) <= kMaxSectorCoord
-        && std::llabs(p.sz) <= kMaxSectorCoord;
+    const auto validAxis = [](int64_t value)
+    {
+        return value >= -kMaxSectorCoord && value <= kMaxSectorCoord;
+    };
+    return validAxis(p.sx) && validAxis(p.sy) && validAxis(p.sz);
 }
 
 WorldPos Canonicalize(const WorldPos& p)
@@ -93,6 +114,11 @@ Vec3d Separation(const WorldPos& from, const WorldPos& to)
     // are within kMaxSectorCoord (static_assert in the header guarantees the
     // difference fits). For nearby bodies these deltas are zero, so the large
     // term below is zero and only the small, precise offset difference survives.
+    if (!ValidSector(from) || !ValidSector(to))
+    {
+        const double nan = (std::numeric_limits<double>::quiet_NaN)();
+        return { nan, nan, nan };
+    }
     const int64_t dsx = to.sx - from.sx;
     const int64_t dsy = to.sy - from.sy;
     const int64_t dsz = to.sz - from.sz;
@@ -121,9 +147,20 @@ Vec3f ToCameraRelative(const WorldPos& body, const WorldPos& camera)
 FrameId FrameGraph::CreateFrame(FrameId parent, const WorldPos& originInGlobal,
                                 const Vec3d& velocityInGlobal)
 {
+    if ((parent != kInvalidFrame && parent >= m_frames.size()) ||
+        m_frames.size() >= static_cast<size_t>(kInvalidFrame))
+        return kInvalidFrame;
+
+    const WorldPos origin = Canonicalize(originInGlobal);
+    if (!ValidSector(origin) || !IsCanonical(origin) ||
+        !std::isfinite(velocityInGlobal.x) ||
+        !std::isfinite(velocityInGlobal.y) ||
+        !std::isfinite(velocityInGlobal.z))
+        return kInvalidFrame;
+
     Frame f;
     f.parent   = parent;
-    f.origin   = Canonicalize(originInGlobal);
+    f.origin   = origin;
     f.velocity = velocityInGlobal;
     m_frames.push_back(f);
     return static_cast<FrameId>(m_frames.size() - 1);

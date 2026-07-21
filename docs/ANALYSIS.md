@@ -1,5 +1,10 @@
 # The Dawning V3 — Engine Analysis Report
 
+> **Historical snapshot:** This report describes an early V3 commit and is kept
+> for provenance. Its source inventory, test/CI status, simulation status, and
+> several defect findings are no longer current. Use the root `README.md` and
+> `docs/research/RUNTIME_INTEGRATION_AUDIT_2026-07-21.md` for implemented status.
+
 ---
 
 ## 1. What this is

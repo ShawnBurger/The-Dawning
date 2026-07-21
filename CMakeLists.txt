@@ -146,6 +146,7 @@ set(SIM_SOURCES
     src/sim/sim_serialize.cpp
     src/sim/orbit_system.cpp
     src/sim/simulation_system.cpp
+    src/sim/snapshot_system.cpp
 )
 
 set(SIM_HEADERS
@@ -166,6 +167,7 @@ set(SIM_HEADERS
     src/sim/sim_serialize.h
     src/sim/orbit_system.h
     src/sim/simulation_system.h
+    src/sim/snapshot_system.h
 )
 
 set(SCENE_SOURCES
@@ -212,6 +214,8 @@ set(TEST_SOURCES
     tests/test_sim_serialize.cpp
     tests/test_orbit_system.cpp
     tests/test_simulation_system.cpp
+    tests/test_snapshot_system.cpp
+    tests/test_timer.cpp
 )
 
 set(TEST_HEADERS
@@ -410,6 +414,8 @@ add_executable(TheDawningTests
     ${TEST_SOURCES}
     ${TEST_HEADERS}
     src/core/types.h
+    src/core/timer.h
+    src/core/timer.cpp
     src/core/shadow_cascades.h
     src/core/shadow_cascades.cpp
     # CPU evaluation of the procedural sky. GPU-free for the same reason
@@ -532,6 +538,9 @@ add_executable(TheDawningTests
     # Complete fixed-step simulation phase order over the GPU-free adapters.
     src/sim/simulation_system.cpp
     src/sim/simulation_system.h
+    # Topology-preserving live ECS bridge for the versioned simulation codec.
+    src/sim/snapshot_system.cpp
+    src/sim/snapshot_system.h
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
 )

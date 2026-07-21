@@ -79,6 +79,7 @@ public:
     MaterialHandle AddMaterial(const MaterialData& material);
     const MaterialData* GetMaterial(MaterialHandle handle) const;
     bool IsValidMaterial(MaterialHandle handle) const;
+    void RemoveMaterial(MaterialHandle handle);
 
     // --- Texture management ---
     TextureHandle AddTexture(render::Texture&& texture, const char* name = nullptr);

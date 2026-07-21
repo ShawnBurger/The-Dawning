@@ -4,27 +4,30 @@
 
 This audit traces the executable runtime from the application fixed-step loop
 through `scene::Scene`, the ECS, simulation kernels, save codec, renderer, asset
-tools, build graph, CI, and smoke harness. It records observed source state at
-the WS-019 base (`220417e`) plus the corrections made in this lane.
+tools, build graph, CI, and smoke harness. WS-019 established the simulation
+orchestrator; WS-020 audited and connected it to the production host, supplied
+the missing live snapshot transaction, and corrected boundary defects exposed
+by that integration.
 
-The audit does not edit Claude's active, uncommitted `app.cpp`, `scene.cpp`,
-renderer, shader, or asset-import worktrees. Those shared callsites must be
-reconciled before the host can adopt the new scheduler without overwriting live
-work.
+Two stale Claude worktrees remain untouched as recovery sources. Their old glTF
+and per-object-buffer experiments are based far behind current `main` and have
+already been superseded by merged implementations. They are not active locks on
+the current scene, renderer, or asset code.
 
 ## Executive Result
 
-The repository has strong GPU-free kernel coverage and an unusually thorough
-GPU smoke harness. The main missing connection was not another physics law; it
-was a deterministic ECS adapter and phase-order boundary. WS-019 supplies that
-boundary as `sim::StepSimulation` and supplies the passive-orbit and proper-time
-adapters it composes.
+The runtime now has one authoritative fixed-step path. `App` calls
+`Scene::UpdateSystems`, which calls `sim::StepSimulation` exactly once and then
+advances only legacy non-rigid render props. The scene owns reference frames,
+coordinate time, simulation tick, one-shot FTL commands, persistent atmosphere
+bindings, and persistent clock-primary bindings. FTL obligations reach the
+timer and path tracer explicitly.
 
-The production host still calls `sim::StepFlightPhysics` directly from
-`Scene::UpdateSystems`. Consequently, gravity, passive N-body, rails,
-atmosphere, FTL transitions, and proper clocks are compiled into the executable
-but are not yet driven by the demo scene. This is an explicit follow-on host
-integration item, not an implicit claim of completion.
+The playable ship is a complete force-integrated simulation body in the root
+frame, so the production demo and smoke harness execute the same scheduler and
+snapshot topology as future authored worlds. A live smoke witness builds,
+validates, applies, and rebuilds a simulation snapshot without disturbing render
+or gameplay components.
 
 ## Production Call Graph
 
@@ -32,22 +35,18 @@ Current host path:
 
 ```text
 App fixed-step accumulator
-  -> Scene::UpdateSystems(fixedDt)
-     -> IntegrateVelocities
-     -> IntegrateRotations
-     -> StepFlightPhysics
-```
-
-WS-019 simulation path:
-
-```text
-StepSimulation(fixedDt, config)
-  -> FTL commands
-  -> atmospheric interactions and ownership promotion
-  -> passive N-body/collision and Kepler rails
-  -> force-integrated gravity accumulation
-  -> flight control, thrust, rigid-body and relativistic momentum integration
-  -> relativistic proper-time clocks
+  -> App::AdvanceSimulation(fixedDt)
+     -> Scene::UpdateSystems(fixedDt)
+        -> StepSimulation(fixedDt, config)
+           -> FTL commands
+           -> atmospheric interactions and ownership promotion
+           -> passive N-body/collision and Kepler rails
+           -> force-integrated gravity accumulation
+           -> flight control, thrust, rigid-body and relativistic momentum
+           -> relativistic proper-time clocks
+        -> legacy non-rigid Velocity/RotationSpeed props
+     -> render-history invalidation when requested
+     -> fixed-accumulator drain when requested
 ```
 
 The order is load-bearing. Atmosphere and FTL can promote a body to
@@ -59,17 +58,17 @@ the final velocity for the coordinate-time step.
 
 | System | Kernel | ECS adapter | Scheduler | Production host | Automated witness |
 | --- | --- | --- | --- | --- | --- |
-| Fixed-step timing | Existing | Existing | Input contract | Connected | Smoke `timeline=fixed` |
-| Flight control/thrusters | Existing | `StepFlightPhysics` | Connected | Connected directly | CPU suite + flight smoke |
-| Force gravity | Existing | `AccumulateForceIntegratedGravity` | Connected | Not yet scheduled | Analytic and cross-frame CPU tests |
-| Passive N-body | Existing | `StepPassiveOrbits` | Connected | Not yet scheduled | Cross-frame and deterministic CPU tests |
-| Kepler rails | Existing | `StepPassiveOrbits` | Connected | Not yet scheduled | Primary-resolution CPU test |
-| Collision policy | Existing | Reconciled by `StepPassiveOrbits` | Connected | Not yet scheduled | Merge/destruction CPU test |
-| Atmosphere | Existing | Existing, corrected | Connected | No authored bindings | Frame/drag/momentum CPU tests |
-| FTL | Existing | Existing | Connected | No command queue | Atomic transition CPU tests |
-| Relativistic momentum | Existing | Corrected in flight adapter | Connected | Available through flight | Exact-force CPU test |
-| Proper time | Existing | `StepRelativisticClocks` | Connected | No clock bindings | SR/GR and atomic CPU tests |
-| Save codec | Existing | Not implemented | N/A | Not connected | Codec CPU tests only |
+| Fixed-step timing | Existing | Existing | Input contract | Connected | Smoke `timeline=fixed` + timer tests |
+| Flight control/thrusters | Existing | `StepFlightPhysics` | Connected | Scheduler | CPU suite + flight smoke |
+| Force gravity | Existing | `AccumulateForceIntegratedGravity` | Connected | Scheduler | Analytic and cross-frame CPU tests |
+| Passive N-body | Existing | `StepPassiveOrbits` | Connected | Scheduler | Cross-frame and deterministic CPU tests |
+| Kepler rails | Existing | `StepPassiveOrbits` | Connected | Scheduler | Primary-resolution CPU test |
+| Collision policy | Existing | Reconciled by `StepPassiveOrbits` | Connected | Scheduler | Merge/destruction/binding-retirement tests |
+| Atmosphere | Existing | Existing, corrected | Connected | Persistent scene bindings | Frame/drag/momentum CPU tests |
+| FTL | Existing | Existing | Connected | One-shot scene queue | Atomic transition + host obligation tests |
+| Relativistic momentum | Existing | Corrected in flight adapter | Connected | Scheduler | Exact-force CPU test |
+| Proper time | Existing | `StepRelativisticClocks` | Connected | Persistent scene bindings | SR/GR and atomic CPU tests |
+| Save codec | Existing | `snapshot_system` | N/A | Scene build/apply API | Atomic CPU tests + live smoke round trip |
 | Raster rendering | Existing | Scene traversal | N/A | Connected | Raster smoke |
 | DXR rendering | Existing | Scene/path tracer | N/A | Connected | Stable/full smoke |
 | Asset cooking/loading | Existing | Model loader | N/A | Connected | CPU tests + smoke markers |
@@ -150,10 +149,74 @@ the newest x64 Windows SDK pair. A post-build step copies both DLLs beside every
 `TheDawningV3` configuration. The failure was reproduced before the fix and
 Release stable/full DXR both passed afterward.
 
+### 8. The production host bypassed the scheduler
+
+`Scene::UpdateSystems` called flight physics directly, leaving gravity, passive
+orbits, collisions, atmosphere, FTL, and clocks disconnected from the app.
+
+Correction: `Scene` now owns the complete scheduler state and returns the stage
+result to `App`. The app fails closed on a rejected step and consumes explicit
+FTL history-reset and accumulator-drain obligations. Smoke requires the
+`simulation_scheduler=ok` marker.
+
+### 9. The save codec had no live ECS transaction
+
+The codec could round-trip hand-authored records, but no runtime path mapped
+stable body IDs and sidecars to live entities. A successful codec test therefore
+did not prove the game could save or restore simulation.
+
+Correction: `snapshot_system` builds canonical snapshots only at fixed-step
+boundaries and applies them onto an identical stable-ID topology. Every write is
+staged before commit; render, material, name, input, and thruster components are
+preserved. Orphan orbit/relativistic sidecars, pending wrenches, malformed data,
+and topology mismatches reject atomically. Smoke requires a live
+`snapshot_roundtrip=ok` marker.
+
+### 10. Entity destruction left scheduler bindings stale
+
+Scene-owned atmosphere and clock bindings outlived manually destroyed entities.
+Collision merging was subtler: an absorbed clock owner was valid at preflight,
+then disappeared before the clock phase and caused a late rejection after the
+merge had committed.
+
+Correction: direct scene destruction clears all associated queues/bindings,
+accepted steps purge bindings for collision-absorbed entities, and the scheduler
+filters clock bindings whose entities were intentionally absorbed during that
+same step. If the bound gravity primary was absorbed instead, the scheduler
+remaps its stable body ID to the terminal collision survivor and returns that
+mapping so the scene can repair its persistent binding. Collision regressions
+cover both cross-phase lifecycles.
+
+### 11. Public timing, frame, and checksum boundaries were partial
+
+`Timer::SetFixedDt(0)` could make every drain loop infinite. `FrameGraph` accepted
+invalid parents and non-finite frames, `ValidSector(INT64_MIN)` used an unsafe
+absolute value, and canonicalization could overflow a sector addition. The
+public CRC helper dereferenced a null non-empty buffer.
+
+Correction: invalid fixed deltas are rejected, suspended simulation has an
+explicit accumulator discard, frame creation validates topology and numeric
+state, coordinate arithmetic contains invalid extremes, and CRC null input is a
+defined failure sentinel. Regression tests exercise each boundary.
+
+### 12. Resource registration could alias or leak slots
+
+Resource pools did not stop at the packed handle's index limit, failed texture
+adoption consumed a free slot, materials had no removal path, and app/model
+loaders did not fail when required resource or descriptor registration failed.
+
+Correction: all pools enforce handle capacity, invalid mesh/texture inputs are
+rejected, texture slot rollback is complete, material retirement mirrors the
+generational policy, and both production loaders propagate registration failure.
+The imported-model bridge now rolls back every entity, mesh, texture, descriptor,
+and resource registered earlier in the same failed load.
+
 ## Determinism And Atomicity Boundaries
 
-- Duplicate FTL commands or atmosphere bindings for one entity reject before
-  the first write.
+- Duplicate FTL, atmosphere, or clock bindings for one entity reject before the
+  first write.
+- Multi-entity FTL and atmosphere batches restore the entire phase if a later
+  entity rejects.
 - Passive bodies are gathered and sorted by stable body ID before integration.
 - Invalid passive sets, frame references, collision configuration, gravity
   sources, relativistic masses, and clock bindings are staged as atomic no-ops.
@@ -171,35 +234,30 @@ snapshot transaction, not scattered reverse mutations.
 
 - Every repository `.cpp` has an intended CMake target assignment.
 - New simulation sources are linked into both the application and CPU tests.
-- CTest registers `TheDawningTests` and CI builds all targets before running it.
+- CTest registers `TheDawningTests`; CI now builds and tests both Debug and
+  Release rather than Debug alone.
 - Debug and Release app, tests, asset compiler, and asset inspector build.
-- Debug and Release CPU suites pass 350 cases and 16,971 checks.
+- Debug and Release CPU suites pass 362 cases and 17,033 checks.
 - Debug raster, stable DXR, and full-quality DXR smoke pass.
 - Release raster, stable DXR, and full-quality DXR smoke pass.
 - Captures are 1920x1080, 99.9-100% nonblack, with structured renderer, shadow,
   IBL, descriptor lifetime, and draw-record probes passing.
 
-## Required Follow-On Integration
+## Required Follow-On Product Work
 
-1. Reconcile Claude's active scene/app work and replace the direct flight call
-   with one `StepSimulation` call per approved fixed step.
-2. Give `Scene` or a dedicated simulation host ownership of `FrameGraph`, active
-   frame, master frame, coordinate time, FTL command queue, atmosphere bindings,
-   and clock-primary bindings.
-3. Consume `resetRenderHistory` and `drainFixedAccumulator` after successful FTL
-   transitions.
-4. Add an ECS snapshot bridge that builds `SimSnapshot` from live components and
-   applies a validated snapshot atomically. The codec alone is not a save game.
-5. Author real planetary/atmospheric entities and attach the playable ship to a
-   valid spatial frame before enabling those bindings in the demo.
-6. Add host-level integration tests for scheduler invocation and save/load
-   reconstruction; kernel tests cannot prove a callsite exists.
+1. Add a versioned game-save envelope and atomic file replacement around the
+   in-memory simulation snapshot. Rendering assets, missions, inventory, and
+   world-streaming state belong in that higher-level format.
+2. Author real planetary/atmospheric source entities and bind them explicitly;
+   the current demo ship is simulation-complete but intentionally experiences no
+   gravity or atmosphere in the material test scene.
+3. Add reference-frame creation/selection policy for streamed star systems and
+   define when the active integration frame diverges from the master clock frame.
+4. Build gameplay-facing FTL command authoring only after destination frame and
+   world-stream ownership rules are fixed.
 
 ## Residual Risks
 
-- The host integration remains deferred because its exact files contain active
-  uncommitted work owned by Claude. Editing a separate copy now would create a
-  predictable merge conflict and risk losing that work.
 - The save format persists the simulation subset only. Rendering assets,
   gameplay identity, command queues, and higher-level world state need a
   versioned save-game layer around it.
@@ -208,3 +266,9 @@ snapshot transaction, not scattered reverse mutations.
   introduce discontinuities and nondeterminism.
 - GPU smoke validates this machine's D3D12/DXR path. CI remains GPU-free by
   design and cannot replace that local hardware gate.
+- `StepSimulation` remains subsystem-atomic rather than whole-step rollback.
+  `completedStage` makes a late rejection explicit; a full transaction would
+  require snapshot-and-rollback ownership at the host boundary.
+- Claude's independent review was requested through a read-only background
+  agent but could not start because its session limit was active. Per the agreed
+  fallback, review remains manual debt rather than a false completed gate.

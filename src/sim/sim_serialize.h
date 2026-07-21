@@ -151,7 +151,8 @@ SimLoadResult Deserialize(const uint8_t* data, size_t size);
 SimLoadResult Deserialize(std::span<const uint8_t> bytes);
 
 // CRC-32 (IEEE reflected 0xEDB88320) over `size` bytes of `data`, treating the 4
-// bytes at `crcFieldOffset` as zero. Exposed for the checksum tests.
+// bytes at `crcFieldOffset` as zero. A null non-empty input returns 0. Exposed
+// for checksum tests and safe for callers at trust boundaries.
 uint32_t ComputeSimCrc32(const uint8_t* data, size_t size, size_t crcFieldOffset);
 
 } // namespace sim

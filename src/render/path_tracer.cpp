@@ -448,6 +448,14 @@ bool PathTracer::Resize(ID3D12Device5* device, uint32_t width, uint32_t height)
     return ok;
 }
 
+void PathTracer::InvalidateAccumulation()
+{
+    m_accumFrameIndex = 0;
+    m_hasPrevCamera = false;
+    m_hasPrevQuality = false;
+    m_hasPrevScene = false;
+}
+
 // =============================================================================
 // Per-frame Constant Buffer (one per frame in flight)
 // =============================================================================

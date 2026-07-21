@@ -175,6 +175,12 @@ TEST_CASE(SimSerialize_Checksum_CatchesBitFlip)
     CHECK_FALSE(Deserialize(flip(16, 0)).Ok());
 }
 
+TEST_CASE(SimSerialize_CrcPublicBoundaryContainsNullInput)
+{
+    CHECK_EQ(ComputeSimCrc32(nullptr, 0, 0), 0u);
+    CHECK_EQ(ComputeSimCrc32(nullptr, 1, 0), 0u);
+}
+
 // =============================================================================
 // T5 - WRONG MAGIC and WRONG VERSION give distinct statuses; version is checked
 //      BEFORE any section body is decoded (a too-new file reports "too new").

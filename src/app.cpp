@@ -495,6 +495,19 @@ bool App::InitializeScene()
         std::move(cubeOrmTexture), "CubeCheckerORM");
     const auto cubeEmissive = resources.AddTexture(
         std::move(cubeEmissiveTexture), "CubePanelEmissive");
+    if (!resources.IsValidMesh(cube) || !resources.IsValidMesh(plane) ||
+        !resources.IsValidMesh(sphere) ||
+        !resources.IsValidTexture(groundAlbedo) ||
+        !resources.IsValidTexture(cubeAlbedo) ||
+        !resources.IsValidTexture(groundNormal) ||
+        !resources.IsValidTexture(cubeNormal) ||
+        !resources.IsValidTexture(groundOrm) ||
+        !resources.IsValidTexture(cubeOrm) ||
+        !resources.IsValidTexture(cubeEmissive))
+    {
+        core::Log::Error("Required demo resources failed to register");
+        return false;
+    }
     m_smokeDescriptorTexture = groundAlbedo;
 
     core::Log::Infof("Meshes registered: cube=%u plane=%u sphere=%u",
@@ -533,6 +546,14 @@ bool App::InitializeScene()
     registry.Assign<ecs::RigidBody>(m_playerShip, gameplay::MakeFighterRigidBody());
     registry.Assign<ecs::ThrusterSet>(m_playerShip, gameplay::MakeFighterThrusterSet());
     registry.Assign<ecs::FlightControl>(m_playerShip, ecs::FlightControl{});
+    registry.Assign<ecs::SpatialFrame>(
+        m_playerShip, ecs::SpatialFrame{ m_scene.ActiveFrame() });
+    ecs::GravitationalBody playerGravity;
+    playerGravity.bodyId = 1;
+    playerGravity.radius = 2.2;
+    playerGravity.isSource = false;
+    playerGravity.owner = ecs::OrbitOwner::ForceIntegrated;
+    registry.Assign<ecs::GravitationalBody>(m_playerShip, playerGravity);
     m_smokeTextureEntity = m_playerShip;
 
     // Exhaust creation adds more Transform components and can reallocate that
@@ -1069,7 +1090,7 @@ int App::RunMainLoop()
         {
             // Simulation is suspended with rendering. Discard elapsed fixed
             // steps so restoring the window cannot trigger an unbounded catch-up.
-            while (m_timer.ConsumeFixedStep()) {}
+            m_timer.DiscardFixedSteps();
             m_pendingPointerPitch = 0.0f;
             m_pendingPointerYaw = 0.0f;
             Sleep(10);
@@ -1080,17 +1101,25 @@ int App::RunMainLoop()
         {
             // The smoke timeline is frame-driven so capture hashes do not depend
             // on how quickly this machine happens to render the test.
-            while (m_timer.ConsumeFixedStep()) {}
-            m_scene.UpdateSystems(kSmokeFixedDeltaSeconds);
+            m_timer.DiscardFixedSteps();
+            if (!AdvanceSimulation(kSmokeFixedDeltaSeconds))
+                break;
             advancedFlightStep = true;
         }
         else
         {
+            bool simulationAccepted = true;
             while (m_timer.ConsumeFixedStep())
             {
-                m_scene.UpdateSystems(m_timer.GetFixedDt());
+                if (!AdvanceSimulation(m_timer.GetFixedDt()))
+                {
+                    simulationAccepted = false;
+                    break;
+                }
                 advancedFlightStep = true;
             }
+            if (!simulationAccepted)
+                break;
         }
 
         if (advancedFlightStep)
@@ -1111,6 +1140,56 @@ int App::RunMainLoop()
     }
 
     return m_exitCode;
+}
+
+bool App::AdvanceSimulation(double dt)
+{
+    const sim::SimulationStepResult result = m_scene.UpdateSystems(dt);
+    if (!result.accepted)
+    {
+        core::Log::Errorf("Simulation fixed step rejected after stage %u",
+                          static_cast<uint32_t>(result.completedStage));
+        m_exitCode = 9;
+        m_running = false;
+        return false;
+    }
+
+    if (result.resetRenderHistory)
+        m_scene.InvalidatePathTraceHistory();
+    if (result.drainFixedAccumulator)
+        m_timer.DiscardFixedSteps();
+
+    if (m_options.smoke && !m_smokeSnapshotVerified)
+    {
+        const sim::SnapshotBuildResult saved =
+            m_scene.BuildSimulationSnapshot(dt);
+        if (!saved.accepted)
+        {
+            core::Log::Errorf("Smoke snapshot build failed: %s",
+                              saved.error.c_str());
+            m_exitCode = 10;
+            m_running = false;
+            return false;
+        }
+
+        const sim::SnapshotApplyResult loaded =
+            m_scene.ApplySimulationSnapshot(saved.snapshot);
+        if (!loaded.accepted || !m_timer.SetFixedDt(saved.snapshot.fixedDt))
+        {
+            core::Log::Errorf("Smoke snapshot apply failed: %s",
+                              loaded.error.c_str());
+            m_exitCode = 10;
+            m_running = false;
+            return false;
+        }
+
+        m_smokeSnapshotVerified = true;
+        core::Log::Infof("[SMOKE] simulation_scheduler=ok sim_tick=%llu",
+                         static_cast<unsigned long long>(m_scene.SimulationTick()));
+        core::Log::Infof("[SMOKE] snapshot_roundtrip=ok snapshot_bodies=%u",
+                         static_cast<uint32_t>(saved.snapshot.bodies.size()));
+    }
+    return true;
 }
 
 void App::UpdateWindowTitle(const core::TimeStep& timeStep)

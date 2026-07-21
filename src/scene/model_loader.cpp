@@ -104,6 +104,21 @@ LoadedModel UploadImportedModel(Scene& scene,
 
     ID3D12Device* d3dDevice = device.Device();
     ID3D12GraphicsCommandList* cmd = device.CmdList();
+    std::vector<TextureHandle> registeredTextures;
+    std::vector<MeshHandle> registeredMeshes;
+
+    const auto rollback = [&]()
+    {
+        for (ecs::Entity entity : loaded.entities)
+            scene.DestroyEntity(entity);
+        loaded.entities.clear();
+        for (MeshHandle handle : registeredMeshes)
+            resources.RemoveMesh(handle, device);
+        for (TextureHandle handle : registeredTextures)
+            resources.RemoveTexture(handle, device, renderer);
+        registeredMeshes.clear();
+        registeredTextures.clear();
+    };
 
     // Decode each embedded image ONCE, up front, and register it with both the
     // raster descriptor heap (RegisterTexture, which stamps texture.descriptor)
@@ -142,12 +157,29 @@ LoadedModel UploadImportedModel(Scene& scene,
         }
 
         tex.descriptor = renderer.RegisterTexture(d3dDevice, tex);
+        if (!tex.descriptor.IsValid())
+        {
+            loaded.error = "texture descriptor allocation failed";
+            core::Log::Errorf("Model load: descriptor allocation failed for image %zu", i);
+            rollback();
+            return loaded;
+        }
         loaded.uploadBuffers.push_back(std::move(texUpload));
 
         const std::string texName =
             img.name.empty() ? (model.name + "_img" + std::to_string(i)) : img.name;
         const TextureHandle handle =
             resources.AddTexture(std::move(tex), texName.c_str());
+        if (!handle.IsValid())
+        {
+            loaded.error = "texture registration failed";
+            renderer.ReleaseTextureDescriptor(device, tex.descriptor);
+            device.DeferredRelease(tex.resource);
+            tex.ResetAfterRetirement();
+            rollback();
+            return loaded;
+        }
+        registeredTextures.push_back(handle);
         imageHandles[i] = handle.value;
         ++decodedImages;
     }
@@ -183,6 +215,7 @@ LoadedModel UploadImportedModel(Scene& scene,
             loaded.error = "GPU mesh creation failed for a primitive";
             core::Log::Errorf("Model load: CreateMesh32 failed for %s primitive %zu",
                               sourceLabel.c_str(), p);
+            rollback();
             return loaded;
         }
 
@@ -193,6 +226,15 @@ LoadedModel UploadImportedModel(Scene& scene,
         const std::string meshName =
             prim.name.empty() ? (model.name + "_prim" + std::to_string(p)) : prim.name;
         const MeshHandle meshHandle = resources.AddMesh(std::move(mesh), meshName.c_str());
+        if (!meshHandle.IsValid())
+        {
+            loaded.error = "mesh registration failed";
+            device.DeferredRelease(mesh.vertexBuffer);
+            device.DeferredRelease(mesh.indexBuffer);
+            rollback();
+            return loaded;
+        }
+        registeredMeshes.push_back(meshHandle);
 
         ecs::Material material;
         if (prim.materialIndex != asset::kInvalidAssetIndex &&
@@ -214,6 +256,7 @@ LoadedModel UploadImportedModel(Scene& scene,
     {
         loaded.error = "model contained no renderable primitives";
         core::Log::Errorf("Model load: %s produced no primitives", sourceLabel.c_str());
+        rollback();
         return loaded;
     }
 

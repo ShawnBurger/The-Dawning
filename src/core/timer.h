@@ -33,7 +33,10 @@ public:
     bool ConsumeFixedStep();
 
     double GetFixedDt() const { return m_fixedDt; }
-    void   SetFixedDt(double dt) { m_fixedDt = dt; }
+    bool   SetFixedDt(double dt);
+
+    // Suspend simulation without retaining an arbitrarily large catch-up debt.
+    void DiscardFixedSteps() { m_accumulator = 0.0; }
 
 private:
     int64_t  m_frequency = 0;

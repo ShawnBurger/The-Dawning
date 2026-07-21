@@ -17,6 +17,8 @@
 #include "../render/renderer.h"
 #include "../render/path_tracer.h"
 #include "../render/d3d12_device.h"
+#include "../sim/simulation_system.h"
+#include "../sim/snapshot_system.h"
 #include "../core/types.h"
 #include <vector>
 
@@ -50,8 +52,22 @@ public:
 
     // --- Systems ---
 
-    // Phase 1: Update all gameplay systems
-    void UpdateSystems(double dt);
+    // Phase 1: advance the one authoritative fixed-step scheduler.
+    sim::SimulationStepResult UpdateSystems(double dt);
+
+    // Runtime bindings consumed by the scheduler on the next fixed step.
+    // FTL commands are one-shot; atmosphere and clock bindings persist.
+    void QueueFtlCommand(const sim::FtlCommand& command);
+    void SetAtmosphereBinding(const sim::AtmosphereBinding& binding);
+    void ClearAtmosphereBinding(ecs::Entity entity);
+    void SetClockGravityBinding(const sim::ClockGravityBinding& binding);
+    void ClearClockGravityBinding(ecs::Entity entity);
+
+    // Restore simulation state onto the same stable body-ID topology while
+    // preserving rendering and gameplay components.
+    sim::SnapshotBuildResult BuildSimulationSnapshot(double fixedDt) const;
+    sim::SnapshotApplyResult ApplySimulationSnapshot(
+        const sim::SimSnapshot& snapshot);
 
     // Phase 2a: Render all visible entities with rasterization
     void RenderEntities(render::D3D12Device& device,
@@ -98,6 +114,13 @@ public:
     // under-counting costs skipped draws. Defined in scene.cpp per RULE 2.
     uint32_t            MeshInstanceCount() const;
     bool                IsRTReady() const   { return m_rtReady; }
+    sim::FrameId        ActiveFrame() const { return m_activeFrame; }
+    sim::FrameId        MasterFrame() const { return m_masterFrame; }
+    double              CoordinateTime() const { return m_coordinateTime; }
+    uint64_t            SimulationTick() const { return m_simTick; }
+    const sim::FrameGraph& Frames() const { return m_frames; }
+
+    void InvalidatePathTraceHistory();
 
     // --- RT Helpers (public for init) ---
     void EnsureBLAS(render::D3D12Device& device);
@@ -106,12 +129,22 @@ private:
     // System implementations
     void SystemVelocity(double dt);
     void SystemRotation(double dt);
-    void SystemFlightPhysics(double dt);
 
     ecs::Registry        m_registry;
     ResourceManager      m_resources;
     render::PathTracer   m_pathTracer;
     bool                 m_rtReady = false;
+
+    sim::FrameGraph      m_frames;
+    sim::FrameId         m_activeFrame = sim::kInvalidFrame;
+    sim::FrameId         m_masterFrame = sim::kInvalidFrame;
+    double               m_coordinateTime = 0.0;
+    uint64_t             m_simTick = 0;
+    sim::FlightAssistParams m_flightAssist;
+    sim::CloseEncounterConfig m_closeEncounters;
+    std::vector<sim::FtlCommand> m_ftlCommands;
+    std::vector<sim::AtmosphereBinding> m_atmosphereBindings;
+    std::vector<sim::ClockGravityBinding> m_clockGravityBindings;
 
     // BLAS index per mesh handle (maps mesh handle value → BLAS pool index)
     HandleSlotMap<MeshHandle, uint32_t> m_meshToBLAS;

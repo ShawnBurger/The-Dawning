@@ -201,6 +201,30 @@ TEST_CASE(FrameGraph_SameFrameSeparationExactAtEveryScale)
     }
 }
 
+TEST_CASE(FrameGraph_CreateRejectsMalformedTopologyAndCoordinates)
+{
+    sim::FrameGraph graph;
+    const sim::FrameId root =
+        graph.CreateFrame(sim::kInvalidFrame, sim::WorldPos{});
+    CHECK(root != sim::kInvalidFrame);
+
+    CHECK_EQ(graph.CreateFrame(99u, sim::WorldPos{}), sim::kInvalidFrame);
+    CHECK_EQ(graph.CreateFrame(
+        root, sim::WorldPos::FromOffset({
+            (std::numeric_limits<double>::quiet_NaN)(), 0.0, 0.0 })),
+        sim::kInvalidFrame);
+    CHECK_EQ(graph.CreateFrame(
+        root, sim::WorldPos{}, {
+            (std::numeric_limits<double>::infinity)(), 0.0, 0.0 }),
+        sim::kInvalidFrame);
+    CHECK_EQ(graph.FrameCount(), 1u);
+
+    const sim::WorldPos minSector{
+        (std::numeric_limits<int64_t>::min)(), 0, 0, {} };
+    CHECK_FALSE(sim::ValidSector(minSector));
+    CHECK(std::isnan(sim::Separation(minSector, sim::WorldPos{}).x));
+}
+
 // The precision limit is a THEOREM about where the design degrades, stated in
 // ULP terms so the boundary is known rather than discovered.
 TEST_CASE(Precision_DegradationMatchesUlpMath)

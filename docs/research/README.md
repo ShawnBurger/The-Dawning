@@ -4,23 +4,32 @@ Design and research material for The Dawning, recovered from the
 `TheDawning_Codex_Handoff_v3_unpacked/` handoff bundle so it is versioned and
 greppable instead of living only inside an unversioned archive folder.
 
-## Read this first: these are aspirational, not status
+## Read this first
 
-**Nothing in this directory describes what the engine currently does.** These are
-design targets, research notes, and specifications — several were written against
-V1/V2 codebases that no longer exist. The live engine is roughly 11k lines
-implementing a D3D12 raster path and a DXR path tracer; most systems described
-here (flight, combat, economy, AI, networking, save/load, terrain streaming,
-animation, audio) have **no code at all** yet.
+Most files in this directory are aspirational design targets, research notes,
+or historical specifications; several were written against V1/V2 codebases
+that no longer exist. The dated audit files are the exception. For current
+runtime wiring and validation, start with
+`RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`.
 
-For actual implemented status, read the root `README.md` and `CLAUDE.md` — and
-treat even those with care, since they too claim some things ahead of the code.
+The live engine now includes tested flight, gravity, passive orbit, collision,
+atmosphere, FTL, relativity, reference-frame, and simulation-snapshot systems in
+addition to D3D12 raster and DXR rendering. Combat, economy, AI, networking,
+terrain streaming, animation, audio, and production authoring tools remain
+design work. For the user-facing baseline, also read the root `README.md` and
+`CLAUDE.md`.
 
 ## What's here
 
+- **`RUNTIME_INTEGRATION_AUDIT_2026-07-21.md`** — current production call graph,
+  wiring matrix, corrections, validation evidence, and residual risks.
+- **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
+  **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
+  and change reviews; useful provenance, not timeless status.
 - **`UNIFIED_ANALYSIS_RESPONSE.md`** — the most useful document in this folder.
-  A clear-eyed audit that scores subsystems honestly and prescribes a Phase 0 of
-  repository/CI/test work before more features. Start here.
+  A historical audit that scored the earlier renderer baseline and prescribed
+  repository/CI/test work. Its recommendations must be checked against current
+  source before acting on them.
 - **`MASTER_ENGINE_SPEC.md`**, **`FULL_3D_SPACE_SIM_ROADMAP.md`**,
   **`TheDawning_MASTER_INDEX.md`** — scope and roadmap framing.
 - **`TheDawning_Batch*_Deep_Dive.md`** (13 files) — per-domain research: orbital

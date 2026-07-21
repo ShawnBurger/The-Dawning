@@ -156,6 +156,11 @@ public:
     bool IsInitialized() const { return m_initialized; }
     uint32_t AccumulationFrameIndex() const { return m_accumFrameIndex; }
 
+    // Teleports and frame rebases are explicit discontinuities even if a
+    // scene-signature hash happens to collide. Preserve RNG progression while
+    // discarding all temporal accumulation history.
+    void InvalidateAccumulation();
+
 private:
     // -------------------------------------------------------------------------
     // Per-frame RT upload buffers

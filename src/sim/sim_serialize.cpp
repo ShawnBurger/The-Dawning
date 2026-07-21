@@ -56,6 +56,8 @@ uint32_t Crc32Byte(uint32_t crc, uint8_t b)
 
 uint32_t ComputeSimCrc32(const uint8_t* data, size_t size, size_t crcFieldOffset)
 {
+    if (!data && size != 0)
+        return 0;
     uint32_t crc = 0xFFFFFFFFu;
     for (size_t i = 0; i < size; ++i)
     {

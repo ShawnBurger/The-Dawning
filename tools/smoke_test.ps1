@@ -132,6 +132,10 @@ if ($logText -notmatch "Smoke mode complete") {
 
 Assert-Marker "overlay" "ok"
 Assert-Marker "timeline" "fixed"
+Assert-Marker "simulation_scheduler" "ok"
+Assert-Marker "sim_tick" "1"
+Assert-Marker "snapshot_roundtrip" "ok"
+Assert-Marker "snapshot_bodies" "1"
 Assert-Marker "present" $(if ($Unlocked) { "immediate" } else { "vsync" })
 Assert-Marker "descriptor_reuse_before_fence" "blocked"
 Assert-Marker "descriptor_reuse_after_fence" "reused"

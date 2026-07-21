@@ -4,6 +4,7 @@
 
 #include "timer.h"
 #include <windows.h>
+#include <cmath>
 #include <cstdint>
 
 namespace core
@@ -72,6 +73,14 @@ bool Timer::ConsumeFixedStep()
         return true;
     }
     return false;
+}
+
+bool Timer::SetFixedDt(double dt)
+{
+    if (!(dt > 0.0) || !std::isfinite(dt))
+        return false;
+    m_fixedDt = dt;
+    return true;
 }
 
 } // namespace core
