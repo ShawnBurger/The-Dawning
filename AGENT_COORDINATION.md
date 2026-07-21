@@ -1638,8 +1638,9 @@ are now integrated as well. The current order is:
   side effects
 - Validation: Debug and Release build every configured target, including the
   game, tests, asset compiler/inspector, and assembly inspector. Both four-test
-  CTest matrices pass. The final Debug and Release CPU binaries pass 378 cases /
-  17,209 checks. Canonical deduplication, input permutation, stable-index remap,
+  CTest matrices pass. After rebasing onto the integrated job system at
+  `2367cab`, the combined Debug and Release CPU binaries pass 384 cases / 17,228
+  checks. Canonical deduplication, input permutation, stable-index remap,
   cross-kind locators, valid aliases, conflicting identities, missing/stale/
   failed/unknown catalog statuses, malformed identities, exceptions, allocation
   failure, unsafe UTF-8/control text, diagnostic amplification, and all resource
@@ -1650,8 +1651,10 @@ are now integrated as well. The current order is:
   security findings. Codex addressed its nonblocking UTF-8 diagnostic
   observation in `6c42ad0`; Claude reviewed `956bd64..6c42ad0` and again returned
   `APPROVE`. Codex also pinned unsafe external-diagnostic suppression in
-  `eb04963` and repeated both CPU configurations.
-- Latest commit: `eb04963`
+  original `eb04963` content (rebased as `fa39899`) and repeated both CPU
+  configurations. The full combined build/test matrices also pass after the
+  clean rebase onto `2367cab`.
+- Latest commit: `fa39899`
 - Next action: fast-forward the reviewed branch into `main`, push, require the
   Windows Debug/Release GitHub CI jobs to pass, then close and retire WS-023
 
