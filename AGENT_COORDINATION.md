@@ -2019,6 +2019,54 @@ are now integrated as well. The current order is:
   collision blockers and the on-foot controller that consumes this query API,
   without extending into dynamic rigid-body or final production geometry work.
 
+### WS-029: Stateful interior blockers and on-foot controller
+
+- Status: ACTIVE
+- Outcome: connect authored interior interaction state to deterministic moving
+  collision blockers, then publish the first fixed-step on-foot capsule
+  controller that consumes the Stage 5B custom collision queries. The slice must
+  prove that a closed or moving hatch blocks traversal, an open hatch permits it,
+  and player displacement remains assembly-local and finite.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit from a stable commit
+- Branch: `codex/interior-controller`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-interior-controller`
+- Base commit: `62bda58`
+- Owned paths: new stateful interior-collision and on-foot gameplay modules;
+  focused tests; additive Stage 5C contract documentation; minimal CMake,
+  assembly-runtime-host, App/input-context, and smoke-witness integration
+- Excluded paths: `src/sim/**` orbital or rigid-body collision policy; general
+  dynamic rigid bodies and constraints; navmesh/pathfinding; pressure and
+  atmosphere; EVA/reference-frame transfer; networking; animation; camera bob;
+  final ship/interior geometry; and unrelated renderer or asset-format changes
+- Shared-file locks: WS-029 holds only the smallest required additions to
+  `CMakeLists.txt`, `src/app.{h,cpp}`, `src/scene/assembly_runtime_host.{h,cpp}`,
+  and `tools/smoke_test.ps1`; no renderer or shader behavior may change
+- Interface contract: static Stage 5B shapes remain immutable. A bounded,
+  stable-ID-ordered dynamic blocker snapshot is rebuilt transactionally from
+  exact moving-part transforms and interaction/portal state. Controller input is
+  an explicit per-fixed-step command; output is a complete pose/velocity/state
+  snapshot. Collision or topology failure leaves the prior live snapshot and
+  controller pose unchanged.
+- Dependencies: merged WS-027 interaction runtime, merged WS-028 collision world,
+  current input edge/state APIs, fixed-step simulation timing, and the existing
+  modern ship-control context
+- Acceptance gates: closed/moving/open/reclosing portal controls; dynamic/static
+  earliest-hit tie ordering; no tunneling; controller acceleration/deceleration,
+  grounded gravity, jump edge, air control, speed limits, and partitioning;
+  invalid input/config/topology atomicity; host lifecycle/teardown; Debug and
+  Release all-target builds and CPU suites; raster/stable/full-DXR and GPU-
+  validation smoke with exact blocker/controller witnesses
+- Negative controls: missing portal or moving-part identity, duplicate stable
+  IDs, stale interaction snapshot, invalid transform, non-finite command,
+  excessive time step, jump while airborne, closed-door tunneling, opening-door
+  premature traversal, depenetration failure, and iteration exhaustion cannot
+  silently mutate the live player pose or blocker world
+- Next action: freeze the Stage 5C blocker-state and fixed-step controller
+  contracts from the current authored topology, runtime lifecycle, and input
+  semantics before implementation
+
 ## 20. Helper Commands
 
 Create a task worktree:
