@@ -240,8 +240,24 @@ Vec3d FrameGraph::RelativeVelocity(const Body& a, const Body& b) const
 
 Vec3d FrameGraph::RebaseFrame(FrameId frameId, const WorldPos& newOrigin)
 {
+    // Reject an out-of-range frame id: m_frames[frameId] below would be an OOB write.
+    if (frameId >= m_frames.size())
+        return Vec3d{ 0.0, 0.0, 0.0 };
+
     const WorldPos oldOrigin = GetFrame(frameId).origin;
     const WorldPos canonNew  = Canonicalize(newOrigin);
+
+    // Reject an invalid new origin the SAME way CreateFrame does (commit 08fa46e).
+    // Canonicalize carries the offset into the sector integers but does NOT clamp
+    // the sector, and leaves a non-finite offset untouched, so an out-of-range
+    // sector or non-finite offset survives it. Storing that unconditionally would
+    // poison the frame permanently: ValidSector(frame.origin) stays false and every
+    // later Separation/ResolveWorldPos/Reparent for in-frame bodies returns NaN.
+    // Leave the frame unchanged and report a zero correction (no body moves) rather
+    // than silently corrupt it. This closes the asymmetry the review flagged, where
+    // the invalid-origin class rejected at CreateFrame was still accepted here.
+    if (!ValidSector(canonNew) || !IsCanonical(canonNew))
+        return Vec3d{ 0.0, 0.0, 0.0 };
 
     // Correction for in-frame bodies: body.world = old + localOld = new + localNew
     // => localNew = localOld + (old - new) = localOld + Separation(new, old).

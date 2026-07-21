@@ -256,6 +256,117 @@ TEST_CASE(OrbitSystem_InvalidInputIsAtomic)
     CHECK(registry.Get<ecs::Transform>(b).position == beforeB.position);
 }
 
+TEST_CASE(OrbitSystem_AbsorbedPrimaryDoesNotFreezeAndRepointsToSurvivor)
+{
+    // Regression for the HIGH review finding: an on-rails body whose primary is
+    // absorbed as a NON-survivor by a same-step merge must not stall the whole
+    // step. Survivor id == min(clusterIds), so a planet (id 100) merged with a
+    // lower-id asteroid (id 50) is absorbed while the moon (id 200) orbits 100.
+    // Before the fix, resolveRail(100) failed -> the entire StepPassiveOrbits
+    // returned an unaccepted default with nothing committed, and every later step
+    // reproduced the identical merge and rejection: a permanent freeze.
+    FrameGraph frames;
+    const FrameId root = frames.CreateFrame(kInvalidFrame, WorldPos{});
+    ecs::Registry registry;
+
+    // Asteroid (lower id) survives; planet (higher id) is absorbed.
+    const ecs::Entity asteroid = MakeOrbitalBody(
+        registry, root, 50, ecs::OrbitOwner::NBodyActive,
+        Vec3d{ -0.5, 0.0, 0.0 }, Vec3d{ 1.0, 0.0, 0.0 }, 4.0, 1.0, 0.5);
+    const ecs::Entity planet = MakeOrbitalBody(
+        registry, root, 100, ecs::OrbitOwner::NBodyActive,
+        Vec3d{ 0.5, 0.0, 0.0 }, Vec3d{ -1.0, 0.0, 0.0 }, 6.0, 1.0, 0.25);
+
+    // Moon on analytic rails around the planet (id 100).
+    const ecs::Entity moon = MakeOrbitalBody(
+        registry, root, 200, ecs::OrbitOwner::OnRails,
+        Vec3d{ 100.5, 0.0, 0.0 }, Vec3d{ 0.0, 0.0, 0.0 },
+        1.0, 0.0, 1.0, /*isSource=*/false);
+    ecs::OrbitState orbit;
+    orbit.elements.semiMajorAxis = 100.0;
+    orbit.elements.eccentricity = 0.0;
+    orbit.primaryMu = 6.0;
+    orbit.primaryBodyId = 100;
+    orbit.epoch = 0.0;
+    registry.Assign<ecs::OrbitState>(moon, orbit);
+
+    CloseEncounterConfig config;
+    config.maxLevel = 0; // force the merge at the top level this step
+
+    // STEP 1 — the merge absorbs the moon's primary. The step must be accepted.
+    const PassiveOrbitStepResult step1 = StepPassiveOrbits(
+        registry, frames, root, 0.0, 0.001, config);
+    CHECK(step1.accepted);
+    CHECK_EQ(step1.destroyedEntityCount, 1u);
+    CHECK_EQ(step1.collisions.events.size(), static_cast<size_t>(1));
+    if (!step1.collisions.events.empty()) // guard: broken build returns 0 events
+    {
+        CHECK(step1.collisions.events[0].merged);
+        CHECK_EQ(step1.collisions.events[0].survivorId, 50ull);
+    }
+    CHECK(registry.IsAlive(asteroid));
+    CHECK_FALSE(registry.IsAlive(planet));
+    CHECK(registry.IsAlive(moon));
+    // The moon's stored primary is repointed to the survivor so later steps resolve.
+    CHECK_EQ(registry.Get<ecs::OrbitState>(moon).primaryBodyId, 50ull);
+    // The moon was actually propagated to a finite world-consistent position.
+    const Vec3d moonPos = registry.Get<ecs::Transform>(moon).position;
+    CHECK(std::isfinite(moonPos.x) && std::isfinite(moonPos.y) &&
+          std::isfinite(moonPos.z));
+
+    // STEP 2 — the absorbed primary (100) no longer exists. With the repoint the
+    // moon resolves against the survivor (50); WITHOUT it, primaryBodyId is still
+    // 100, recordById has no 100, resolveRail returns false, and the step freezes
+    // again. This second step is the watched failure for the repoint half.
+    // Guarded on step1.accepted: if step 1 was (wrongly) rejected, the two
+    // overlapping bodies remain and a default-config resolve would churn — the
+    // freeze this test exists to forbid, so there is nothing to assert past it.
+    if (step1.accepted)
+    {
+        const PassiveOrbitStepResult step2 = StepPassiveOrbits(
+            registry, frames, root, 0.001, 0.001);
+        CHECK(step2.accepted);
+        CHECK_EQ(step2.railBodyCount, 1u);
+        CHECK(registry.IsAlive(moon));
+    }
+}
+
+TEST_CASE(OrbitSystem_ThreeBodyMergeSumsInertialMass)
+{
+    // Exercises the merge mass-sum path that the determinism finding hardened
+    // (each group's members are now sorted by bodyId before summing). Three
+    // NBodyActive bodies collapse into one survivor; the survivor's inertial mass
+    // must equal the exact sum of the three. NOTE: masses are exact powers of two,
+    // so the sum is order-independent by construction; the sort's benefit is
+    // toolchain PORTABILITY of the low-order rounding for non-dyadic masses, which
+    // is not observable from a single MSVC build (bucket order is fixed per build,
+    // like the logger race). This is behavioral coverage of the path, not a
+    // watched-failing witness for the sort.
+    FrameGraph frames;
+    const FrameId root = frames.CreateFrame(kInvalidFrame, WorldPos{});
+    ecs::Registry registry;
+    MakeOrbitalBody(registry, root, 10, ecs::OrbitOwner::NBodyActive,
+                    Vec3d{ -0.6, 0.0, 0.0 }, Vec3d{ 1.0, 0.0, 0.0 },
+                    2.0, 1.0, 0.5);   // mass 2
+    MakeOrbitalBody(registry, root, 20, ecs::OrbitOwner::NBodyActive,
+                    Vec3d{ 0.0, 0.0, 0.0 }, Vec3d{ 0.0, 0.0, 0.0 },
+                    4.0, 1.0, 0.25);  // mass 4
+    MakeOrbitalBody(registry, root, 30, ecs::OrbitOwner::NBodyActive,
+                    Vec3d{ 0.6, 0.0, 0.0 }, Vec3d{ -1.0, 0.0, 0.0 },
+                    8.0, 1.0, 0.125); // mass 8
+
+    CloseEncounterConfig config;
+    config.maxLevel = 0;
+    const PassiveOrbitStepResult result = StepPassiveOrbits(
+        registry, frames, root, 0.0, 0.001, config);
+    CHECK(result.accepted);
+    CHECK_EQ(result.destroyedEntityCount, 2u);
+    const ecs::Entity survivor = FindBody(registry, 10);
+    CHECK_FALSE(survivor.IsNull());
+    // Combined inertial mass 2 + 4 + 8 = 14 -> invMass 1/14.
+    CHECK(Near(registry.Get<ecs::RigidBody>(survivor).invMass, 1.0 / 14.0));
+}
+
 TEST_CASE(OrbitSystem_DeterministicAcrossComponentInsertionOrder)
 {
     FrameGraph frames;

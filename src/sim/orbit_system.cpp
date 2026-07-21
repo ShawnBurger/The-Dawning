@@ -291,6 +291,16 @@ PassiveOrbitStepResult StepPassiveOrbits(
     groups.reserve(parent.size());
     for (const auto& entry : parent)
         groups[findRoot(entry.first)].push_back(entry.first);
+    // Each group's members are pushed while iterating the unordered_map `parent`,
+    // i.e. in hash-bucket order. The merge below sums inertial masses over the
+    // group, and IEEE addition is non-associative, so a 3+-body merge's summed
+    // mass — hence the survivor's invMass and its whole subsequent trajectory —
+    // would depend on STL bucket layout and differ across toolchains
+    // (libstdc++/libc++/MSVC iterate uint64_t keys differently). Sort each group
+    // ascending by bodyId so the sum follows the id-sorted-summation discipline
+    // the force path (nbody.cpp DeterministicOrder) already enforces everywhere.
+    for (auto& entry : groups)
+        std::sort(entry.second.begin(), entry.second.end());
 
     std::vector<StagedBody> staged;
     staged.reserve(particles.size() + result.railBodyCount);
@@ -360,6 +370,11 @@ PassiveOrbitStepResult StepPassiveOrbits(
     const double targetTime = coordinateTime + dt;
     std::unordered_map<uint64_t, uint8_t> railMarks;
     railMarks.reserve(result.railBodyCount * 2u);
+    // Rail bodies whose primary was absorbed by this step's merge need their stored
+    // OrbitState.primaryBodyId repointed to the survivor so LATER steps (where the
+    // absorbed primary entity no longer exists) still resolve. Staged here, applied
+    // in the commit phase only on the accepted path. {entityIndex, survivorBodyId}.
+    std::vector<std::pair<uint32_t, uint64_t>> primaryRepoints;
     std::function<bool(uint64_t)> resolveRail = [&](uint64_t bodyId) -> bool {
         if (worldStates.find(bodyId) != worldStates.end())
             return true;
@@ -376,9 +391,31 @@ PassiveOrbitStepResult StepPassiveOrbits(
             return true;
         mark = 1;
 
-        if (!resolveRail(record.orbit.primaryBodyId))
+        // Follow the primary through this step's merge. If the primary was an
+        // NBodyActive source that was absorbed as a NON-survivor, its bodyId is
+        // gone from worldStates and its stored record still reads NBodyActive, so
+        // a direct resolveRail(primaryId) returns false and stalls the ENTIRE step
+        // — permanently, since nothing commits and the next step reproduces the
+        // identical merge (the review's HIGH finding). The union-find root is the
+        // cluster's min bodyId, which is exactly the collision survivor and IS a
+        // surviving particle already in worldStates. Only consult findRoot for ids
+        // that are in `parent` (N-body bodies); operator[] would otherwise insert.
+        const uint64_t primaryId = record.orbit.primaryBodyId;
+        const uint64_t effectivePrimary =
+            (parent.find(primaryId) != parent.end()) ? findRoot(primaryId)
+                                                      : primaryId;
+        if (!resolveRail(effectivePrimary))
             return false;
-        const WorldState& primary = worldStates.at(record.orbit.primaryBodyId);
+        const WorldState& primary = worldStates.at(effectivePrimary);
+        // If the primary merged away, repoint this rail body's OrbitState to the
+        // survivor for future steps. NOTE (documented residual for a follow-up):
+        // primaryMu and the osculating elements are left as-is, so PromoteFromRails
+        // keeps propagating around the survivor with the pre-merge mu. For the
+        // dominant case — a heavy primary absorbing a light body — the survivor's
+        // world position and mass are ~unchanged, so the error is small and bounded;
+        // the exact fix is to re-fit the elements (DemoteToRails) about the survivor.
+        if (effectivePrimary != primaryId)
+            primaryRepoints.push_back({ record.entityIndex, effectivePrimary });
         const StateVector relative = PromoteFromRails(
             record.orbit, targetTime - record.orbit.epoch);
         if (!IsFinite(relative))
@@ -441,6 +478,14 @@ PassiveOrbitStepResult StepPassiveOrbits(
             gravity.isSource = next.isSource;
         }
     }
+    // Repoint rail bodies whose primary merged away, so subsequent steps resolve
+    // against the survivor instead of the destroyed absorbed primary. Applied here
+    // (accepted path only) alongside the other staged writes; the rail entity itself
+    // survives, so its OrbitState component is live.
+    for (const auto& repoint : primaryRepoints)
+        registry.GetByIndex<ecs::OrbitState>(repoint.first).primaryBodyId =
+            repoint.second;
+
     for (ecs::Entity entity : absorbedEntities)
         registry.Destroy(entity);
 

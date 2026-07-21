@@ -441,6 +441,44 @@ TEST_CASE(RebaseFrame_PreservesWorldPositionExactly)
     CHECK(after == before);        // bit-exact world invariance
 }
 
+// A new origin that CreateFrame would reject (out-of-range sector, or a non-finite
+// offset) must NOT corrupt the frame. RebaseFrame leaves the origin unchanged and
+// returns a zero correction, matching CreateFrame's rejection. Regression for the
+// review finding that RebaseFrame stored an UNVALIDATED origin while CreateFrame
+// (commit 08fa46e) rejects the identical input — Canonicalize does not clamp the
+// sector or discard a non-finite offset, so an unvalidated store would leave
+// ValidSector(frame.origin) false forever and propagate NaN through every later
+// Separation/ResolveWorldPos/Reparent for in-frame bodies.
+TEST_CASE(RebaseFrame_RejectsInvalidOriginAndPreservesFrame)
+{
+    sim::FrameGraph g;
+    const WorldPos good{ 10, 0, 0, { 2048.0, 0.0, 0.0 } };
+    const sim::FrameId frame = g.CreateFrame(sim::kInvalidFrame, good);
+    CHECK(frame != sim::kInvalidFrame);
+    CHECK(g.GetFrame(frame).origin == good);
+
+    // (a) Out-of-range sector (> kMaxSectorCoord): Canonicalize carries the offset
+    // but never clamps the sector, so this survives to the store unless rejected.
+    const WorldPos badSector{ sim::kMaxSectorCoord + 1, 0, 0, { 0.0, 0.0, 0.0 } };
+    const Vec3d corrA = g.RebaseFrame(frame, badSector);
+    CHECK(corrA.x == 0.0 && corrA.y == 0.0 && corrA.z == 0.0);
+    CHECK(g.GetFrame(frame).origin == good);            // frame unchanged
+    CHECK(sim::ValidSector(g.GetFrame(frame).origin));  // still valid
+
+    // (b) Non-finite offset: IsCanonical rejects it (AxisCanonical checks isfinite).
+    const WorldPos badOffset{
+        10, 0, 0,
+        { std::numeric_limits<double>::infinity(), 0.0, 0.0 } };
+    const Vec3d corrB = g.RebaseFrame(frame, badOffset);
+    CHECK(corrB.x == 0.0 && corrB.y == 0.0 && corrB.z == 0.0);
+    CHECK(g.GetFrame(frame).origin == good);            // frame unchanged
+
+    // The guard does NOT over-reject: a valid rebase still applies.
+    const WorldPos okNew{ 10, 0, 0, { 1024.0, 0.0, 0.0 } };
+    g.RebaseFrame(frame, okNew);
+    CHECK(g.GetFrame(frame).origin == okNew);
+}
+
 // Moving a body to a new parent frame preserves its world position AND world
 // velocity exactly.
 TEST_CASE(Reparent_PreservesWorldStateExactly)
