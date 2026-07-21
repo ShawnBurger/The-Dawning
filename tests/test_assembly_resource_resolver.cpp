@@ -383,6 +383,20 @@ TEST_CASE(AssemblyResourceResolver_BoundsUntrustedCatalogDiagnostics)
         utf8Result,
         asset::AssemblyResourceResolutionStatus::CatalogNotFound);
     CHECK(utf8Result.error.ends_with("aaaaaa"));
+
+    catalog = MakeCatalog();
+    auto& unsafe = catalog.entries[{
+        asset::AssemblyResourceKind::Visual, "shared://surface"
+    }];
+    unsafe.status = asset::AssemblyCatalogLookupStatus::NotFound;
+    unsafe.error = "unsafe\ndetail";
+    limits.maxCatalogErrorBytes = 1024;
+    const auto unsafeResult =
+        asset::ResolveAssemblyResources(assembly, catalog, limits);
+    CheckFailure(
+        unsafeResult,
+        asset::AssemblyResourceResolutionStatus::CatalogNotFound);
+    CHECK(unsafeResult.error.find(": ") == std::string::npos);
 }
 
 TEST_CASE(AssemblyResourceResolver_RejectsUnsafeLocatorsAndResourceAmplification)

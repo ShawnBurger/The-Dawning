@@ -191,6 +191,8 @@ std::string ExternalErrorPreview(std::string_view error, uint32_t maxBytes)
         --prefixBytes;
     }
     const std::string_view prefix = error.substr(0, prefixBytes);
+    // Catalog diagnostics are untrusted; omit the excerpt instead of allowing
+    // controls or malformed text to reach logs and operator tooling.
     if (!IsValidUtf8(prefix) ||
         std::any_of(prefix.begin(), prefix.end(), [](unsigned char value) {
             return value < 0x20 || value == 0x7f;
