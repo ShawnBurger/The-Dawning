@@ -228,4 +228,103 @@ struct FlightControl
     FlightMode  mode          = FlightMode::Coupled;
 };
 
+// =============================================================================
+// Orbital / N-body gravity (Sim Stage 1) — APPENDED, do not reorder the above.
+// =============================================================================
+// The dynamics-state components for the N-body orbital core. They follow
+// docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md — the "DECISION REVISION"
+// (N-body-default in the active system, Kepler rails as a distant LOD) and §5
+// (one owner per body per step). See src/sim/nbody.h and src/sim/kepler.h.
+//
+// These are plain data (doubles + ids). They are consumed by the pure functions
+// in sim/nbody.h and sim/kepler.h exactly the way ecs::RigidBody is consumed by
+// sim/rigid_body.h — sim includes ecs; ecs never includes sim, so no cycle.
+//
+// World POSE is NOT duplicated here: the orbital position lives in
+// Transform.position (Vec3d) and the orbital velocity in RigidBody.linearVelocity
+// (Vec3d), the same single-source-of-truth carriers §4.4 makes the on-rails <->
+// N-body handoff continuous through. GravitationalBody/OrbitState add only the
+// gravitational parameters, the LOD owner token, and the analytic rails.
+// =============================================================================
+
+// The level-of-detail owner of a body's motion THIS step. Exactly one owner per
+// body per step (RELATIVISTIC_SIM_ARCHITECTURE.md §5.1, revised): a body is
+// either integrated by the N-body Forest-Ruth stepper OR advanced on analytic
+// Kepler rails, never both. Debug-asserted in the stepper. An OnRails body must
+// receive NO separate N-body force (the pull is already in its ellipse) — the
+// double-count negative control the design demands.
+enum class OrbitOwner : uint32_t
+{
+    NBodyActive = 0, // full N-body gravity this step (the active-system default)
+    OnRails     = 1, // analytic Kepler propagation around its primary this step
+};
+
+// -----------------------------------------------------------------------------
+// OrbitalElements — the classical osculating orbit an on-rails body propagates.
+// -----------------------------------------------------------------------------
+// Angles in radians, distance in metres. The anomaly stored is the TRUE anomaly
+// at the epoch (OrbitState::epoch), NOT the mean anomaly: true anomaly is exact
+// in the (e->1, M->0) critical region the research (PHYSICS_RESEARCH_REFERENCE §1)
+// flags, where mean-anomaly seeding is worst-conditioned. semiMajorAxis is
+// negative for hyperbolic orbits (e>1), the standard convention.
+struct OrbitalElements
+{
+    double semiMajorAxis    = 0.0; // a  (m); a<0 for hyperbolic
+    double eccentricity     = 0.0; // e  (0<=e<1 ellipse, ~1 parabola, >1 hyperbola)
+    double inclination      = 0.0; // i  (rad)
+    double longitudeAscNode = 0.0; // Omega (rad)
+    double argPeriapsis     = 0.0; // omega (rad)
+    double trueAnomaly      = 0.0; // nu    (rad) AT EPOCH
+};
+
+// -----------------------------------------------------------------------------
+// GravitationalBody — a body that produces and/or feels Newtonian gravity.
+// -----------------------------------------------------------------------------
+struct GravitationalBody
+{
+    // Gravitational parameter mu = G*M (m^3 s^-2). This is the quantity the force
+    // law g = -mu*r/(r^2+eps^2)^1.5 and the future GR clock both use, and it is
+    // known far more precisely than G and M separately. mass = mu / G. A test
+    // particle (ship, missile, debris) may carry mu = 0: it FEELS gravity but is
+    // a negligible source (see isSource).
+    double mu = 0.0;
+
+    // Physical radius (m). Feeds the shared softening floor
+    // eps = max(radius, r_s + eps0) and close-encounter/collision detection.
+    double radius = 0.0;
+
+    // STABLE identity. The force summation is done in ascending bodyId order so
+    // floating-point non-associativity cannot make the result depend on iteration
+    // accident (RELATIVISTIC_SIM_ARCHITECTURE.md revision, "Determinism"). Two ids
+    // must never collide within one active system.
+    uint64_t bodyId = 0;
+
+    // true  => a massive contributor: produces gravity AND feels it.
+    // false => a test particle: feels gravity from sources, produces none. Its
+    //          reaction on the sources is dropped (standard test-particle limit),
+    //          which is exact in the mu->0 limit and keeps ships/debris O(N) not
+    //          O(N^2). A test particle under THRUST is not stepped here at all —
+    //          it goes through the rigid-body lane (see sim/nbody.h operator split).
+    bool isSource = true;
+
+    // LOD owner THIS step. See OrbitOwner.
+    OrbitOwner owner = OrbitOwner::NBodyActive;
+};
+
+// -----------------------------------------------------------------------------
+// OrbitState — the analytic rails an on-rails body rides, plus its primary.
+// -----------------------------------------------------------------------------
+// Valid/used when GravitationalBody::owner == OnRails. On promotion (player
+// enters the system) the N-body state is SEEDED from these elements at the
+// promotion instant; on demotion osculating elements are FIT back into here from
+// the current (r,v) — both continuous in position and velocity by construction
+// (sim/nbody.h Promote/Demote).
+struct OrbitState
+{
+    OrbitalElements elements;         // the osculating orbit, defined at `epoch`
+    double          primaryMu = 0.0;  // mu of the primary this body orbits
+    uint64_t        primaryBodyId = 0;// stable id of the primary
+    double          epoch = 0.0;      // coordinate time at which `elements` hold
+};
+
 } // namespace ecs
