@@ -1135,14 +1135,15 @@ registered or edited.
 
 ### WS-015: Collision policy integration review
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: integrate Claude's Stage-5 collision policy onto current `main` only
   after adversarial coverage proves swept elastic contacts and public config
   limits cannot violate anti-tunneling, energy, or bounded-work claims
 - Primary: Claude (`1749f74`); integrator/reviewer: Codex
 - Branch: `codex/review-sim-collision`
 - Worktree: `D:\The Dawning (new)\.agents\worktrees\codex-review-sim-collision`
-- Base commit: `5171cbf`; source checkpoint: `1749f74`
+- Base registration: `5b85f9a`; source checkpoint: Claude `1749f74`
+  (content-equivalent review cherry-pick `5670fc7`)
 - Owned paths: `src/sim/collision.h`, `src/sim/collision.cpp`,
   `src/sim/nbody.h`, `tests/test_collision.cpp`, collision entries in
   `CMakeLists.txt`, and collision-policy contracts in research documentation
@@ -1160,11 +1161,32 @@ registered or edited.
 - Negative controls: endpoint-only approach classification must miss the swept
   elastic crossing; zero/non-finite subdivision denominators and out-of-range
   restitution/max depth must fail or exceed the bounded-work contract before fix
-- Latest commit: Claude source `1749f74`; review branch not yet created
-- Review note: Codex owns this pass so no reciprocal Claude review blocks it; any
-  additional Claude review is optional manual debt under Shawn's instruction
-- Next action: create the review worktree from current `main`, cherry-pick the
-  source checkpoint, establish watched failures, then harden and verify
+- Latest commits: Claude source `1749f74`; Claude follow-up `9b42a0e`; review
+  branch `931a6d4`; integrated `main` commit `7cee582`
+- Review note: the immutable Claude source passed its eight collision cases, but
+  the added full-crossing control produced no bounce and the zero-eta hostile
+  control drove more than 244 seconds of saturated microstepping before the run
+  was terminated. Codex owns this pass, so no reciprocal Claude review blocks it;
+  any additional Claude review is optional manual debt under Shawn's instruction.
+  Claude independently landed `9b42a0e` while the review matrix was running. Its
+  restitution clamp was deliberately superseded during integration by the public
+  house guard: out-of-range response coefficients now reject atomically instead
+  of silently changing authored values.
+- Acceptance result: the policy now has an absolute level-16 work cap and level-17
+  saturation sentinel; all public entry points reject invalid config/state;
+  duplicate IDs, zero softening, and aggregate merge overflow cannot partially
+  mutate topology; outside-origin swept crossings bounce without re-bouncing a
+  pair already leaving the shell; post-merge impulses are central. Debug and
+  Release each pass 305 cases and 16,130 checks. Raster, stable-DXR, and full-DXR
+  smoke pass in both configurations with nonblank 1920x1080 captures.
+- Residual risk: the CPU policy is not wired to the production active-system ECS.
+  Entity destruction, survivor rigid-body spin, relativistic momentum transfer,
+  projectile ray-sphere tests, and detailed ship/interior colliders remain owned
+  follow-on work. Hitting the subdivision cap is reported, not dynamically
+  rescheduled; the future scheduler must define how saturated encounters carry
+  forward without consuming an unbounded frame budget.
+- Next action: retire the clean review worktree after pushing `main`; begin the
+  next registered production adapter without extending collision scope
 
 ## 20. Helper Commands
 
