@@ -583,14 +583,15 @@ on `main`. The current order is:
    published and retired.
 2. Keep the timed-out reciprocal Claude reviews as explicit manual review debt;
    they do not reopen the proven integration gates.
-3. Route coupled flight assist through real actuator limits so both flight modes
-   expose physical thruster state.
+3. WS-014 routed coupled flight assist through real actuator limits so both
+   flight modes expose physical thruster state; it is verified and merged.
 4. Add collision/close-encounter policy before production N-body activation.
-5. Register the next lane and verify its paths do not overlap Claude before editing.
+5. Register that lane only after verifying its paths do not overlap Claude.
 
-WS-013 completed the concrete WS-011 review findings. WS-014 is the active Codex
-product-integration lane; its owned paths do not overlap Claude's stale collision
-worktree, which currently has no commits beyond its merged ancestor.
+WS-013 completed the concrete WS-011 review findings, and WS-014 completed the
+physical-actuator flight-control bridge. Collision/close-encounter policy is the
+next candidate lane; Claude's collision worktree must be re-audited before it is
+registered or edited.
 
 ### WS-001: Coordination contract
 
@@ -1063,7 +1064,7 @@ worktree, which currently has no commits beyond its merged ancestor.
 
 ### WS-014: Coupled flight assist through physical actuators
 
-- Status: ACTIVE
+- Status: MERGED
 - Outcome: remove the ideal-reaction-wrench shortcut so coupled flight assist is
   limited by, and visibly reflected in, the ship's actual thruster bank
 - Primary: Codex
@@ -1095,11 +1096,24 @@ worktree, which currently has no commits beyond its merged ancestor.
 - Negative controls: direct accumulation of `AssistWrench`, a coupled ship that
   accelerates beyond installed thrust, and unchanged throttle feedback under
   coupled braking must each fail a watched test
-- Latest commit: none; tests are written first against the ideal-wrench shortcut
-- Review note: request one bounded Claude review after the fix commit; a failed
-  attempt becomes deferred manual review debt per Shawn's instruction
-- Next action: create the isolated worktree, prove the shortcut and feedback gaps,
-  then add the bounded allocator without changing the existing input contract
+- Latest commits: feature `c837ea0`; merge `838f44e`
+- Review note: the bounded read-only Claude review produced no output and timed
+  out after 60 seconds. Shawn explicitly allowed this step to be deferred; it is
+  manual reciprocal-review debt rather than reviewer approval.
+- Acceptance result: three watched ECS cases first produced 11 failed checks
+  against the ideal-wrench shortcut while all 289 pre-existing cases stayed
+  green. The corrected feature branch and combined `main` pass 295 cases and
+  15,963 checks in Debug and Release plus raster, stable-DXR, and full-DXR smoke
+  in both builds. Coupled acceleration now comes only from installed nozzles;
+  missing and weakened banks demonstrably reduce authority, and actual throttle
+  state is retained for exhaust and damage feedback.
+- Residual risk: the projected allocator is deterministic and bounded but is not
+  a globally optimal constrained IFCS solver. Thruster geometry remains a trusted
+  component contract; malformed nozzle data is ignored by allocation but should
+  receive a broader component-validation policy before content authoring scales.
+- Next action: retire the clean local feature worktree after pushing `main`, then
+  re-audit Claude's collision branch and register a non-overlapping
+  collision/close-encounter policy lane
 
 ## 20. Helper Commands
 
