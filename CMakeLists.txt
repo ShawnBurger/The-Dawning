@@ -179,12 +179,14 @@ set(SIM_HEADERS
 )
 
 set(SCENE_SOURCES
+    src/scene/assembly_instantiator.cpp
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
     src/scene/model_loader.cpp
 )
 
 set(SCENE_HEADERS
+    src/scene/assembly_instantiator.h
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
     src/scene/resource_manager.h
@@ -200,6 +202,7 @@ set(TEST_SOURCES
     tests/test_deferred_release.cpp
     tests/test_descriptor_allocator.cpp
     tests/test_resource_handle.cpp
+    tests/test_assembly_instantiator.cpp
     tests/test_assembly_resource_catalog.cpp
     tests/test_assembly_resource_resolver.cpp
     tests/test_cooked_assembly.cpp
@@ -468,6 +471,11 @@ add_executable(TheDawningTests
     src/core/sh_irradiance.h
     src/core/sh_irradiance.cpp
     ${ECS_HEADERS}
+    # Two-phase cooked-assembly scene transaction. This file depends only on
+    # asset contracts, ECS data, and packed resource handles; the production
+    # Registry target and fault-injected test target both remain GPU-free.
+    src/scene/assembly_instantiator.cpp
+    src/scene/assembly_instantiator.h
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
     # GPU-facing per-draw record layouts and their sizing arithmetic. Safe here
