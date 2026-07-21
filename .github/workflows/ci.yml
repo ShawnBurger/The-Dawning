@@ -1,9 +1,9 @@
 name: CI
 
 # GPU-less CI. The runner has no DXR adapter, so this job deliberately does NOT
-# run tools/smoke_test.ps1 — that harness requires a real device, a Debug build
-# and dxcompiler.dll/dxil.dll. It builds everything and runs the CPU-only unit
-# test target (TheDawningTests), which links no graphics libraries.
+# run tools/smoke_test.ps1 — that harness requires a real D3D12/DXR device and
+# an interactive window. It builds everything and runs the CPU-only unit test
+# target (TheDawningTests), which links no graphics libraries.
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Printed before anything can fail, so a future breakage is legible from
       # the log alone rather than needing a local repro.
