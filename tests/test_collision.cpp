@@ -1,8 +1,9 @@
 // =============================================================================
 // tests/test_collision.cpp - N-body close-encounter / collision policy
 // =============================================================================
-// SIM STAGE 5. Drives the SHIPPED sim/collision.{h,cpp} against the design in
-// docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md section 6. Pure CPU; no D3D12.
+// SIM STAGE 5. Drives the SHIPPED sim/collision.{h,cpp} against the "Production
+// close-encounter policy" in docs/research/RELATIVISTIC_SIM_ARCHITECTURE.md.
+// Pure CPU; no D3D12.
 //
 // The policy is what nbody.h's DetectCloseEncounter (a system-wide bool) routes to:
 // global power-of-two symplectic subdivision with per-micro-step swept contact
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace
@@ -351,13 +353,22 @@ TEST_CASE(Collision_Determinism_UnderInputPermutation)
         CHECK_EQ(a[k].mu, b[k].mu);
         CHECK_EQ(a[k].position.x, b[k].position.x);
         CHECK_EQ(a[k].position.y, b[k].position.y);
+        CHECK_EQ(a[k].position.z, b[k].position.z);
         CHECK_EQ(a[k].velocity.x, b[k].velocity.x);
+        CHECK_EQ(a[k].velocity.y, b[k].velocity.y);
         CHECK_EQ(a[k].velocity.z, b[k].velocity.z);
+        CHECK_EQ(a[k].softening, b[k].softening);
         CHECK_EQ(a[k].radius, b[k].radius);
+        CHECK_EQ(a[k].isSource, b[k].isSource);
     }
     CHECK_EQ(ra.events.size(), rb.events.size());
     for (size_t k = 0; k < ra.events.size() && k < rb.events.size(); ++k)
+    {
         CHECK_EQ(ra.events[k].survivorId, rb.events[k].survivorId);
+        CHECK_EQ(ra.events[k].absorbedIds, rb.events[k].absorbedIds);
+        CHECK_EQ(ra.events[k].merged, rb.events[k].merged);
+        CHECK_EQ(ra.events[k].penetration, rb.events[k].penetration);
+    }
 }
 
 // =============================================================================
@@ -439,4 +450,195 @@ TEST_CASE(Collision_BoundOrbit_CleanFlyby_StaysBounded)
     // Energy stays bounded over ~40 periods (measured ~0.0018): no secular blow-up.
     // A secular drift would exceed this by the end of the run.
     CHECK(peakCol < 5e-3 * std::fabs(e0));
+}
+
+// =============================================================================
+// T9 - SWEPT ELASTIC CONTACT: both endpoints are outside the contact shell, but
+//      the moving body crosses it during the micro-step. Endpoint-only approach
+//      classification sees the body separating after the crossing and tunnels.
+// =============================================================================
+TEST_CASE(Collision_SweptElasticCrossing_BouncesInsteadOfTunneling)
+{
+    CloseEncounterConfig cfg;
+    cfg.restitution = 1.0;
+
+    std::vector<NBodyParticle> bodies = {
+        MakeP(1, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 }, 2.0, 1.0),
+        MakeP(2, Vec3d{ 3, 0, 0 }, Vec3d{ 6, 0, 0 }, 2.0, 1.0),
+    };
+    const std::vector<Vec3d> previous = {
+        Vec3d{ 0, 0, 0 }, Vec3d{ -3, 0, 0 },
+    };
+    const Vec3d momentumBefore = MomentumSum(bodies);
+    const double kineticBefore = KineticGScaled(bodies);
+
+    CloseEncounterReport report;
+    ResolveContactsAtBoundary(bodies, previous, cfg, report);
+
+    CHECK_EQ(CountBounces(report), 1);
+    CHECK_APPROX_EPS(bodies[0].velocity.x, 6.0, 1e-12);
+    CHECK_APPROX_EPS(bodies[1].velocity.x, 0.0, 1e-12);
+    const Vec3d momentumAfter = MomentumSum(bodies);
+    CHECK_APPROX_EPS(momentumAfter.x, momentumBefore.x, 1e-12);
+    CHECK_APPROX_EPS(momentumAfter.y, momentumBefore.y, 1e-12);
+    CHECK_APPROX_EPS(momentumAfter.z, momentumBefore.z, 1e-12);
+    CHECK_APPROX_EPS(KineticGScaled(bodies), kineticBefore, 1e-12);
+
+    // Reverse input order while preserving each body's swept segment. The result
+    // is compared by stable body id so normal orientation cannot depend on index.
+    std::vector<NBodyParticle> reversed = {
+        MakeP(2, Vec3d{ 3, 0, 0 }, Vec3d{ 6, 0, 0 }, 2.0, 1.0),
+        MakeP(1, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 }, 2.0, 1.0),
+    };
+    const std::vector<Vec3d> reversedPrevious = {
+        Vec3d{ -3, 0, 0 }, Vec3d{ 0, 0, 0 },
+    };
+    CloseEncounterReport reversedReport;
+    ResolveContactsAtBoundary(reversed, reversedPrevious, cfg, reversedReport);
+    CHECK_EQ(CountBounces(reversedReport), 1);
+    CHECK_APPROX_EPS(reversed[0].velocity.x, 0.0, 1e-12); // id 2
+    CHECK_APPROX_EPS(reversed[1].velocity.x, 6.0, 1e-12); // id 1
+
+    // The same crossing can finish just inside the shell after passing the
+    // centre. It is still a swept entry and must receive the impulse.
+    std::vector<NBodyParticle> crossedInside = {
+        MakeP(1, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 }, 2.0, 1.0),
+        MakeP(2, Vec3d{ 1.9, 0, 0 }, Vec3d{ 6, 0, 0 }, 2.0, 1.0),
+    };
+    const std::vector<Vec3d> crossedInsidePrevious = {
+        Vec3d{ 0, 0, 0 }, Vec3d{ -3, 0, 0 },
+    };
+    CloseEncounterReport crossedInsideReport;
+    ResolveContactsAtBoundary(crossedInside, crossedInsidePrevious, cfg,
+                              crossedInsideReport);
+    CHECK_EQ(CountBounces(crossedInsideReport), 1);
+    CHECK_APPROX_EPS(crossedInside[0].velocity.x, 6.0, 1e-12);
+    CHECK_APPROX_EPS(crossedInside[1].velocity.x, 0.0, 1e-12);
+
+    // Starting inside and leaving the shell is not a new entry. Re-bouncing here
+    // would trap an already-resolved pair at the contact boundary.
+    std::vector<NBodyParticle> exiting = {
+        MakeP(1, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 }, 2.0, 1.0),
+        MakeP(2, Vec3d{ 3, 0, 0 }, Vec3d{ 6, 0, 0 }, 2.0, 1.0),
+    };
+    const std::vector<Vec3d> exitingPrevious = {
+        Vec3d{ 0, 0, 0 }, Vec3d{ 1.9, 0, 0 },
+    };
+    CloseEncounterReport exitingReport;
+    ResolveContactsAtBoundary(exiting, exitingPrevious, cfg, exitingReport);
+    CHECK(exitingReport.events.empty());
+    CHECK_APPROX_EPS(exiting[0].velocity.x, 0.0, 1e-12);
+    CHECK_APPROX_EPS(exiting[1].velocity.x, 6.0, 1e-12);
+}
+
+// =============================================================================
+// T10 - PUBLIC CONFIG CONTAINMENT: invalid divisors/restitution are no-ops, a
+//       negative requested depth still reports saturation, and extreme finite
+//       demand returns a bounded sentinel rather than an undefined float->int cast.
+// =============================================================================
+TEST_CASE(Collision_InvalidConfigAndExtremeDepth_AreContained)
+{
+    const std::vector<NBodyParticle> fast = {
+        MakeP(1, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 }, 2.0, 1.0),
+        MakeP(2, Vec3d{ -100, 0, 0 }, Vec3d{ 1000, 0, 0 }, 2.0, 1.0),
+    };
+
+    CloseEncounterConfig zeroEta;
+    zeroEta.eta = 0.0;
+    CHECK_EQ(RequiredSubdivisionLevel(fast, 1.0, zeroEta), 0);
+    std::vector<NBodyParticle> unchanged = fast;
+    CloseEncounterReport invalidReport;
+    StepNBodyCollisional(unchanged, 1.0, zeroEta, invalidReport);
+    CHECK_EQ(invalidReport.microSteps, 0u);
+    CHECK_EQ(unchanged[1].position.x, fast[1].position.x);
+    CHECK_EQ(unchanged[1].velocity.x, fast[1].velocity.x);
+
+    CloseEncounterConfig badRestitution;
+    badRestitution.restitution = 1.5;
+    std::vector<NBodyParticle> overlap = {
+        MakeP(1, Vec3d{ -0.95, 0, 0 }, Vec3d{ 1, 0, 0 }, 2.0, 1.0),
+        MakeP(2, Vec3d{ 0.95, 0, 0 }, Vec3d{ -1, 0, 0 }, 2.0, 1.0),
+    };
+    const std::vector<NBodyParticle> before = overlap;
+    CloseEncounterReport restitutionReport;
+    ResolveInstant(overlap, badRestitution, restitutionReport);
+    CHECK(restitutionReport.events.empty());
+    CHECK_EQ(overlap[0].velocity.x, before[0].velocity.x);
+    CHECK_EQ(overlap[1].velocity.x, before[1].velocity.x);
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<CloseEncounterConfig> invalidConfigs;
+    CloseEncounterConfig invalid;
+    invalid.eta = nan; invalidConfigs.push_back(invalid);
+    invalid = CloseEncounterConfig{};
+    invalid.etaContact = 0.0; invalidConfigs.push_back(invalid);
+    invalid = CloseEncounterConfig{};
+    invalid.contactScale = -1.0; invalidConfigs.push_back(invalid);
+    invalid = CloseEncounterConfig{};
+    invalid.stickRestitution = 2.0; invalidConfigs.push_back(invalid);
+    invalid = CloseEncounterConfig{};
+    invalid.deepMergeFrac = nan; invalidConfigs.push_back(invalid);
+    invalid = CloseEncounterConfig{};
+    invalid.solverIterations = 0; invalidConfigs.push_back(invalid);
+    for (const CloseEncounterConfig& bad : invalidConfigs)
+    {
+        CHECK_EQ(RequiredSubdivisionLevel(fast, 1.0, bad), 0);
+        std::vector<NBodyParticle> candidate = fast;
+        CloseEncounterReport rejected;
+        StepNBodyCollisional(candidate, 1.0, bad, rejected);
+        CHECK_EQ(rejected.microSteps, 0u);
+        CHECK_EQ(candidate[1].position.x, fast[1].position.x);
+        CHECK_EQ(candidate[1].velocity.x, fast[1].velocity.x);
+    }
+
+    std::vector<std::vector<NBodyParticle>> invalidStates;
+    std::vector<NBodyParticle> badState = fast;
+    badState[1].softening = 0.0;
+    invalidStates.push_back(badState);
+    badState = fast;
+    badState[1].bodyId = badState[0].bodyId;
+    invalidStates.push_back(badState);
+    for (const std::vector<NBodyParticle>& bad : invalidStates)
+    {
+        std::vector<NBodyParticle> candidate = bad;
+        CloseEncounterReport rejected;
+        StepNBodyCollisional(candidate, 1.0, CloseEncounterConfig{}, rejected);
+        CHECK_EQ(rejected.microSteps, 0u);
+        CHECK_EQ(candidate[0].bodyId, bad[0].bodyId);
+        CHECK_EQ(candidate[1].bodyId, bad[1].bodyId);
+        CHECK_EQ(candidate[1].position.x, bad[1].position.x);
+    }
+
+    std::vector<NBodyParticle> aggregateOverflow = {
+        MakeP(1, Vec3d{ -0.5, 0, 0 }, Vec3d{ 0, 0, 0 },
+              std::numeric_limits<double>::max() * 0.5, 1.0),
+        MakeP(2, Vec3d{ 0, 0, 0 }, Vec3d{ 0, 0, 0 },
+              std::numeric_limits<double>::max() * 0.5, 1.0),
+        MakeP(3, Vec3d{ 0.5, 0, 0 }, Vec3d{ 0, 0, 0 },
+              std::numeric_limits<double>::max() * 0.5, 1.0),
+    };
+    const std::vector<NBodyParticle> overflowBefore = aggregateOverflow;
+    CloseEncounterReport overflowReport;
+    ResolveInstant(aggregateOverflow, CloseEncounterConfig{}, overflowReport);
+    CHECK(overflowReport.events.empty());
+    CHECK_EQ(aggregateOverflow.size(), overflowBefore.size());
+    CHECK_EQ(aggregateOverflow[0].mu, overflowBefore[0].mu);
+    CHECK_EQ(aggregateOverflow[1].mu, overflowBefore[1].mu);
+    CHECK_EQ(aggregateOverflow[2].mu, overflowBefore[2].mu);
+
+    CloseEncounterConfig negativeDepth;
+    negativeDepth.maxLevel = -4;
+    std::vector<NBodyParticle> capped = fast;
+    CloseEncounterReport cappedReport;
+    StepNBodyCollisional(capped, 1.0, negativeDepth, cappedReport);
+    CHECK(cappedReport.hitDepthCap);
+    CHECK_EQ(cappedReport.subdivisionLevel, 0);
+    CHECK_EQ(cappedReport.microSteps, 1u);
+
+    std::vector<NBodyParticle> extreme = fast;
+    extreme[1].velocity.x = std::numeric_limits<double>::max() * 0.25;
+    const int extremeLevel = RequiredSubdivisionLevel(
+        extreme, 1.0, CloseEncounterConfig{});
+    CHECK(extremeLevel > CloseEncounterConfig{}.maxLevel);
+    CHECK(extremeLevel <= CloseEncounterConfig{}.maxLevel + 1);
 }
