@@ -1592,7 +1592,7 @@ are now integrated as well. The current order is:
 
 ### WS-023: Transactional cooked-assembly resource resolution
 
-- Status: ACTIVE
+- Status: READY_TO_MERGE
 - Outcome: consume one immutable `CookedAssembly`, resolve every referenced
   visual, collision, LOD, navmesh, walkable-surface, and moving-part locator
   into a typed immutable catalog identity, and publish either a complete binding
@@ -1636,10 +1636,24 @@ are now integrated as well. The current order is:
   catalog exception, and allocation failure cannot publish a partial graph;
   no hidden file loading, source-path leakage, global cache mutation, or scene
   side effects
-- Latest commit: pending
-- Next action: inspect existing handle conventions, implement and adversarially
-  test the isolated resolver, request Claude review, then integrate only after
-  both build matrices and GitHub CI pass
+- Validation: Debug and Release build every configured target, including the
+  game, tests, asset compiler/inspector, and assembly inspector. Both four-test
+  CTest matrices pass. The final Debug and Release CPU binaries pass 378 cases /
+  17,209 checks. Canonical deduplication, input permutation, stable-index remap,
+  cross-kind locators, valid aliases, conflicting identities, missing/stale/
+  failed/unknown catalog statuses, malformed identities, exceptions, allocation
+  failure, unsafe UTF-8/control text, diagnostic amplification, and all resource
+  limits have direct witnesses. Diff, scope, dependency, path, and credential
+  scans are clean.
+- Review: Claude first returned `OVERLAP_CLEAR`, then reviewed
+  `7de644d..956bd64` and returned `APPROVE` with no actionable correctness or
+  security findings. Codex addressed its nonblocking UTF-8 diagnostic
+  observation in `6c42ad0`; Claude reviewed `956bd64..6c42ad0` and again returned
+  `APPROVE`. Codex also pinned unsafe external-diagnostic suppression in
+  `eb04963` and repeated both CPU configurations.
+- Latest commit: `eb04963`
+- Next action: fast-forward the reviewed branch into `main`, push, require the
+  Windows Debug/Release GitHub CI jobs to pass, then close and retire WS-023
 
 ## 20. Helper Commands
 
