@@ -623,6 +623,38 @@ regime is needed or wanted.**
 
 ---
 
+### 7.1 Production ECS adapter contract
+
+`ApplyAtmosphereToEntity` is the GPU-free bridge from this model to a live
+`Transform + SpatialFrame + RigidBody + AerodynamicBody`. It resolves position
+and velocity through `FrameGraph`, computes `v_atm = v_linear + omega x r`, and
+samples the current altitude without caching density.
+
+The shipped stiff-drag policy refines the force-only shorthand above: drag is
+applied exactly once with `SemiImplicitDragAirspeed` as an operator-split velocity
+update. It is **not** also added to `forceAccum`. Its equivalent impulse-over-dt
+force participates only in the CoP moment, so off-centre drag still rotates the
+body without duplicating its translational impulse. Lift remains a world force in
+`forceAccum`; the complete aerodynamic force is rotated into body space before
+forming the body-frame torque. The adapter must run once before
+`StepFlightPhysics` in the same fixed step.
+
+All numeric state and frame conversions are staged before any component write.
+Malformed requests reject without changing the registry. A valid vacuum or
+ceiling sample is an accepted exact no-op. Positive density promotes an optional
+`GravitationalBody` from rails to `NBodyActive`; `OrbitState` remains intact for a
+later deterministic demotion. Diagnostics (density, dynamic pressure, Mach,
+angle of attack, and heat flux) are returned to gameplay and never feed back into
+the trajectory except through the explicit drag/lift path above.
+
+This first adapter samples density once at the fixed-step position. The adaptive
+altitude substepping described in section 6.3 remains scheduler work for steps
+that cross a material fraction of a scale height; unconditional drag contraction
+prevents energy injection but does not by itself recover a rapidly varying
+density field.
+
+---
+
 ## 8. Game fidelity precedent
 
 Where the bar sits, from serious to arcade, and where this engine should aim:

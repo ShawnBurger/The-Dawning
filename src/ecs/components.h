@@ -409,4 +409,22 @@ struct SpatialFrame
     uint32_t frameId = UINT32_MAX;
 };
 
+// -----------------------------------------------------------------------------
+// AerodynamicBody - authored coefficient and geometry data for atmosphere.
+// -----------------------------------------------------------------------------
+// Coefficients use one shared reference area. centerOfPressure and liftAxis are
+// body-local; the atmosphere adapter converts the resulting wrench into the
+// RigidBody world-force/body-torque convention.
+struct AerodynamicBody
+{
+    double referenceArea = 1.0;             // m^2
+    double baseDragCoefficient = 0.25;      // Cd at low Mach and zero AoA
+    double angleOfAttackDrag = 1.0;         // k in Cd *= 1 + k*sin(alpha)^2
+    double liftSlope = 0.0;                 // Cl per radian; 0 disables lift
+    double stallAngleRadians = 0.2617993878; // 15 degrees
+    double noseRadius = 0.5;                // m, Sutton-Graves diagnostic
+    core::Vec3f liftAxis = { 0.0f, 1.0f, 0.0f };
+    core::Vec3f centerOfPressure = { 0.0f, 0.0f, 0.0f };
+};
+
 } // namespace ecs
