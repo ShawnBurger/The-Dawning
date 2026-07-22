@@ -105,8 +105,9 @@ ecs::OrbitalElements StateToElements(const StateVector& state, double mu);
 
 // Propagate elliptic elements forward by dt seconds: advance the mean anomaly by
 // n*dt (n = sqrt(mu/a^3)), solve with Markley, return elements with trueAnomaly
-// updated (a, e, i, node, argp unchanged — a Kepler orbit is closed). For e>=1 use
-// PropagateUniversal instead; this asserts elliptic in debug.
+// updated (a, e, i, node, argp unchanged — a Kepler orbit is closed). Closed
+// (elliptic, a>0) orbits only: for e>=1 use PropagateUniversal instead, as the
+// mean motion sqrt(mu/a^3) is not real for a<0.
 ecs::OrbitalElements PropagateElements(const ecs::OrbitalElements& elements,
                                        double mu, double dt);
 

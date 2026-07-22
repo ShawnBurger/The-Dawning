@@ -2,9 +2,9 @@
 // =============================================================================
 // render/renderer.h — The Dawning V3 Renderer
 // =============================================================================
-// Manages the rendering pipeline for Layer 2:
+// Manages the rasterization pipeline (Layer 2 geometry + Layer 4 materials):
 //   - Root signature (v1.1 with fallback to v1.0)
-//   - Graphics PSO (classic API — stream upgrade in Layer 3)
+//   - Graphics PSO (classic D3D12_GRAPHICS_PIPELINE_STATE_DESC)
 //   - Per-frame constant buffer upload ring (persistently mapped, 256-byte aligned)
 //   - Draw dispatch for meshes with per-object transforms and materials
 //

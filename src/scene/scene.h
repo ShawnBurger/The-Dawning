@@ -63,7 +63,7 @@ public:
     // Switch celestial bodies between TRUE radius (near-body / ship views) and
     // exaggerated ORRERY markers. At the orrery scale (K~1e-9) a true-radius
     // planet is sub-pixel, so in orrery mode each body is scaled to render at a
-    // fixed few-unit marker size (Sun larger, planets ~2 units) — the K cancels,
+    // fixed marker size (Sun ~14 units, planets floored to 7) — the K cancels,
     // giving a constant on-screen size regardless of the compression. Idempotent;
     // call each frame with the active mode.
     void ApplyStarSystemRenderMode(bool orrery);

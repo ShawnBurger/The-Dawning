@@ -157,7 +157,8 @@ void Scene::ApplyStarSystemRenderMode(bool orrery)
             // Render each body at a fixed marker size in RENDER units: the K in
             // ToCameraRelativeMatrix multiplies scale, so scale = markerUnits /
             // (meshRadius * K) yields `markerUnits` on screen regardless of K.
-            // Sun larger (~7 units), planets floored to ~2 so they stay visible.
+            // Sun larger (~14 units at r=6.96e8), every planet floored to the 7-unit
+            // minimum so it stays visible (radius/5e7 < 7 for all reference planets).
             const double markerUnits = (std::max)(7.0, g.radius / 5.0e7);
             s = static_cast<float>(markerUnits /
                 (static_cast<double>(m_bodyMeshRadius) * m_renderScale));

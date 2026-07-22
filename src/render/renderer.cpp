@@ -1676,21 +1676,16 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
     // harness, which forces a nonzero exit when anything logs an error.
     if (m_cbOffset + alignedSize > kCBRingSize)
     {
-        // Per shadowed entity, per frame: 256 (main-pass CBPerObject) + 256
-        // (CBMaterial) + 256 * kShadowCascadeCount (one CBPerObject per cascade,
-        // because the casters are walked once per cascade). Cascades multiplied
-        // the shadow term by 4 and roughly halved the entity ceiling; measured at
-        // 97 entities the raster frame uses 149,504 of 262,144 bytes.
-        constexpr uint32_t kBytesPerShadowedEntity =
-            256u + 256u + 256u * core::kShadowCascadeCount;
+        // The ring now holds only per-FRAME and per-PASS constants: CBPerFrame,
+        // the camera CBPerPass, and one CBPerPass per shadow cascade. Per-object
+        // and per-material data moved to growable structured buffers
+        // (gpu_draw_records.h), so ring usage is FLAT in entity count. An overflow
+        // here means that fixed per-frame/per-pass set outgrew the ring, not that
+        // the scene has too many objects.
         core::Log::Errorf(
-            "CB upload ring overflow at %u/%u bytes. Every shadowed entity costs "
-            "%u bytes per frame (256 per-object + 256 material + 256 x %u "
-            "cascades), so this ring caps the scene at roughly %u of them. The fix "
-            "is per-object data in a structured buffer indexed by draw, not a root "
-            "CBV per draw.",
-            m_cbOffset, kCBRingSize, kBytesPerShadowedEntity,
-            core::kShadowCascadeCount, kCBRingSize / kBytesPerShadowedEntity);
+            "CB upload ring overflow at %u/%u bytes. The ring holds only per-frame "
+            "and per-pass constants (flat in entity count); raise kCBRingSize.",
+            m_cbOffset, kCBRingSize);
         return 0;
     }
 

@@ -20,7 +20,6 @@ constexpr uint16_t kFormatMinor   = 1;
 constexpr uint32_t kHeaderBytes   = 32;
 constexpr uint32_t kSectionHeader = 20;
 constexpr size_t   kCrcFieldOffset = 12;
-constexpr size_t   kMinFileBytes  = kHeaderBytes; // header alone is a legal (0-section) file? no - EPOK+FRMS required
 constexpr size_t   kMaxBufferBytes = 512ull * 1024ull * 1024ull;
 constexpr uint32_t kFlagRequired  = 1u;
 

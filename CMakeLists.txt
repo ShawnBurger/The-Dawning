@@ -101,6 +101,7 @@ set(RENDER_HEADERS
     src/render/rt_texture_lod.h
     src/render/path_tracer.h
     src/render/environment_ibl.h
+    src/render/render_constants.h
 )
 
 set(SHADER_FILES
@@ -134,6 +135,7 @@ set(ECS_HEADERS
     src/ecs/component_pool.h
     src/ecs/components.h
     src/ecs/registry.h
+    src/ecs/systems.h
 )
 
 # Platform- and GPU-free gameplay policies. These consume custom engine
@@ -238,6 +240,7 @@ set(SCENE_HEADERS
     src/scene/resource_manager.h
     src/scene/scene.h
     src/scene/star_system_seed.h
+    src/scene/model_loader.h
 )
 
 set(TEST_SOURCES

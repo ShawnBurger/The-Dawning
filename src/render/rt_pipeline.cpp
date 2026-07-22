@@ -291,7 +291,7 @@ bool RTPipeline::CreateStateObject(ID3D12Device5* device)
     // We need to build the state object from subobjects
     // Subobjects: DXIL library, hit groups (primary + shadow),
     //             shader config, pipeline config, global root sig
-    const uint32_t kSubobjectCount = 8;
+    const uint32_t kSubobjectCount = 6; // DXIL lib, primary+shadow hit groups, shader config, pipeline config, global root sig
     std::vector<D3D12_STATE_SUBOBJECT> subobjects(kSubobjectCount);
     uint32_t idx = 0;
 
@@ -331,7 +331,7 @@ bool RTPipeline::CreateStateObject(ID3D12Device5* device)
 
     // --- 4. Shader Config (payload + attribute size) ---
     D3D12_RAYTRACING_SHADER_CONFIG shaderConfig = {};
-    shaderConfig.MaxPayloadSizeInBytes   = 48; // hit distance, normal, UV, instance ID
+    shaderConfig.MaxPayloadSizeInBytes   = 32; // RayPayload: hitT, normal, uv, instanceID, conePacked
     shaderConfig.MaxAttributeSizeInBytes = 8;  // float2 barycentrics (built-in triangles)
 
     subobjects[idx].Type  = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;

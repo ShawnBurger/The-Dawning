@@ -122,7 +122,12 @@ bool FileExists(const char* path)
 void SetWorkingDirectoryToExecutable()
 {
     char exePath[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    const DWORD n = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) // 0 = failed; >= MAX_PATH = truncated (maybe unterminated)
+    {
+        core::Log::Warn("Could not resolve executable path; leaving working directory");
+        return;
+    }
     char* lastSlash = std::strrchr(exePath, '\\');
     if (lastSlash)
         *lastSlash = '\0';
@@ -1393,8 +1398,8 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_OEM_2))
             m_timer.SetTimeScale(1.0);
 
-        // F5 cycles which seeded body the near-body view frames (Sun, Earth,
-        // Moon, Mars). Harmless in other modes.
+        // F5 cycles which seeded body the near-body view frames (Earth, Moon,
+        // Mars, Sun — see kFocusCycle below). Harmless in other modes.
         if (input.KeyPressed(VK_F5))
         {
             static const uint64_t kFocusCycle[] = { 10, 11, 20, 1 }; // Earth, Moon, Mars, Sun
@@ -2491,10 +2496,11 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
         m_options.smoke && !m_options.starSystem && !m_smokeCameraTarget.IsNull()
             ? m_smokeCameraTarget   // default smoke probe; NOT when flying the star system
             : m_playerShip;
-    if (m_cameraMode == CameraMode::ShipChase &&
-        registry.TryGet<ecs::Transform>(chaseTarget))
+    const ecs::Transform* ship = (m_cameraMode == CameraMode::ShipChase)
+        ? registry.TryGet<ecs::Transform>(chaseTarget)
+        : nullptr;
+    if (ship)
     {
-        const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget);
         if (m_options.smoke && !m_options.starSystem &&
             !IsReferenceRuntimeContent())
         {

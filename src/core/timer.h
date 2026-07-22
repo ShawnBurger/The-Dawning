@@ -67,7 +67,7 @@ private:
     // Fixed timestep
     double   m_fixedDt = 1.0 / 60.0;      // 60 Hz physics by default
     double   m_accumulator = 0.0;
-    double   m_timeScale = 1.0;           // physics : wall-time ratio (>= real time)
+    double   m_timeScale = 1.0;           // physics:wall-time ratio (>0, finite; <1 slow-mo, >1 warp)
     static constexpr double kMaxDt = 0.25; // Clamp frame dt to prevent spiral of death
     static constexpr int kMaxStepsPerTick = 600; // spiral-of-death cap under warp
 };
