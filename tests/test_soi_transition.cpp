@@ -129,3 +129,35 @@ TEST_CASE(SoiTransition_ProbeCrossingIntoAPlanetSwitchesPrimaryContinuously)
     // The planets themselves did not transition (still bound to the star).
     CHECK_EQ(registry.Get<ecs::OrbitState>(planet).primaryBodyId, 1ull);
 }
+
+TEST_CASE(SoiTransition_DegenerateCoMovingCrossingIsRejectedNotCommitted)
+{
+    // A co-moving crossing (probe velocity bit-exactly equal to the planet's, so
+    // relative velocity is zero) is a DEGENERATE conic: Repatch would yield a NaN
+    // OrbitState that, once committed, fails IsValidOrbit and freezes StepPassive-
+    // Orbits forever. The orchestrator must REJECT it, keeping the valid orbit.
+    FrameGraph frames;
+    const FrameId root = frames.CreateFrame(kInvalidFrame, WorldPos{});
+    ecs::Registry registry;
+    InstantiateStarSystem(registry, root, BuildReferenceSystem());
+
+    const ecs::Entity planet = FindBody(registry, 10);
+    const Vec3d planetPos = registry.Get<ecs::Transform>(planet).position;
+    const Vec3d planetVel = registry.Get<ecs::RigidBody>(planet).linearVelocity;
+    const double planetSoi = SphereOfInfluenceRadius(kAU, kMuEarth, kMuSun);
+
+    // Inside the planet's SOI, but moving EXACTLY with the planet (v_rel == 0).
+    const Vec3d posIn = planetPos + Vec3d{ 0.0, 0.0, planetSoi * 0.5 };
+    const ecs::Entity probe = MakeProbe(registry, root, posIn, planetVel);
+
+    const SoiTransitionResult r = StepSoiTransitions(registry, 100.0, 0.01);
+
+    // The transition was rejected (not applied as a NaN); the probe keeps a
+    // WELL-FORMED orbit — no non-finite element and no parabolic e==1.0 poison.
+    const ecs::OrbitState& po = registry.Get<ecs::OrbitState>(probe);
+    CHECK(std::isfinite(po.elements.inclination));
+    CHECK(std::isfinite(po.elements.semiMajorAxis));
+    CHECK(std::isfinite(po.elements.eccentricity));
+    CHECK(po.elements.eccentricity != 1.0);
+    (void)r;
+}

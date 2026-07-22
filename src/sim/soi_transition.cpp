@@ -9,6 +9,7 @@
 #include "../ecs/components.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
@@ -20,6 +21,22 @@ using core::Vec3d;
 
 namespace {
 struct Candidate { uint64_t bodyId; uint32_t entityIndex; };
+
+// A re-fit conic is safe to commit only if it is well-formed. Repatch's documented
+// precondition is a non-degenerate conic (r×v ≠ 0, r > 0); a bit-exact radial /
+// co-moving crossing violates it and DemoteToRails then yields NaN inclination and
+// e == 1.0. Such an OrbitState would fail IsValidOrbit in the very next
+// StepPassiveOrbits and — because that step commits nothing — freeze propagation
+// permanently and silently. Reject it here (keep the current valid orbit) instead.
+bool IsWellFormedOrbit(const ecs::OrbitState& o)
+{
+    const ecs::OrbitalElements& e = o.elements;
+    return std::isfinite(e.semiMajorAxis) && std::isfinite(e.eccentricity) &&
+           std::isfinite(e.inclination) && std::isfinite(e.longitudeAscNode) &&
+           std::isfinite(e.argPeriapsis) && std::isfinite(e.trueAnomaly) &&
+           std::isfinite(o.primaryMu) && o.primaryMu > 0.0 &&
+           e.eccentricity >= 0.0 && e.eccentricity != 1.0;
+}
 } // namespace
 
 SoiTransitionResult StepSoiTransitions(ecs::Registry& registry, double now,
@@ -105,8 +122,16 @@ SoiTransitionResult StepSoiTransitions(ecs::Registry& registry, double now,
         const Vec3d bodyVel = registry.GetByIndex<ecs::RigidBody>(c.entityIndex).linearVelocity;
 
         // Re-fit the orbit about the new primary, continuous in global (pos, vel).
-        orbit = Repatch(bodyWorld, bodyVel, WorldPos::FromOffset(primaryPos),
-                        primaryVel, primaryMu, dominant, now);
+        // A degenerate crossing (relative state exactly radial / co-moving, or the
+        // body exactly at the primary) yields a NaN conic; committing it would
+        // freeze StepPassiveOrbits forever, so skip the transition and keep the
+        // current valid orbit. A real, non-radial crossing never hits this.
+        const ecs::OrbitState refit =
+            Repatch(bodyWorld, bodyVel, WorldPos::FromOffset(primaryPos),
+                    primaryVel, primaryMu, dominant, now);
+        if (!IsWellFormedOrbit(refit))
+            continue;
+        orbit = refit;
         ++result.transitions;
     }
 
