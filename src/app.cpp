@@ -3271,34 +3271,46 @@ void App::RenderTerrainPreview()
     std::vector<GenResult> gen(missIdx.size());
     auto genOne = [&](uint32_t m)
     {
-        const terrain::QuadPatch& qp = visible[missIdx[m]].qp;
-        terrain::ChunkParams tp;
-        tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
-        tp.gridN = 33;
-        tp.planetRadius = bodyR; tp.amplitudeMeters = amplitude;
-        tp.type = cfg.type; tp.seed = cfg.seed; tp.seaLevel = cfg.seaLevel; tp.coastWidth = cfg.coastWidth;
-        terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
-
-        GenResult& r = gen[m];
-        r.origin  = chunk.origin;
-        r.indices = std::move(chunk.indices);
-        r.verts.resize(chunk.vertices.size());
-        for (size_t i = 0; i < chunk.vertices.size(); ++i)
+        // The JobSystem contract is that a job MUST NOT throw (a throwing job
+        // std::terminates its worker). GenerateChunk and the vector resizes below
+        // allocate, so a std::bad_alloc is possible; catch it and leave this slot
+        // empty (r.verts stays empty -> skipped in the upload loop, drawn next frame)
+        // rather than taking the process down from a worker thread.
+        try
         {
-            const terrain::ChunkVertex& cv = chunk.vertices[i];
-            const core::Vec3d bp{ chunk.origin.x + cv.position.x,
-                                  chunk.origin.y + cv.position.y,
-                                  chunk.origin.z + cv.position.z };
-            const double bl = bp.Length();
-            const core::Vec3f od = (bl > 0.0)
-                ? core::Vec3f{ static_cast<float>(bp.x / bl),
-                               static_cast<float>(bp.y / bl),
-                               static_cast<float>(bp.z / bl) }
-                : core::Vec3f{ 0.0f, 0.0f, 1.0f };
-            r.verts[i].position = cv.position;
-            r.verts[i].normal   = cv.normal;
-            r.verts[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
-            r.verts[i].uv       = cv.uv;
+            const terrain::QuadPatch& qp = visible[missIdx[m]].qp;
+            terrain::ChunkParams tp;
+            tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
+            tp.gridN = 33;
+            tp.planetRadius = bodyR; tp.amplitudeMeters = amplitude;
+            tp.type = cfg.type; tp.seed = cfg.seed; tp.seaLevel = cfg.seaLevel; tp.coastWidth = cfg.coastWidth;
+            terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
+
+            GenResult& r = gen[m];
+            r.origin  = chunk.origin;
+            r.indices = std::move(chunk.indices);
+            r.verts.resize(chunk.vertices.size());
+            for (size_t i = 0; i < chunk.vertices.size(); ++i)
+            {
+                const terrain::ChunkVertex& cv = chunk.vertices[i];
+                const core::Vec3d bp{ chunk.origin.x + cv.position.x,
+                                      chunk.origin.y + cv.position.y,
+                                      chunk.origin.z + cv.position.z };
+                const double bl = bp.Length();
+                const core::Vec3f od = (bl > 0.0)
+                    ? core::Vec3f{ static_cast<float>(bp.x / bl),
+                                   static_cast<float>(bp.y / bl),
+                                   static_cast<float>(bp.z / bl) }
+                    : core::Vec3f{ 0.0f, 0.0f, 1.0f };
+                r.verts[i].position = cv.position;
+                r.verts[i].normal   = cv.normal;
+                r.verts[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
+                r.verts[i].uv       = cv.uv;
+            }
+        }
+        catch (...)
+        {
+            gen[m].verts.clear(); // leave this patch for a later frame
         }
     };
     if (missIdx.size() > 1)
