@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "asset_id": "ship.frontier.courier_mk1",
+  "status": "design_authority",
+  "units": "meters",
+  "coordinate_system": {
+    "handedness": "left",
+    "up": "+Y",
+    "forward": "+Z",
+    "root_origin": "center_of_design_envelope"
+  },
+  "envelope_m": {
+    "width_x": 16.0,
+    "height_y": 7.0,
+    "length_z": 28.0
+  },
+  "proportion_contract": {
+    "ordering": "length_z > width_x > height_y",
+    "length_to_width": 1.75,
+    "height_to_width": 0.4375,
+    "minimum_length_to_width": 1.5,
+    "allowed_height_to_width": [0.35, 0.55],
+    "silhouette": "longitudinal pressure spacecraft",
+    "reject": [
+      "width-dominant hull",
+      "saucer or disk silhouette",
+      "pancake hull",
+      "height outside the authored hull-class band"
+    ]
+  },
+  "habitable_envelope_m": {
+    "width_x": 9.0,
+    "height_y": 3.2,
+    "length_z": 22.0,
+    "deck_floor_y": -1.2
+  },
+  "human_factors": {
+    "player_capsule_radius": 0.35,
+    "player_capsule_height": 1.8,
+    "minimum_standing_clearance": 2.1,
+    "nominal_clear_height": 2.4,
+    "minimum_door_clear_width": 0.95,
+    "nominal_door_clear_width": 1.05,
+    "nominal_door_clear_height": 2.2,
+    "main_corridor_clear_width": 1.4,
+    "boarding_threshold_max_step": 0.2,
+    "handrail_height": 1.0
+  },
+  "pressure_structure": {
+    "nominal_visual_shell_thickness": 0.18,
+    "outer_hatch_clear_width": 1.2,
+    "outer_hatch_clear_height": 2.2,
+    "airlock_chamber_width": 2.4,
+    "airlock_chamber_height": 2.4,
+    "airlock_chamber_length": 2.8
+  },
+  "modules": [
+    {
+      "id": "exterior_hull",
+      "role": "exterior",
+      "center_m": [0.0, 0.0, 0.0],
+      "clear_size_m": [16.0, 7.0, 28.0]
+    },
+    {
+      "id": "boarding_vestibule",
+      "role": "interior_unpressurized",
+      "center_m": [0.0, -0.1, -12.8],
+      "clear_size_m": [1.25, 2.25, 2.4]
+    },
+    {
+      "id": "airlock_module",
+      "role": "interior",
+      "center_m": [0.0, 0.0, -10.2],
+      "clear_size_m": [2.4, 2.4, 2.8]
+    },
+    {
+      "id": "main_corridor",
+      "role": "interior",
+      "center_m": [0.0, 0.0, -3.9],
+      "clear_size_m": [1.4, 2.4, 9.8]
+    },
+    {
+      "id": "cockpit_module",
+      "role": "interior",
+      "center_m": [0.0, 0.0, 5.0],
+      "clear_size_m": [4.8, 2.5, 8.0]
+    },
+    {
+      "id": "engineering_module",
+      "role": "interior",
+      "center_m": [2.5, 0.0, -4.5],
+      "clear_size_m": [3.6, 2.5, 4.5]
+    },
+    {
+      "id": "cargo_module",
+      "role": "interior",
+      "center_m": [-3.45, 0.0, -3.0],
+      "clear_size_m": [5.5, 2.8, 6.0]
+    },
+    {
+      "id": "crew_module",
+      "role": "interior",
+      "center_m": [2.6, 0.0, -0.8],
+      "clear_size_m": [3.8, 2.4, 4.5]
+    }
+  ],
+  "required_zone_path": [
+    "outside",
+    "boarding_vestibule",
+    "airlock",
+    "corridor",
+    "cockpit"
+  ],
+  "required_zones": [
+    "boarding_vestibule",
+    "airlock",
+    "corridor",
+    "cockpit",
+    "engineering",
+    "cargo",
+    "crew"
+  ],
+  "source_studies": [
+    {
+      "request_hash": "77756cfe9565468ef8a899aae1ce7099a05365ac521d0d45502eec10e423ccdc",
+      "module_id": "exterior_centerline",
+      "status": "rejected_for_production",
+      "reasons": [
+        "aircraft-like silhouette instead of a modular pressure spacecraft",
+        "generated long axis is X rather than authored +Z",
+        "no trustworthy exterior boarding or docking interface",
+        "surface breakup is below the hero photoreal target"
+      ]
+    }
+  ]
+}

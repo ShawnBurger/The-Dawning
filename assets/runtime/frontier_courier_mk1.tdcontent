@@ -1,0 +1,66 @@
+tdcontent 2
+scene "ship.frontier.courier_mk1.runtime"
+assembly "frontier_courier_mk1.tdassembly"
+root 0 0 0 0 0 0 1 1 1
+visual "source://frontier_courier/exterior_hull_lod0.glb" "frontier_courier_hull_lods.tdmodel" 0
+visual "visual://frontier_courier/exterior_hull_lod0" "frontier_courier_hull_lods.tdmodel" 0
+visual "visual://frontier_courier/exterior_hull_lod1" "frontier_courier_hull_lods.tdmodel" 1
+visual "visual://frontier_courier/exterior_hull_lod2" "frontier_courier_hull_lods.tdmodel" 2
+visual "source://frontier_courier/boarding_vestibule_lod0.glb" "frontier_courier_interior_lods.tdmodel" 0
+visual "visual://frontier_courier/boarding_vestibule_lod0" "frontier_courier_interior_lods.tdmodel" 0
+visual "visual://frontier_courier/boarding_vestibule_lod1" "frontier_courier_interior_lods.tdmodel" 1
+visual "visual://frontier_courier/boarding_vestibule_lod2" "frontier_courier_interior_lods.tdmodel" 2
+visual "source://frontier_courier/airlock_lod0.glb" "frontier_courier_interior_lods.tdmodel" 3
+visual "visual://frontier_courier/airlock_lod0" "frontier_courier_interior_lods.tdmodel" 3
+visual "visual://frontier_courier/airlock_lod1" "frontier_courier_interior_lods.tdmodel" 4
+visual "visual://frontier_courier/airlock_lod2" "frontier_courier_interior_lods.tdmodel" 5
+visual "source://frontier_courier/main_corridor_lod0.glb" "frontier_courier_interior_lods.tdmodel" 6
+visual "visual://frontier_courier/main_corridor_lod0" "frontier_courier_interior_lods.tdmodel" 6
+visual "visual://frontier_courier/main_corridor_lod1" "frontier_courier_interior_lods.tdmodel" 7
+visual "visual://frontier_courier/main_corridor_lod2" "frontier_courier_interior_lods.tdmodel" 8
+visual "source://frontier_courier/cockpit_lod0.glb" "frontier_courier_interior_lods.tdmodel" 9
+visual "visual://frontier_courier/cockpit_lod0" "frontier_courier_interior_lods.tdmodel" 9
+visual "visual://frontier_courier/cockpit_lod1" "frontier_courier_interior_lods.tdmodel" 10
+visual "visual://frontier_courier/cockpit_lod2" "frontier_courier_interior_lods.tdmodel" 11
+visual "source://frontier_courier/engineering_lod0.glb" "frontier_courier_interior_lods.tdmodel" 12
+visual "visual://frontier_courier/engineering_lod0" "frontier_courier_interior_lods.tdmodel" 12
+visual "visual://frontier_courier/engineering_lod1" "frontier_courier_interior_lods.tdmodel" 13
+visual "visual://frontier_courier/engineering_lod2" "frontier_courier_interior_lods.tdmodel" 14
+visual "source://frontier_courier/cargo_lod0.glb" "frontier_courier_interior_lods.tdmodel" 15
+visual "visual://frontier_courier/cargo_lod0" "frontier_courier_interior_lods.tdmodel" 15
+visual "visual://frontier_courier/cargo_lod1" "frontier_courier_interior_lods.tdmodel" 16
+visual "visual://frontier_courier/cargo_lod2" "frontier_courier_interior_lods.tdmodel" 17
+visual "source://frontier_courier/crew_lod0.glb" "frontier_courier_interior_lods.tdmodel" 18
+visual "visual://frontier_courier/crew_lod0" "frontier_courier_interior_lods.tdmodel" 18
+visual "visual://frontier_courier/crew_lod1" "frontier_courier_interior_lods.tdmodel" 19
+visual "visual://frontier_courier/crew_lod2" "frontier_courier_interior_lods.tdmodel" 20
+visual "visual://frontier_courier/outer_hatch_panel" "frontier_courier_interior_lods.tdmodel" 21
+visual "visual://frontier_courier/airlock_outer_door_panel" "frontier_courier_interior_lods.tdmodel" 22
+visual "visual://frontier_courier/inner_door_panel" "frontier_courier_interior_lods.tdmodel" 23
+visual "visual://frontier_courier/cockpit_door_panel" "frontier_courier_interior_lods.tdmodel" 24
+visual "visual://frontier_courier/engineering_door_panel" "frontier_courier_interior_lods.tdmodel" 25
+visual "visual://frontier_courier/cargo_door_panel" "frontier_courier_interior_lods.tdmodel" 26
+visual "visual://frontier_courier/crew_door_panel" "frontier_courier_interior_lods.tdmodel" 27
+collision "collision://frontier_courier/exterior_hull" "frontier_courier_exterior_hull.tdcollision"
+collision "collision://frontier_courier/boarding_vestibule" "frontier_courier_boarding_vestibule.tdcollision"
+collision "collision://frontier_courier/airlock" "frontier_courier_airlock_module.tdcollision"
+collision "collision://frontier_courier/main_corridor" "frontier_courier_main_corridor.tdcollision"
+collision "collision://frontier_courier/cockpit" "frontier_courier_cockpit_module.tdcollision"
+collision "collision://frontier_courier/engineering" "frontier_courier_engineering_module.tdcollision"
+collision "collision://frontier_courier/cargo" "frontier_courier_cargo_module.tdcollision"
+collision "collision://frontier_courier/crew" "frontier_courier_crew_module.tdcollision"
+navigation "nav://frontier_courier/boarding_vestibule"
+walkable "walk://frontier_courier/boarding_vestibule_floor"
+navigation "nav://frontier_courier/airlock"
+walkable "walk://frontier_courier/airlock_floor"
+navigation "nav://frontier_courier/main_corridor"
+walkable "walk://frontier_courier/main_corridor_floor"
+navigation "nav://frontier_courier/cockpit"
+walkable "walk://frontier_courier/cockpit_floor"
+navigation "nav://frontier_courier/engineering"
+walkable "walk://frontier_courier/engineering_floor"
+navigation "nav://frontier_courier/cargo"
+walkable "walk://frontier_courier/cargo_floor"
+navigation "nav://frontier_courier/crew"
+walkable "walk://frontier_courier/crew_floor"
+end

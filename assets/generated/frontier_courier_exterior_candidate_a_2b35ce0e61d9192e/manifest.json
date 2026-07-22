@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T00:24:44.202935+00:00",
+  "request_hash": "2b35ce0e61d9192e1a122a51327855b150d44cb856d67bcff683088feba45e1d",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "d9f33a4c8d3e369dea68bba9c3f815ee45473915e393c9887179c7c64edeecd0",
+    "input_task_id": "019f8730-2b7a-776a-9a2e-e61576520049",
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_hull",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit physically based aerospace finish matching the approved views: off-white ceramic-coated titanium and aluminum hull panels, dark carbon thermal tiles, black radiators, smoked armored cockpit glass, exposed steel and copper service hardware, restrained grime at seams and thrusters, no baked illumination, text, logos, decals, weapons or emissive fantasy effects.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8732-5ec2-7801-8957-01b5c2328d9b",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784679656752,
+      "started_at": 1784679656888,
+      "finished_at": 1784679877737,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "dc417070f60e5929b456a4d8fafb763db62f6e66f0ba19f886dd64907de806e1",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "05b7a946990892d879ffd381ec039b8d10111f5ed539829321e5f61965e26c54",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "4a7d5b70f82ef3794ad57fcaf9446a5aa70a794885af52188febf486f39a3b3c",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "7a1b4d0a713e5271293ee3f690b12e2ed9257caf3afd9aae11bc33b74abd6a5e",
+      "metallic_0": "8a0bf5290477c3d3bb3130c075e066365f63484ac79b6bb2f0ecf2bbc3e86654",
+      "roughness_0": "ac01b4f51e59c5eb21037204e6e1edd3f1fa40b93f6f9d56efb4f2e9c02d9385",
+      "normal_0": "47a0cccf00ebd461c7870d150791f82e417b84b04413286d073daa1b10fc747d",
+      "emission_0": "8aaecd6bd59cb1c953c5f023782c3c151775054f593ad3f0900b3657f0ba3b85"
+    }
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "vertices": 138947,
+    "indices": 362385,
+    "triangles": 120795,
+    "materials": 1,
+    "textures": 4,
+    "images": 4,
+    "bounds_min": [-0.9499, -0.4918, -0.8586],
+    "bounds_max": [0.9476, 0.4909, 0.8603]
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "reviewed_at_utc": "2026-07-22T00:26:00Z",
+    "reasons": [
+      "partial neighboring-view source fragment reconstructed as detached geometry",
+      "raw bounds ratio does not preserve the authored 28 m by 16 m by 7 m envelope",
+      "rear and engine forms are not consistent enough for socket-authoritative assembly",
+      "candidate is unsuitable for collision, navigation, pressure, or moving-part extraction"
+    ],
+    "disposition": "retain under assets/generated as a provenance-backed negative control; do not refine or promote"
+  },
+  "consumed_credits": 30
+}

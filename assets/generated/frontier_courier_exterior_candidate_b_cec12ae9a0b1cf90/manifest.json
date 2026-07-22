@@ -1,0 +1,98 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T00:42:33.219768+00:00",
+  "request_hash": "cec12ae9a0b1cf90e16eb74ebc371f3f20cd8587968df5d23752c4c0aa3b7db7",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "9f3dffcc886ead1fdd866987c4f91fdca8dd7305c15ba2922a9525fb75ddbd4d",
+    "input_mode": "retained_images",
+    "input_task_id": null,
+    "input_images": [
+      {
+        "name": "view_0.png",
+        "mime_type": "image/png",
+        "byte_count": 171957,
+        "sha256": "6b16c6daba1e9fc2929a385358d2ec4a220b6707d4393a585e917975711944ce"
+      },
+      {
+        "name": "view_1.png",
+        "mime_type": "image/png",
+        "byte_count": 172344,
+        "sha256": "f42469cd7e4455ff2676bb6c29e23389327d27e415cd98a5eca16c7b0d2d9e37"
+      },
+      {
+        "name": "view_2.png",
+        "mime_type": "image/png",
+        "byte_count": 264466,
+        "sha256": "3b3ffbcc6164a914a3f88c844af5d8903650a1fc51003a8c32ccab063124a71d"
+      }
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_hull",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit physically based aerospace finish: off-white ceramic-coated titanium and aluminum pressure-hull panels, dark carbon thermal tiles, black radiators, smoked armored glass, exposed steel and copper service hardware, restrained seam and thruster grime. Clear maintenance access and structural panel hierarchy. No baked illumination, text, logos, decals, weapons or fantasy glow.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8742-b388-7344-aee4-e8488948e7fe",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784680725872,
+      "started_at": 1784680725938,
+      "finished_at": 1784680944858,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [
+      "input_0.png",
+      "input_1.png",
+      "input_2.png"
+    ],
+    "input_image_sha256": {
+      "input_0.png": "6b16c6daba1e9fc2929a385358d2ec4a220b6707d4393a585e917975711944ce",
+      "input_1.png": "f42469cd7e4455ff2676bb6c29e23389327d27e415cd98a5eca16c7b0d2d9e37",
+      "input_2.png": "3b3ffbcc6164a914a3f88c844af5d8903650a1fc51003a8c32ccab063124a71d"
+    },
+    "model": "model.glb",
+    "model_sha256": "d9be79075db9f51a721aaa350d7bd56cb66dd3059c73655e1841641b5f324a72",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "4059f6fc4fc910bf84b6addcdc18e4a27719391522ed9e1e65ff964927e5cb9f",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "36ab165b7b4aa41f0c6c319c6b3690072826162920cb8d89ba1307c75d74493b",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "0b76e88c266055b9071836f70cc4185f2696cc79d162a7f5697d7c7abe3d275c",
+      "metallic_0": "38475d7175087b2ffd65331ef3097edda74abae18284bd92a4061034c52403a8",
+      "roughness_0": "10889e8210b5d2aed02903f490ce96c4bc8d61672bbe1130ae26588333568e24",
+      "normal_0": "a19f9ad40aaa9b7d07e94def1397285b016eb8d650be12497f511c5f40ba06c9",
+      "emission_0": "a5c5c876499eeac8cc5329c42492ead2431a5b2c43cd2b4a4f487307d5866b0d"
+    }
+  },
+  "consumed_credits": 30
+}

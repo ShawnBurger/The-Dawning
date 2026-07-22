@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T00:19:17.829025+00:00",
+  "request_hash": "d9f33a4c8d3e369dea68bba9c3f815ee45473915e393c9887179c7c64edeecd0",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Photorealistic industrial spacecraft: a compact 28 m frontier courier with a blunt faceted pressure hull, broad 16 m beam, 7 m height and a two-deck center body. Armored cockpit glazing near the nose; visible side boarding airlock collar; bilateral modular engine hardpoints but no detached engines. RCS clusters, radiators, heat shielding, landing-gear bays, layered titanium, aluminum and carbon panels, and service hatches. NASA-real engineering, clean neutral studio. Exact same object in every view. No airplane wings or tail, weapons, text, logos, stand, ground or background.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_hull",
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8730-2b7a-776a-9a2e-e61576520049",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784679510561,
+      "started_at": 1784679510648,
+      "finished_at": 1784679548097,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "c60395912ef3c81af1f9e8177256db03d4cd003120b8726aa706f152a275dff0",
+      "view_1.png": "277a4a7902af99c59421af5224643ec8dcd1b320f58c112993c6f14451a2f1b3",
+      "view_2.png": "92da8def922d22294138598f97df5416a5175375588dea4dc3c8f3fb47c7a191"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T00:21:00Z",
+    "strengths": [
+      "consistent blunt two-deck spacecraft silhouette across front, rear, and side views",
+      "readable armored cockpit and integrated bilateral propulsion modules",
+      "explicit side boarding collar suitable for the authored airlock socket",
+      "credible layered aerospace materials and maintainable service-panel language"
+    ],
+    "risks": [
+      "partial neighboring-view fragments appear at two image edges and must not become geometry",
+      "generated exterior detail does not own scale, collision, portals, pivots, or pressure topology",
+      "candidate geometry still requires dimensional normalization and engine-side validation"
+    ]
+  },
+  "consumed_credits": 9
+}

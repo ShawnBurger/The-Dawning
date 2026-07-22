@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "collision_id": "frontier_courier.airlock_module",
+  "boxes": [
+    {
+      "id": "ceiling",
+      "center_m": [
+        0.0,
+        1.25,
+        0.0
+      ],
+      "half_extents_m": [
+        1.25,
+        0.05,
+        1.45
+      ],
+      "walkable": false
+    },
+    {
+      "id": "floor",
+      "center_m": [
+        0.0,
+        -1.25,
+        0.0
+      ],
+      "half_extents_m": [
+        1.25,
+        0.05,
+        1.45
+      ],
+      "walkable": true
+    },
+    {
+      "id": "frame_aft_left",
+      "center_m": [
+        -0.8625,
+        0.0,
+        -1.45
+      ],
+      "half_extents_m": [
+        0.3375,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "frame_aft_right",
+      "center_m": [
+        0.8625,
+        0.0,
+        -1.45
+      ],
+      "half_extents_m": [
+        0.3375,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "frame_fore_left",
+      "center_m": [
+        -0.8625,
+        0.0,
+        1.45
+      ],
+      "half_extents_m": [
+        0.3375,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "frame_fore_right",
+      "center_m": [
+        0.8625,
+        0.0,
+        1.45
+      ],
+      "half_extents_m": [
+        0.3375,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "lintel_aft",
+      "center_m": [
+        0.0,
+        1.1,
+        -1.45
+      ],
+      "half_extents_m": [
+        0.525,
+        0.1,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "lintel_fore",
+      "center_m": [
+        0.0,
+        1.1,
+        1.45
+      ],
+      "half_extents_m": [
+        0.525,
+        0.1,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "wall_left_00",
+      "center_m": [
+        -1.25,
+        0.0,
+        0.0
+      ],
+      "half_extents_m": [
+        0.05,
+        1.2,
+        1.4
+      ],
+      "walkable": false
+    },
+    {
+      "id": "wall_right_00",
+      "center_m": [
+        1.25,
+        0.0,
+        0.0
+      ],
+      "half_extents_m": [
+        0.05,
+        1.2,
+        1.4
+      ],
+      "walkable": false
+    }
+  ]
+}

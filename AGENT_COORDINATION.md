@@ -2335,10 +2335,23 @@ are now integrated as well. The current order is:
   pressure metadata, combined moving parts, invalid pivots, fewer than three LOD
   identities, or an exterior with no continuous interior fails production
   acceptance without replacing the reference fixture.
-- Next action: freeze the ship dimension/zone/socket brief, perform zero-credit
-  Meshy request review, generate the first bounded exterior module preview, and
-  inspect its geometry before approving texture refinement or additional
-  modules.
+- Current checkpoint (2026-07-21): the 28 x 16 x 7 m longitudinal envelope,
+  seven-zone topology, exterior source, connected boarding cavity, 28-primitive
+  modular interior, seven moving closures, eight deterministic collision
+  packages, cooked assembly, and exact 61-binding runtime catalog are authored
+  and authenticated. All model, assembly, collision, and content recooks are
+  byte-identical. The runtime admits the courier's 8 modules, 7 moving parts,
+  88 static boxes, and 14 initial dynamic closure blockers; the legacy app smoke
+  then reaches a reference-ship-specific door-location assertion.
+- Remaining gates: give production content an explicit runtime scene-selection
+  path so courier testing does not inherit reference-fixture assertions; capture
+  courier raster/stable-DXR/full-DXR and possession/exit/re-entry evidence; and
+  replace the systems-safe interior blockout dressing with reviewed production
+  consoles, seats, storage, tools, piping, displays, materials, and habitation
+  props without changing its certified clearances or topology.
+- Next action: merge the authenticated production-kit checkpoint, then add the
+  independent courier runtime test path before beginning production interior
+  dressing.
 
 ## 20. Helper Commands
 

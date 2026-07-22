@@ -1,0 +1,841 @@
+{
+  "schema_version": 1,
+  "asset_id": "ship.frontier.courier_mk1",
+  "tool": "tools/blender/build_frontier_courier_interior.py",
+  "blender_version": "4.5.0",
+  "design_authority": {
+    "path": "assets/design/frontier_courier_mk1/dimensions.json",
+    "sha256": "db3b7eb7ed0b78a75da1f87b7582f7550088d06618304fc5b2aa752b2d101fd8"
+  },
+  "assembly_manifest": {
+    "path": "assets/manifests/frontier_courier_mk1.design.tdasset.json",
+    "sha256": "f73f7adf701c3630fbb58ccae215f41473b42414bde49bbc805b7c2417f67800"
+  },
+  "primitive_order": [
+    "FrontierCourier_BoardingVestibule_LOD0",
+    "FrontierCourier_BoardingVestibule_LOD1",
+    "FrontierCourier_BoardingVestibule_LOD2",
+    "FrontierCourier_AirlockModule_LOD0",
+    "FrontierCourier_AirlockModule_LOD1",
+    "FrontierCourier_AirlockModule_LOD2",
+    "FrontierCourier_MainCorridor_LOD0",
+    "FrontierCourier_MainCorridor_LOD1",
+    "FrontierCourier_MainCorridor_LOD2",
+    "FrontierCourier_CockpitModule_LOD0",
+    "FrontierCourier_CockpitModule_LOD1",
+    "FrontierCourier_CockpitModule_LOD2",
+    "FrontierCourier_EngineeringModule_LOD0",
+    "FrontierCourier_EngineeringModule_LOD1",
+    "FrontierCourier_EngineeringModule_LOD2",
+    "FrontierCourier_CargoModule_LOD0",
+    "FrontierCourier_CargoModule_LOD1",
+    "FrontierCourier_CargoModule_LOD2",
+    "FrontierCourier_CrewModule_LOD0",
+    "FrontierCourier_CrewModule_LOD1",
+    "FrontierCourier_CrewModule_LOD2",
+    "FrontierCourier_outer_hatch_panel",
+    "FrontierCourier_airlock_outer_door_panel",
+    "FrontierCourier_inner_door_panel",
+    "FrontierCourier_cockpit_door_panel",
+    "FrontierCourier_engineering_door_panel",
+    "FrontierCourier_cargo_door_panel",
+    "FrontierCourier_crew_door_panel"
+  ],
+  "bindings": {
+    "source://frontier_courier/boarding_vestibule_lod0.glb": 0,
+    "visual://frontier_courier/boarding_vestibule_lod0": 0,
+    "visual://frontier_courier/boarding_vestibule_lod1": 1,
+    "visual://frontier_courier/boarding_vestibule_lod2": 2,
+    "source://frontier_courier/airlock_lod0.glb": 3,
+    "visual://frontier_courier/airlock_lod0": 3,
+    "visual://frontier_courier/airlock_lod1": 4,
+    "visual://frontier_courier/airlock_lod2": 5,
+    "source://frontier_courier/main_corridor_lod0.glb": 6,
+    "visual://frontier_courier/main_corridor_lod0": 6,
+    "visual://frontier_courier/main_corridor_lod1": 7,
+    "visual://frontier_courier/main_corridor_lod2": 8,
+    "source://frontier_courier/cockpit_lod0.glb": 9,
+    "visual://frontier_courier/cockpit_lod0": 9,
+    "visual://frontier_courier/cockpit_lod1": 10,
+    "visual://frontier_courier/cockpit_lod2": 11,
+    "source://frontier_courier/engineering_lod0.glb": 12,
+    "visual://frontier_courier/engineering_lod0": 12,
+    "visual://frontier_courier/engineering_lod1": 13,
+    "visual://frontier_courier/engineering_lod2": 14,
+    "source://frontier_courier/cargo_lod0.glb": 15,
+    "visual://frontier_courier/cargo_lod0": 15,
+    "visual://frontier_courier/cargo_lod1": 16,
+    "visual://frontier_courier/cargo_lod2": 17,
+    "source://frontier_courier/crew_lod0.glb": 18,
+    "visual://frontier_courier/crew_lod0": 18,
+    "visual://frontier_courier/crew_lod1": 19,
+    "visual://frontier_courier/crew_lod2": 20,
+    "visual://frontier_courier/outer_hatch_panel": 21,
+    "visual://frontier_courier/airlock_outer_door_panel": 22,
+    "visual://frontier_courier/inner_door_panel": 23,
+    "visual://frontier_courier/cockpit_door_panel": 24,
+    "visual://frontier_courier/engineering_door_panel": 25,
+    "visual://frontier_courier/cargo_door_panel": 26,
+    "visual://frontier_courier/crew_door_panel": 27
+  },
+  "geometry": [
+    {
+      "primitive_index": 0,
+      "name": "FrontierCourier_BoardingVestibule_LOD0",
+      "module": "boarding_vestibule",
+      "lod": 0,
+      "geometry": {
+        "vertices": 840,
+        "edges": 1620,
+        "faces": 810,
+        "triangles": 1620,
+        "connected_components": 15,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1.0136523037864245,
+        "dimensions_blender_xyz_m": [
+          1.350000023841858,
+          2.5,
+          2.3499999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 1,
+      "name": "FrontierCourier_BoardingVestibule_LOD1",
+      "module": "boarding_vestibule",
+      "lod": 1,
+      "geometry": {
+        "vertices": 784,
+        "edges": 1512,
+        "faces": 756,
+        "triangles": 1512,
+        "connected_components": 14,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.9400514567469868,
+        "dimensions_blender_xyz_m": [
+          1.350000023841858,
+          2.5,
+          2.3499999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 2,
+      "name": "FrontierCourier_BoardingVestibule_LOD2",
+      "module": "boarding_vestibule",
+      "lod": 2,
+      "geometry": {
+        "vertices": 80,
+        "edges": 120,
+        "faces": 60,
+        "triangles": 120,
+        "connected_components": 10,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.9277497918605748,
+        "dimensions_blender_xyz_m": [
+          1.350000023841858,
+          2.5,
+          2.3499999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 3,
+      "name": "FrontierCourier_AirlockModule_LOD0",
+      "module": "airlock_module",
+      "lod": 0,
+      "geometry": {
+        "vertices": 1008,
+        "edges": 1944,
+        "faces": 972,
+        "triangles": 1944,
+        "connected_components": 18,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1.8146318205496619,
+        "dimensions_blender_xyz_m": [
+          2.5,
+          2.9000000953674316,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 4,
+      "name": "FrontierCourier_AirlockModule_LOD1",
+      "module": "airlock_module",
+      "lod": 1,
+      "geometry": {
+        "vertices": 784,
+        "edges": 1512,
+        "faces": 756,
+        "triangles": 1512,
+        "connected_components": 14,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1.7565373182475612,
+        "dimensions_blender_xyz_m": [
+          2.5,
+          2.9000000953674316,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 5,
+      "name": "FrontierCourier_AirlockModule_LOD2",
+      "module": "airlock_module",
+      "lod": 2,
+      "geometry": {
+        "vertices": 80,
+        "edges": 120,
+        "faces": 60,
+        "triangles": 120,
+        "connected_components": 10,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1.7419992516041147,
+        "dimensions_blender_xyz_m": [
+          2.5,
+          2.9000000953674316,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 6,
+      "name": "FrontierCourier_MainCorridor_LOD0",
+      "module": "main_corridor",
+      "lod": 0,
+      "geometry": {
+        "vertices": 2016,
+        "edges": 3888,
+        "faces": 1944,
+        "triangles": 3888,
+        "connected_components": 36,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.68722344557215,
+        "dimensions_blender_xyz_m": [
+          1.5,
+          9.899999618530273,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 7,
+      "name": "FrontierCourier_MainCorridor_LOD1",
+      "module": "main_corridor",
+      "lod": 1,
+      "geometry": {
+        "vertices": 1904,
+        "edges": 3672,
+        "faces": 1836,
+        "triangles": 3672,
+        "connected_components": 34,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.65829355608904,
+        "dimensions_blender_xyz_m": [
+          1.5,
+          9.899999618530273,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 8,
+      "name": "FrontierCourier_MainCorridor_LOD2",
+      "module": "main_corridor",
+      "lod": 2,
+      "geometry": {
+        "vertices": 128,
+        "edges": 192,
+        "faces": 96,
+        "triangles": 192,
+        "connected_components": 16,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.595498559564369,
+        "dimensions_blender_xyz_m": [
+          1.5,
+          9.899999618530273,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 9,
+      "name": "FrontierCourier_CockpitModule_LOD0",
+      "module": "cockpit_module",
+      "lod": 0,
+      "geometry": {
+        "vertices": 1736,
+        "edges": 3348,
+        "faces": 1674,
+        "triangles": 3348,
+        "connected_components": 31,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 10.585733969868741,
+        "dimensions_blender_xyz_m": [
+          4.900000095367432,
+          8.100000381469727,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 10,
+      "name": "FrontierCourier_CockpitModule_LOD1",
+      "module": "cockpit_module",
+      "lod": 1,
+      "geometry": {
+        "vertices": 1232,
+        "edges": 2376,
+        "faces": 1188,
+        "triangles": 2376,
+        "connected_components": 22,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 7.1308762118909295,
+        "dimensions_blender_xyz_m": [
+          4.900000095367432,
+          8.100000381469727,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 11,
+      "name": "FrontierCourier_CockpitModule_LOD2",
+      "module": "cockpit_module",
+      "lod": 2,
+      "geometry": {
+        "vertices": 64,
+        "edges": 96,
+        "faces": 48,
+        "triangles": 96,
+        "connected_components": 8,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 7.053498762279705,
+        "dimensions_blender_xyz_m": [
+          4.900000095367432,
+          8.100000381469727,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 12,
+      "name": "FrontierCourier_EngineeringModule_LOD0",
+      "module": "engineering_module",
+      "lod": 0,
+      "geometry": {
+        "vertices": 1176,
+        "edges": 2268,
+        "faces": 1134,
+        "triangles": 2268,
+        "connected_components": 21,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 6.200226525511333,
+        "dimensions_blender_xyz_m": [
+          3.700000047683716,
+          4.599999904632568,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 13,
+      "name": "FrontierCourier_EngineeringModule_LOD1",
+      "module": "engineering_module",
+      "lod": 1,
+      "geometry": {
+        "vertices": 840,
+        "edges": 1620,
+        "faces": 810,
+        "triangles": 1620,
+        "connected_components": 15,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.6445524128483564,
+        "dimensions_blender_xyz_m": [
+          3.700000047683716,
+          4.599999904632568,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 14,
+      "name": "FrontierCourier_EngineeringModule_LOD2",
+      "module": "engineering_module",
+      "lod": 2,
+      "geometry": {
+        "vertices": 64,
+        "edges": 96,
+        "faces": 48,
+        "triangles": 96,
+        "connected_components": 8,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.6114989313185646,
+        "dimensions_blender_xyz_m": [
+          3.700000047683716,
+          4.599999904632568,
+          2.5999999046325684
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 15,
+      "name": "FrontierCourier_CargoModule_LOD0",
+      "module": "cargo_module",
+      "lod": 0,
+      "geometry": {
+        "vertices": 1288,
+        "edges": 2484,
+        "faces": 1242,
+        "triangles": 2484,
+        "connected_components": 23,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 6.753258044705662,
+        "dimensions_blender_xyz_m": [
+          5.599999904632568,
+          6.099999904632568,
+          2.9000000953674316
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 16,
+      "name": "FrontierCourier_CargoModule_LOD1",
+      "module": "cargo_module",
+      "lod": 1,
+      "geometry": {
+        "vertices": 1008,
+        "edges": 1944,
+        "faces": 972,
+        "triangles": 1944,
+        "connected_components": 18,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 6.581413464764196,
+        "dimensions_blender_xyz_m": [
+          5.599999904632568,
+          6.099999904632568,
+          2.9000000953674316
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 17,
+      "name": "FrontierCourier_CargoModule_LOD2",
+      "module": "cargo_module",
+      "lod": 2,
+      "geometry": {
+        "vertices": 64,
+        "edges": 96,
+        "faces": 48,
+        "triangles": 96,
+        "connected_components": 8,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 6.520501765400059,
+        "dimensions_blender_xyz_m": [
+          5.599999904632568,
+          6.099999904632568,
+          2.9000000953674316
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 18,
+      "name": "FrontierCourier_CrewModule_LOD0",
+      "module": "crew_module",
+      "lod": 0,
+      "geometry": {
+        "vertices": 1120,
+        "edges": 2160,
+        "faces": 1080,
+        "triangles": 2160,
+        "connected_components": 20,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 5.858103064513038,
+        "dimensions_blender_xyz_m": [
+          3.9000000953674316,
+          4.599999904632568,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 19,
+      "name": "FrontierCourier_CrewModule_LOD1",
+      "module": "crew_module",
+      "lod": 1,
+      "geometry": {
+        "vertices": 840,
+        "edges": 1620,
+        "faces": 810,
+        "triangles": 1620,
+        "connected_components": 15,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.703537255875319,
+        "dimensions_blender_xyz_m": [
+          3.9000000953674316,
+          4.599999904632568,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 20,
+      "name": "FrontierCourier_CrewModule_LOD2",
+      "module": "crew_module",
+      "lod": 2,
+      "geometry": {
+        "vertices": 64,
+        "edges": 96,
+        "faces": 48,
+        "triangles": 96,
+        "connected_components": 8,
+        "largest_component_vertices": 8,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 3.6704988762140593,
+        "dimensions_blender_xyz_m": [
+          3.9000000953674316,
+          4.599999904632568,
+          2.5
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 21,
+      "name": "FrontierCourier_outer_hatch_panel",
+      "moving_part": "outer_hatch_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.3277496940837236,
+        "dimensions_blender_xyz_m": [
+          1.2000000476837158,
+          0.14160001277923584,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 22,
+      "name": "FrontierCourier_airlock_outer_door_panel",
+      "moving_part": "airlock_outer_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.28666165183763426,
+        "dimensions_blender_xyz_m": [
+          1.0499999523162842,
+          0.14160001277923584,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 23,
+      "name": "FrontierCourier_inner_door_panel",
+      "moving_part": "inner_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.28666165510339403,
+        "dimensions_blender_xyz_m": [
+          1.0499999523162842,
+          0.14160001277923584,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 24,
+      "name": "FrontierCourier_cockpit_door_panel",
+      "moving_part": "cockpit_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.28666138537733765,
+        "dimensions_blender_xyz_m": [
+          1.0499999523162842,
+          0.1416001319885254,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 25,
+      "name": "FrontierCourier_engineering_door_panel",
+      "moving_part": "engineering_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.28666165224108714,
+        "dimensions_blender_xyz_m": [
+          0.14160001277923584,
+          1.0499999523162842,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 26,
+      "name": "FrontierCourier_cargo_door_panel",
+      "moving_part": "cargo_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.28666137496653255,
+        "dimensions_blender_xyz_m": [
+          0.1416001319885254,
+          1.0499999523162842,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    },
+    {
+      "primitive_index": 27,
+      "name": "FrontierCourier_crew_door_panel",
+      "moving_part": "crew_door_panel",
+      "geometry": {
+        "vertices": 112,
+        "edges": 216,
+        "faces": 108,
+        "triangles": 216,
+        "connected_components": 2,
+        "largest_component_vertices": 56,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.2866616521947036,
+        "dimensions_blender_xyz_m": [
+          0.14160001277923584,
+          1.0499999523162842,
+          2.200000047683716
+        ],
+        "uv_layers": 0,
+        "materials": 1
+      }
+    }
+  ],
+  "output": {
+    "path": "assets/source/frontier_courier_mk1/frontier_courier_interior_lods.glb",
+    "sha256": "222e7fccfdfb7ee83216bc67cf8759aefeb7b77f343240257dee0093263e158e",
+    "byte_count": 2680664,
+    "mesh_order": [
+      "FrontierCourier_BoardingVestibule_LOD0_Mesh",
+      "FrontierCourier_BoardingVestibule_LOD1_Mesh",
+      "FrontierCourier_BoardingVestibule_LOD2_Mesh",
+      "FrontierCourier_AirlockModule_LOD0_Mesh",
+      "FrontierCourier_AirlockModule_LOD1_Mesh",
+      "FrontierCourier_AirlockModule_LOD2_Mesh",
+      "FrontierCourier_MainCorridor_LOD0_Mesh",
+      "FrontierCourier_MainCorridor_LOD1_Mesh",
+      "FrontierCourier_MainCorridor_LOD2_Mesh",
+      "FrontierCourier_CockpitModule_LOD0_Mesh",
+      "FrontierCourier_CockpitModule_LOD1_Mesh",
+      "FrontierCourier_CockpitModule_LOD2_Mesh",
+      "FrontierCourier_EngineeringModule_LOD0_Mesh",
+      "FrontierCourier_EngineeringModule_LOD1_Mesh",
+      "FrontierCourier_EngineeringModule_LOD2_Mesh",
+      "FrontierCourier_CargoModule_LOD0_Mesh",
+      "FrontierCourier_CargoModule_LOD1_Mesh",
+      "FrontierCourier_CargoModule_LOD2_Mesh",
+      "FrontierCourier_CrewModule_LOD0_Mesh",
+      "FrontierCourier_CrewModule_LOD1_Mesh",
+      "FrontierCourier_CrewModule_LOD2_Mesh",
+      "FrontierCourier_outer_hatch_panel_Mesh",
+      "FrontierCourier_airlock_outer_door_panel_Mesh",
+      "FrontierCourier_inner_door_panel_Mesh",
+      "FrontierCourier_cockpit_door_panel_Mesh",
+      "FrontierCourier_engineering_door_panel_Mesh",
+      "FrontierCourier_cargo_door_panel_Mesh",
+      "FrontierCourier_crew_door_panel_Mesh"
+    ],
+    "mesh_count": 28,
+    "material_count": 1
+  }
+}

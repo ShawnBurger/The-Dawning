@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "collision_id": "frontier_courier.exterior_hull",
+  "boxes": [
+    {
+      "id": "aft_left",
+      "center_m": [
+        -4.15,
+        0.0,
+        -13.7
+      ],
+      "half_extents_m": [
+        3.15,
+        3.0,
+        0.3
+      ],
+      "walkable": false
+    },
+    {
+      "id": "aft_right",
+      "center_m": [
+        4.15,
+        0.0,
+        -13.7
+      ],
+      "half_extents_m": [
+        3.15,
+        3.0,
+        0.3
+      ],
+      "walkable": false
+    },
+    {
+      "id": "hull_left",
+      "center_m": [
+        -7.7,
+        0.0,
+        0.0
+      ],
+      "half_extents_m": [
+        0.3,
+        3.0,
+        13.0
+      ],
+      "walkable": false
+    },
+    {
+      "id": "hull_right",
+      "center_m": [
+        7.7,
+        0.0,
+        0.0
+      ],
+      "half_extents_m": [
+        0.3,
+        3.0,
+        13.0
+      ],
+      "walkable": false
+    },
+    {
+      "id": "keel",
+      "center_m": [
+        0.0,
+        -3.2,
+        0.0
+      ],
+      "half_extents_m": [
+        7.6,
+        0.3,
+        13.6
+      ],
+      "walkable": false
+    },
+    {
+      "id": "nose",
+      "center_m": [
+        0.0,
+        0.0,
+        13.7
+      ],
+      "half_extents_m": [
+        7.0,
+        3.0,
+        0.3
+      ],
+      "walkable": false
+    },
+    {
+      "id": "roof",
+      "center_m": [
+        0.0,
+        3.2,
+        0.0
+      ],
+      "half_extents_m": [
+        7.0,
+        0.3,
+        13.0
+      ],
+      "walkable": false
+    }
+  ]
+}

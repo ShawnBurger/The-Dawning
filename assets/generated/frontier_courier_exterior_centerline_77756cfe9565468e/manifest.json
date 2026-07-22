@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T00:03:34.300759+00:00",
+  "request_hash": "77756cfe9565468ef8a899aae1ce7099a05365ac521d0d45502eec10e423ccdc",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "Photorealistic hard-surface center fuselage for a realistic 28-meter frontier courier spaceship, elongated pressurized hull from armored cockpit nose to aft engineering spine, sized for two internal decks, bilateral symmetry, grounded NASA-industrial aerospace engineering, layered aluminum, titanium and carbon-composite panels, recessed RCS ports, radiators, heat shielding, service panels and believable structural seams. Landing-capable proportions. No detached parts, wings, engines, weapons, text, logos, stand, ground or background. Closed exterior shell, clean silhouette, nose faces +Z.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_centerline",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8721-7859-75fd-bb2b-735c0347aa7f",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784678547589,
+      "started_at": 1784678547692,
+      "finished_at": 1784678601571,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "1e62063dde5f64bc68237f012d2bb9b6103a3bf4f601df098e382afb62596a76",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "988376a9d80568540872f7555a0e3520e681bb172fcadd991eb855819dcfd5a4"
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 72267,
+    "triangles": 118549,
+    "materials": 0,
+    "textures": 0,
+    "bounds_min": [-0.9503, -0.2632, -0.6624],
+    "bounds_max": [0.9488, 0.2618, 0.6642]
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "retained_as": "silhouette_negative_control",
+    "reasons": [
+      "aircraft-like silhouette instead of a modular pressure spacecraft",
+      "long axis generated on X rather than authored +Z",
+      "no trustworthy exterior boarding or docking interface",
+      "surface breakup is below the hero photoreal target"
+    ]
+  },
+  "consumed_credits": 20
+}

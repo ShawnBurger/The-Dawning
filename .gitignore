@@ -39,6 +39,7 @@ __pycache__/
 *.log
 *.tmp
 *.bak
+/tmp/
 
 # Smoke-test capture output
 smoke_capture.ppm

@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "asset_id": "ship.frontier.courier_mk1",
+  "asset_kind": "ship",
+  "units": "meters",
+  "coordinate_system": {
+    "handedness": "left",
+    "up": "+Y",
+    "forward": "+Z"
+  },
+  "interior_contract": {
+    "continuous_world": true,
+    "loading_screen_free": true,
+    "fully_interactive": true,
+    "minimum_clearance_m": 2.1,
+    "minimum_door_width_m": 0.95
+  },
+  "provenance": {
+    "assembly_revision": "frontier-courier-design-2",
+    "sources": [
+      {
+        "id": "design_authority",
+        "provider": "The Dawning",
+        "manifest": "assets/design/frontier_courier_mk1/dimensions.json",
+        "request_hash": "db3b7eb7ed0b78a75da1f87b7582f7550088d06618304fc5b2aa752b2d101fd8"
+      },
+      {
+        "id": "meshy_centerline_study",
+        "provider": "Meshy",
+        "manifest": "assets/generated/frontier_courier_exterior_centerline_77756cfe9565468e/manifest.json",
+        "request_hash": "77756cfe9565468ef8a899aae1ce7099a05365ac521d0d45502eec10e423ccdc"
+      },
+      {
+        "id": "meshy_candidate_b",
+        "provider": "Meshy",
+        "manifest": "assets/generated/frontier_courier_exterior_candidate_b_cec12ae9a0b1cf90/manifest.json",
+        "request_hash": "cec12ae9a0b1cf90e16eb74ebc371f3f20cd8587968df5d23752c4c0aa3b7db7"
+      },
+      {
+        "id": "meshy_retexture",
+        "provider": "Meshy",
+        "manifest": "assets/generated/frontier_courier_exterior_retexture_e0f7f2a8f6e127ec/manifest.json",
+        "request_hash": "e0f7f2a8f6e127ecf96896d35fa782ad1da94eba7e0ca456c9882b4f32e8f848"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "id": "exterior_hull",
+      "role": "exterior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/exterior_hull_lod0.glb",
+      "transform": {
+        "position_m": [0.0, 0.0, 0.0],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {
+        "type": "compound",
+        "source": "collision://frontier_courier/exterior_hull"
+      },
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/exterior_hull_lod0", "max_distance_m": 80.0},
+        {"level": 1, "source": "visual://frontier_courier/exterior_hull_lod1", "max_distance_m": 400.0},
+        {"level": 2, "source": "visual://frontier_courier/exterior_hull_lod2", "max_distance_m": 2500.0}
+      ]
+    },
+    {
+      "id": "boarding_vestibule",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/boarding_vestibule_lod0.glb",
+      "transform": {
+        "position_m": [0.0, -0.1, -12.8],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/boarding_vestibule"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/boarding_vestibule_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/boarding_vestibule_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/boarding_vestibule_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "airlock_module",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/airlock_lod0.glb",
+      "transform": {
+        "position_m": [0.0, 0.0, -10.2],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/airlock"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/airlock_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/airlock_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/airlock_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "main_corridor",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/main_corridor_lod0.glb",
+      "transform": {
+        "position_m": [0.0, 0.0, -3.9],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/main_corridor"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/main_corridor_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/main_corridor_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/main_corridor_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "cockpit_module",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/cockpit_lod0.glb",
+      "transform": {
+        "position_m": [0.0, 0.0, 5.0],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/cockpit"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/cockpit_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/cockpit_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/cockpit_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "engineering_module",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/engineering_lod0.glb",
+      "transform": {
+        "position_m": [2.5, 0.0, -4.5],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/engineering"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/engineering_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/engineering_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/engineering_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "cargo_module",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/cargo_lod0.glb",
+      "transform": {
+        "position_m": [-3.45, 0.0, -3.0],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/cargo"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/cargo_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/cargo_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/cargo_lod2", "max_distance_m": 300.0}
+      ]
+    },
+    {
+      "id": "crew_module",
+      "role": "interior",
+      "provenance_ref": "design_authority",
+      "visual_source": "source://frontier_courier/crew_lod0.glb",
+      "transform": {
+        "position_m": [2.6, 0.0, -0.8],
+        "rotation_euler_degrees": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "collision": {"type": "mesh", "source": "collision://frontier_courier/crew"},
+      "lods": [
+        {"level": 0, "source": "visual://frontier_courier/crew_lod0", "max_distance_m": 20.0},
+        {"level": 1, "source": "visual://frontier_courier/crew_lod1", "max_distance_m": 80.0},
+        {"level": 2, "source": "visual://frontier_courier/crew_lod2", "max_distance_m": 300.0}
+      ]
+    }
+  ],
+  "sockets": [
+    {"id": "hull_boarding", "module": "exterior_hull", "type": "portal", "position_m": [0.0, -0.1, -14.0], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "vestibule_outer", "module": "boarding_vestibule", "type": "portal", "position_m": [0.0, 0.0, -1.2], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "vestibule_inner", "module": "boarding_vestibule", "type": "portal", "position_m": [0.0, 0.1, 1.2], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "airlock_outer", "module": "airlock_module", "type": "portal", "position_m": [0.0, 0.0, -1.4], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "airlock_inner", "module": "airlock_module", "type": "portal", "position_m": [0.0, 0.0, 1.4], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "corridor_aft", "module": "main_corridor", "type": "portal", "position_m": [0.0, 0.0, -4.9], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "corridor_fore", "module": "main_corridor", "type": "portal", "position_m": [0.0, 0.0, 4.9], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "cockpit_aft", "module": "cockpit_module", "type": "portal", "position_m": [0.0, 0.0, -4.0], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "corridor_engineering", "module": "main_corridor", "type": "portal", "position_m": [0.7, 0.0, -0.6], "forward": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "engineering_entry", "module": "engineering_module", "type": "portal", "position_m": [-1.8, 0.0, 0.0], "forward": [-1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "corridor_cargo", "module": "main_corridor", "type": "portal", "position_m": [-0.7, 0.0, 0.9], "forward": [-1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "cargo_entry", "module": "cargo_module", "type": "portal", "position_m": [2.75, 0.0, 0.0], "forward": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "corridor_crew", "module": "main_corridor", "type": "portal", "position_m": [0.7, 0.0, 3.1], "forward": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "crew_entry", "module": "crew_module", "type": "portal", "position_m": [-1.9, 0.0, 0.0], "forward": [-1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "pilot_exit_spawn", "module": "cockpit_module", "type": "spawn", "position_m": [0.0, -0.85, -1.8], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "pilot_seat_anchor", "module": "cockpit_module", "type": "interaction", "position_m": [0.0, -0.45, 2.1], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]}
+  ],
+  "zones": [
+    {"id": "boarding_vestibule", "module": "boarding_vestibule", "pressure": "unpressurized", "navmesh_source": "nav://frontier_courier/boarding_vestibule", "walkable_surface": "walk://frontier_courier/boarding_vestibule_floor"},
+    {"id": "airlock", "module": "airlock_module", "pressure": "airlock", "navmesh_source": "nav://frontier_courier/airlock", "walkable_surface": "walk://frontier_courier/airlock_floor"},
+    {"id": "corridor", "module": "main_corridor", "pressure": "pressurized", "navmesh_source": "nav://frontier_courier/main_corridor", "walkable_surface": "walk://frontier_courier/main_corridor_floor"},
+    {"id": "cockpit", "module": "cockpit_module", "pressure": "pressurized", "navmesh_source": "nav://frontier_courier/cockpit", "walkable_surface": "walk://frontier_courier/cockpit_floor"},
+    {"id": "engineering", "module": "engineering_module", "pressure": "pressurized", "navmesh_source": "nav://frontier_courier/engineering", "walkable_surface": "walk://frontier_courier/engineering_floor"},
+    {"id": "cargo", "module": "cargo_module", "pressure": "pressurized", "navmesh_source": "nav://frontier_courier/cargo", "walkable_surface": "walk://frontier_courier/cargo_floor"},
+    {"id": "crew", "module": "crew_module", "pressure": "pressurized", "navmesh_source": "nav://frontier_courier/crew", "walkable_surface": "walk://frontier_courier/crew_floor"}
+  ],
+  "portals": [
+    {"id": "boarding_portal", "a": "outside", "b": "boarding_vestibule", "socket_a": "hull_boarding", "socket_b": "vestibule_outer", "closure_interaction": "outer_hatch", "sealable": true, "nav_link": true},
+    {"id": "vestibule_airlock_portal", "a": "boarding_vestibule", "b": "airlock", "socket_a": "vestibule_inner", "socket_b": "airlock_outer", "closure_interaction": "airlock_outer_door", "sealable": true, "nav_link": true},
+    {"id": "airlock_corridor_portal", "a": "airlock", "b": "corridor", "socket_a": "airlock_inner", "socket_b": "corridor_aft", "closure_interaction": "inner_door", "sealable": true, "nav_link": true},
+    {"id": "cockpit_portal", "a": "corridor", "b": "cockpit", "socket_a": "corridor_fore", "socket_b": "cockpit_aft", "closure_interaction": "cockpit_door", "sealable": true, "nav_link": true},
+    {"id": "engineering_portal", "a": "corridor", "b": "engineering", "socket_a": "corridor_engineering", "socket_b": "engineering_entry", "closure_interaction": "engineering_door", "sealable": true, "nav_link": true},
+    {"id": "cargo_portal", "a": "corridor", "b": "cargo", "socket_a": "corridor_cargo", "socket_b": "cargo_entry", "closure_interaction": "cargo_door", "sealable": true, "nav_link": true},
+    {"id": "crew_portal", "a": "corridor", "b": "crew", "socket_a": "corridor_crew", "socket_b": "crew_entry", "closure_interaction": "crew_door", "sealable": true, "nav_link": true}
+  ],
+  "interactions": [
+    {"id": "outer_hatch", "type": "hatch", "module": "boarding_vestibule", "socket": "vestibule_outer", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "outer_hatch_panel", "portal": "boarding_portal"},
+    {"id": "airlock_outer_door", "type": "door", "module": "airlock_module", "socket": "airlock_outer", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "airlock_outer_door_panel", "portal": "vestibule_airlock_portal"},
+    {"id": "inner_door", "type": "door", "module": "airlock_module", "socket": "airlock_inner", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "inner_door_panel", "portal": "airlock_corridor_portal"},
+    {"id": "cockpit_door", "type": "door", "module": "cockpit_module", "socket": "cockpit_aft", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "cockpit_door_panel", "portal": "cockpit_portal"},
+    {"id": "engineering_door", "type": "door", "module": "engineering_module", "socket": "engineering_entry", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "engineering_door_panel", "portal": "engineering_portal"},
+    {"id": "cargo_door", "type": "door", "module": "cargo_module", "socket": "cargo_entry", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "cargo_door_panel", "portal": "cargo_portal"},
+    {"id": "crew_door", "type": "door", "module": "crew_module", "socket": "crew_entry", "states": ["closed", "opening", "open", "closing", "locked"], "initial_state": "closed", "moving_part": "crew_door_panel", "portal": "crew_portal"},
+    {"id": "pilot_seat", "type": "seat", "module": "cockpit_module", "socket": "pilot_seat_anchor", "states": ["available", "occupied"], "initial_state": "available"}
+  ],
+  "moving_parts": [
+    {"id": "outer_hatch_panel", "module": "boarding_vestibule", "interaction": "outer_hatch", "visual_source": "visual://frontier_courier/outer_hatch_panel", "pivot_m": [0.6, 0.0, -1.2], "motion": {"type": "rotational", "axis": [0.0, 1.0, 0.0], "travel": 105.0}},
+    {"id": "airlock_outer_door_panel", "module": "airlock_module", "interaction": "airlock_outer_door", "visual_source": "visual://frontier_courier/airlock_outer_door_panel", "pivot_m": [0.0, 0.0, -1.4], "motion": {"type": "linear", "axis": [1.0, 0.0, 0.0], "travel": 1.15}},
+    {"id": "inner_door_panel", "module": "airlock_module", "interaction": "inner_door", "visual_source": "visual://frontier_courier/inner_door_panel", "pivot_m": [0.0, 0.0, 1.4], "motion": {"type": "linear", "axis": [1.0, 0.0, 0.0], "travel": 1.15}},
+    {"id": "cockpit_door_panel", "module": "cockpit_module", "interaction": "cockpit_door", "visual_source": "visual://frontier_courier/cockpit_door_panel", "pivot_m": [0.0, 0.0, -4.0], "motion": {"type": "linear", "axis": [1.0, 0.0, 0.0], "travel": 1.15}},
+    {"id": "engineering_door_panel", "module": "engineering_module", "interaction": "engineering_door", "visual_source": "visual://frontier_courier/engineering_door_panel", "pivot_m": [-1.8, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}},
+    {"id": "cargo_door_panel", "module": "cargo_module", "interaction": "cargo_door", "visual_source": "visual://frontier_courier/cargo_door_panel", "pivot_m": [2.75, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}},
+    {"id": "crew_door_panel", "module": "crew_module", "interaction": "crew_door", "visual_source": "visual://frontier_courier/crew_door_panel", "pivot_m": [-1.9, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}}
+  ],
+  "navigation": {
+    "entry_zone": "boarding_vestibule",
+    "required_reachable_zones": ["boarding_vestibule", "airlock", "corridor", "cockpit", "engineering", "cargo", "crew"]
+  }
+}

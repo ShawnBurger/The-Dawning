@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "collision_id": "frontier_courier.crew_module",
+  "boxes": [
+    {
+      "id": "bulkhead_aft",
+      "center_m": [
+        0.0,
+        0.0,
+        -2.3
+      ],
+      "half_extents_m": [
+        1.9,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "bulkhead_fore",
+      "center_m": [
+        0.0,
+        0.0,
+        2.3
+      ],
+      "half_extents_m": [
+        1.9,
+        1.2,
+        0.05
+      ],
+      "walkable": false
+    },
+    {
+      "id": "bunk_lower_0",
+      "center_m": [
+        1.44,
+        -0.78,
+        -1.25
+      ],
+      "half_extents_m": [
+        0.41,
+        0.16,
+        0.86
+      ],
+      "walkable": false
+    },
+    {
+      "id": "bunk_lower_1",
+      "center_m": [
+        1.44,
+        -0.78,
+        1.25
+      ],
+      "half_extents_m": [
+        0.41,
+        0.16,
+        0.86
+      ],
+      "walkable": false
+    },
+    {
+      "id": "bunk_upper_0",
+      "center_m": [
+        1.44,
+        -0.12,
+        -1.25
+      ],
+      "half_extents_m": [
+        0.41,
+        0.1,
+        0.86
+      ],
+      "walkable": false
+    },
+    {
+      "id": "bunk_upper_1",
+      "center_m": [
+        1.44,
+        -0.12,
+        1.25
+      ],
+      "half_extents_m": [
+        0.41,
+        0.1,
+        0.86
+      ],
+      "walkable": false
+    },
+    {
+      "id": "ceiling",
+      "center_m": [
+        0.0,
+        1.25,
+        0.0
+      ],
+      "half_extents_m": [
+        1.95,
+        0.05,
+        2.3
+      ],
+      "walkable": false
+    },
+    {
+      "id": "floor",
+      "center_m": [
+        0.0,
+        -1.25,
+        0.0
+      ],
+      "half_extents_m": [
+        1.95,
+        0.05,
+        2.3
+      ],
+      "walkable": true
+    },
+    {
+      "id": "lintel_left_01",
+      "center_m": [
+        -1.95,
+        1.1,
+        0.0
+      ],
+      "half_extents_m": [
+        0.05,
+        0.1,
+        0.525
+      ],
+      "walkable": false
+    },
+    {
+      "id": "locker",
+      "center_m": [
+        -1.6,
+        -0.42,
+        1.45
+      ],
+      "half_extents_m": [
+        0.28,
+        0.75,
+        0.41
+      ],
+      "walkable": false
+    },
+    {
+      "id": "wall_left_00",
+      "center_m": [
+        -1.95,
+        0.0,
+        -1.3875
+      ],
+      "half_extents_m": [
+        0.05,
+        1.2,
+        0.8625
+      ],
+      "walkable": false
+    },
+    {
+      "id": "wall_left_02",
+      "center_m": [
+        -1.95,
+        0.0,
+        1.3875
+      ],
+      "half_extents_m": [
+        0.05,
+        1.2,
+        0.8625
+      ],
+      "walkable": false
+    },
+    {
+      "id": "wall_right_00",
+      "center_m": [
+        1.95,
+        0.0,
+        0.0
+      ],
+      "half_extents_m": [
+        0.05,
+        1.2,
+        2.25
+      ],
+      "walkable": false
+    }
+  ]
+}

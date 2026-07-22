@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/retexture",
+  "generated_at_utc": "2026-07-22T01:08:57.239024+00:00",
+  "request_hash": "e0f7f2a8f6e127ecf96896d35fa782ad1da94eba7e0ca456c9882b4f32e8f848",
+  "stage": "retexture",
+  "parameters": {
+    "input_model": {
+      "name": "frontier_courier_hull_lod0.clean.glb",
+      "mime_type": "application/octet-stream",
+      "byte_count": 5997408,
+      "sha256": "3d5d1c667e3aca024228ff070f9322f875beefc342042b355c30914c3d09b783"
+    },
+    "text_style_prompt": "Photoreal hard-surface frontier courier spacecraft; charcoal graphite ceramic-composite pressure hull; subdued gunmetal armor; pale gray replaceable maintenance panels; restrained oxidized copper hazard accents around service access only; heat-darkened titanium around aft propulsion; no painted windows, no fake doors, no text, no logos, no emissive decoration, no baked highlights or shadows, physically plausible panel scale and wear, clean enough for active service.",
+    "ai_model": "meshy-6",
+    "enable_original_uv": false,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_hull",
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "retexture": {
+      "id": "019f875c-0a6d-7ff5-bbff-c186866b5acf",
+      "type": "retexture",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784682386448,
+      "started_at": 1784682386473,
+      "finished_at": 1784682531316,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "input_model": "input.glb",
+    "input_model_sha256": "3d5d1c667e3aca024228ff070f9322f875beefc342042b355c30914c3d09b783",
+    "model": "model.glb",
+    "model_sha256": "c7576eaef44a2240a10b2fcf5867d7f0b74cfe78230e06152dc14676eb4f1a58",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "36430acca9a484c5f81186c0c73c04362e34c52a7effe9bb9e6f2fa5b8457d86",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "b1c94747ef736409a6a09320a114f6059425f427c3e692e89938a5acacbdd5f8",
+      "metallic_0": "7b6adb34e0b37408a8254637f7065581f1383d9e1251dae2b03be8bcb0008669",
+      "roughness_0": "c03dacf367427f4fa920c75a36d8e501cdd6a23b2c6fe84c018d19bce4edf047",
+      "normal_0": "2003e22d057ef77156848cb0acb0fd27d98e9616d726a31a18e37862e97c36f3",
+      "emission_0": "702c8f73ff4c781bee35997197ee0a1f09a8dac5f8894d30624f09cad2a0d181"
+    }
+  },
+  "consumed_credits": 10
+}

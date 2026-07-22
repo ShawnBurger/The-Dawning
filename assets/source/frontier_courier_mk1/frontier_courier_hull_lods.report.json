@@ -1,0 +1,314 @@
+{
+  "schema_version": 2,
+  "asset_id": "ship.frontier.courier_mk1",
+  "module_id": "exterior_hull",
+  "tool": "tools/blender/accept_retextured_hull.py",
+  "blender_version": "4.5.0",
+  "source": {
+    "path": "assets/source/frontier_courier_mk1/frontier_courier_hull_retexture_source.glb",
+    "sha256": "c7576eaef44a2240a10b2fcf5867d7f0b74cfe78230e06152dc14676eb4f1a58",
+    "byte_count": 40681912,
+    "raw_dimensions_blender_xyz": [
+      1.1427520513534546,
+      2.0,
+      0.5000380277633667
+    ],
+    "raw_vertices": 147278,
+    "raw_faces": 249998
+  },
+  "authored_dimensions_engine_xyz_m": [
+    16.0,
+    7.0,
+    28.0
+  ],
+  "proportions": {
+    "length_to_width": 1.75,
+    "height_to_width": 0.4375
+  },
+  "weld_distance_m": 1e-06,
+  "welded_seam_vertices": 22451,
+  "interior_cavity": {
+    "solver": "MANIFOLD",
+    "cutters_engine_xyz_m": [
+      {
+        "id": "boarding_vestibule",
+        "center_engine_xyz_m": [
+          0.0,
+          -0.1,
+          -12.8
+        ],
+        "size_engine_xyz_m": [
+          1.45,
+          2.45,
+          2.7
+        ]
+      },
+      {
+        "id": "airlock",
+        "center_engine_xyz_m": [
+          0.0,
+          0.0,
+          -10.2
+        ],
+        "size_engine_xyz_m": [
+          2.5,
+          2.5,
+          3.0
+        ]
+      },
+      {
+        "id": "corridor",
+        "center_engine_xyz_m": [
+          0.0,
+          0.0,
+          -3.9
+        ],
+        "size_engine_xyz_m": [
+          1.5,
+          2.5,
+          10.0
+        ]
+      },
+      {
+        "id": "cockpit",
+        "center_engine_xyz_m": [
+          0.0,
+          0.05,
+          5.0
+        ],
+        "size_engine_xyz_m": [
+          4.9,
+          2.6,
+          8.2
+        ]
+      },
+      {
+        "id": "engineering",
+        "center_engine_xyz_m": [
+          2.5,
+          0.0,
+          -4.5
+        ],
+        "size_engine_xyz_m": [
+          3.8,
+          2.6,
+          4.7
+        ]
+      },
+      {
+        "id": "cargo",
+        "center_engine_xyz_m": [
+          -3.45,
+          0.0,
+          -3.0
+        ],
+        "size_engine_xyz_m": [
+          5.7,
+          2.9,
+          6.2
+        ]
+      },
+      {
+        "id": "crew",
+        "center_engine_xyz_m": [
+          2.6,
+          0.0,
+          -0.8
+        ],
+        "size_engine_xyz_m": [
+          4.0,
+          2.5,
+          4.7
+        ]
+      }
+    ],
+    "cutter_geometry": {
+      "vertices": 96,
+      "edges": 146,
+      "faces": 52,
+      "triangles": 188,
+      "connected_components": 1,
+      "largest_component_vertices": 96,
+      "boundary_edges": 0,
+      "non_manifold_edges": 0,
+      "wire_edges": 0,
+      "loose_vertices": 0,
+      "signed_volume_m3": 346.1333047617363,
+      "dimensions_blender_xyz_m": [
+        10.899999618530273,
+        23.25,
+        2.9000000953674316
+      ],
+      "uv_layers": 1,
+      "materials": 0
+    },
+    "sealed_hull_geometry": {
+      "vertices": 124827,
+      "edges": 374997,
+      "faces": 249998,
+      "triangles": 249998,
+      "connected_components": 1,
+      "largest_component_vertices": 124827,
+      "boundary_edges": 0,
+      "non_manifold_edges": 0,
+      "wire_edges": 0,
+      "loose_vertices": 0,
+      "signed_volume_m3": 1357.5794497360178,
+      "dimensions_blender_xyz_m": [
+        16.0,
+        28.0,
+        7.0
+      ],
+      "uv_layers": 1,
+      "materials": 1
+    },
+    "open_hull_geometry": {
+      "vertices": 123886,
+      "edges": 371186,
+      "faces": 247118,
+      "triangles": 248136,
+      "connected_components": 1,
+      "largest_component_vertices": 123886,
+      "boundary_edges": 0,
+      "non_manifold_edges": 0,
+      "wire_edges": 0,
+      "loose_vertices": 0,
+      "signed_volume_m3": 1014.8804262392903,
+      "dimensions_blender_xyz_m": [
+        16.0,
+        27.87348175048828,
+        7.0
+      ],
+      "uv_layers": 1,
+      "materials": 1
+    },
+    "removed_volume_m3": 342.6990234967275,
+    "empty_material_slots_removed": 1,
+    "aft_opening_plane_engine_z_m": -14.0,
+    "closure_required": "outer_hatch_panel"
+  },
+  "material": {
+    "uv_layers": [
+      "UVMap"
+    ],
+    "materials": [
+      "material"
+    ],
+    "images": [
+      {
+        "node": "Image Texture",
+        "image": "emissive",
+        "width": 2048,
+        "height": 2048,
+        "colorspace": "sRGB"
+      },
+      {
+        "node": "Image Texture.001",
+        "image": "base_color",
+        "width": 4096,
+        "height": 4096,
+        "colorspace": "sRGB"
+      },
+      {
+        "node": "Image Texture.002",
+        "image": "metallic_roughness",
+        "width": 2048,
+        "height": 2048,
+        "colorspace": "Non-Color"
+      },
+      {
+        "node": "Image Texture.003",
+        "image": "normal",
+        "width": 4096,
+        "height": 4096,
+        "colorspace": "Non-Color"
+      }
+    ]
+  },
+  "lods": [
+    {
+      "level": 0,
+      "geometry": {
+        "vertices": 123886,
+        "edges": 371186,
+        "faces": 247118,
+        "triangles": 248136,
+        "connected_components": 1,
+        "largest_component_vertices": 123886,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1014.8804262392903,
+        "dimensions_blender_xyz_m": [
+          16.0,
+          27.87348175048828,
+          7.0
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      }
+    },
+    {
+      "level": 1,
+      "geometry": {
+        "vertices": 39982,
+        "edges": 120492,
+        "faces": 80328,
+        "triangles": 80328,
+        "connected_components": 1,
+        "largest_component_vertices": 39982,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1014.7497105539079,
+        "dimensions_blender_xyz_m": [
+          15.99758529663086,
+          27.870079040527344,
+          6.995547294616699
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      }
+    },
+    {
+      "level": 2,
+      "geometry": {
+        "vertices": 8855,
+        "edges": 27111,
+        "faces": 18074,
+        "triangles": 18074,
+        "connected_components": 1,
+        "largest_component_vertices": 8855,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 1016.2932097595365,
+        "dimensions_blender_xyz_m": [
+          16.015106201171875,
+          27.865211486816406,
+          6.984992027282715
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      }
+    }
+  ],
+  "output": {
+    "path": "assets/source/frontier_courier_mk1/frontier_courier_hull_lods.glb",
+    "sha256": "fd52c6f2e3d1dbfe37e2bf68e9196248b3e3e6706b23d54831dc69d3015912a9",
+    "byte_count": 44583380,
+    "primitive_order": [
+      "FrontierCourier_Hull_LOD0",
+      "FrontierCourier_Hull_LOD1",
+      "FrontierCourier_Hull_LOD2"
+    ],
+    "mesh_order": [
+      "FrontierCourier_Hull_LOD0_Mesh",
+      "FrontierCourier_Hull_LOD1_Mesh",
+      "FrontierCourier_Hull_LOD2_Mesh"
+    ]
+  }
+}

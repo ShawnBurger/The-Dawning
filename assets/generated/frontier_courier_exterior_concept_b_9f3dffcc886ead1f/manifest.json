@@ -1,0 +1,75 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T00:27:46.359034+00:00",
+  "request_hash": "9f3dffcc886ead1fdd866987c4f91fdca8dd7305c15ba2922a9525fb75ddbd4d",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "One fully visible centered photorealistic industrial spacecraft with empty gray margin on every edge. Compact 28 m frontier courier: blunt faceted pressure hull, 16 m beam, 7 m tall, two-deck core. Orthographic front, rear and left-side views of the exact same ship; one complete ship per image, never cropped, no neighboring objects. Armored nose cockpit, circular port airlock collar, integrated bilateral engine pods, RCS clusters, radiators, landing-gear bays, layered off-white metal and carbon panels. NASA-real engineering. No wings, tail, weapons, text, logos, stand, ground or scenery.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "exterior_hull",
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8737-ecc9-7b56-9999-24d542400cf3",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784680019004,
+      "started_at": 1784680019204,
+      "finished_at": 1784680058379,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "e8e54c4b64fa1525c097dde6b4ad4de8b4a8e92db1c4597ab95f45ba2b15c332",
+      "view_1.png": "c197fc3cc96aa6a8f41963f4d8d79d47dc81227fb90e55919a9cf4a5242ea934",
+      "view_2.png": "d6fd359e2c973df464bab5af53bf7a9634716442558e0bb4e97e15e3188c588c"
+    },
+    "reviewed_inputs": [
+      "reviewed_inputs/view_0.png",
+      "reviewed_inputs/view_1.png",
+      "reviewed_inputs/view_2.png"
+    ],
+    "reviewed_input_sha256": {
+      "reviewed_inputs/view_0.png": "6b16c6daba1e9fc2929a385358d2ec4a220b6707d4393a585e917975711944ce",
+      "reviewed_inputs/view_1.png": "f42469cd7e4455ff2676bb6c29e23389327d27e415cd98a5eca16c7b0d2d9e37",
+      "reviewed_inputs/view_2.png": "3b3ffbcc6164a914a3f88c844af5d8903650a1fc51003a8c32ccab063124a71d"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T00:38:00Z",
+    "strengths": [
+      "front, rear, and side views describe one consistent compact pressure hull",
+      "side boarding collar, cockpit glazing, engine modules, RCS, and landing structure are readable",
+      "source proportions can be normalized to the authored 28 m by 16 m by 7 m envelope",
+      "surface language supports separate structural, thermal, glazing, and service materials"
+    ],
+    "input_preparation": {
+      "method": "remove only partial neighboring-view edge pixels, then center the retained object on a transparent canvas at the original dimensions",
+      "source_pixels_modified": false,
+      "view_0_removed_pixels": {"left": 0, "right": 16},
+      "view_1_removed_pixels": {"left": 0, "right": 0},
+      "view_2_removed_pixels": {"left": 40, "right": 40}
+    },
+    "reference_packet": {
+      "name": "Flight_Tech_Ship_Images_Complete.pdf",
+      "sha256": "2288fc6d879357b76882b745f86ce30cd5892be107266493139d1f70e985adf0",
+      "reviewed_pages": [16, 22, 23, 65, 68],
+      "usage": "non-literal inspiration for service access, systems zoning, cutaway logic, integrated propulsion, and landing hardware; no sheet or named design is reproduced"
+    }
+  },
+  "consumed_credits": 9
+}

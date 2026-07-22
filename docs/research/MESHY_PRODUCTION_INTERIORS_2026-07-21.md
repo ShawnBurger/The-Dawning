@@ -95,6 +95,13 @@ Generate and approve discrete families instead:
 - Collision/navigation: simplified authored meshes and volumes, never derived
   blindly from render triangles at runtime.
 
+All ships are longitudinal vehicles. Before concept generation, each hull class
+must declare a minimum length-to-beam ratio and an acceptable height-to-beam
+band. The hard ordering is `length > beam > height`; the class-specific height
+band prevents both pancake hulls and implausibly tall ships. Width-dominant,
+saucer, disk, and post-hoc stretched silhouettes fail concept review regardless
+of surface quality. Stations and structures use separate proportion contracts.
+
 Use a shared dimensions sheet before generation: grid size, deck height, hull
 thickness, corridor width, clear door width, handrail height, docking collar,
 seat/console envelope, and player capsule. Multi-view references should use the
