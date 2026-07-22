@@ -207,6 +207,15 @@ float PlanetElevation(const Vec3f& n, int type, const Vec3f& seedOffset,
             elev = Saturate(elev + cr * 0.6f);
         }
     }
+
+    // Near-surface multi-scale detail — twin of planet_noise.hlsli (see there for
+    // the why): two higher-frequency ridged bands, amplitude-weighted by elevation
+    // (Musgrave multifractal), in the SHARED field so collision matches the visual.
+    const float rough = 0.35f + 0.65f * elev;
+    const float dHi   = Ridged3(n * 200.0f + seedOffset * 2.7f) - 0.33f;
+    const float dLo   = Ridged3(n * 800.0f + seedOffset * 4.1f) - 0.33f;
+    const float detailGate = (type == 0) ? landMask : 1.0f;
+    elev = Saturate(elev + (dHi * 0.12f + dLo * 0.07f) * rough * detailGate);
     return elev;
 }
 

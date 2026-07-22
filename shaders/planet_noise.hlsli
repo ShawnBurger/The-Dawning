@@ -199,6 +199,20 @@ float PlanetElevation(float3 N, int type, float3 seedO, float h, float landMask,
             elev = saturate(elev + cr * 0.6);
         }
     }
+
+    // Near-surface multi-scale detail. The continental fBm is a red-spectrum
+    // (gain 0.5) self-similar field, so up close it reads rounded/smooth. Two
+    // higher-frequency RIDGED bands add crunchier, non-stationary relief, amplitude-
+    // weighted by the elevation already computed (Musgrave multifractal — ridges and
+    // peaks get rocky, basins/ocean stay smooth). It is in the SHARED field, so the
+    // collision mesh gets it too (the ground you land on matches the ground you see),
+    // and it is sub-pixel from orbit, so the far silhouette is unchanged. Earth's
+    // ocean is gated out by landMask.
+    float rough = 0.35 + 0.65 * elev;                       // rocky on highs, softer in basins
+    float dHi   = Ridged3(N * 200.0 + seedO * 2.7) - 0.33;  // regional ridges/hills
+    float dLo   = Ridged3(N * 800.0 + seedO * 4.1) - 0.33;  // local rock
+    float detailGate = (type == 0) ? landMask : 1.0;        // Earth ocean stays flat
+    elev = saturate(elev + (dHi * 0.12 + dLo * 0.07) * rough * detailGate);
     return elev;
 }
 
