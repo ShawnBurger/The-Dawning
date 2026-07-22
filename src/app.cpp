@@ -3241,51 +3241,95 @@ void App::RenderTerrainPreview()
     std::vector<terrain::QuadPatch> patches;
     terrain::SelectQuadtreeLOD(qc, camBody, patches);
 
+    // Collect the visible patch set (after the cheap horizon cull), and split it
+    // into cache hits and misses. The misses' meshes are generated in PARALLEL
+    // below, then uploaded + cached + drawn on the main thread.
+    struct VisiblePatch { uint64_t key; terrain::QuadPatch qp; };
+    std::vector<VisiblePatch> visible;
+    visible.reserve(patches.size());
+    std::vector<size_t> missIdx;   // indices into `visible` that are not yet cached
     for (const terrain::QuadPatch& qp : patches)
     {
-        // Cheap horizon cull: skip the far hemisphere.
         const core::Vec3d cdir = terrain::FaceToDirection(
             qp.face, 0.5 * (qp.u0 + qp.u1), 0.5 * (qp.v0 + qp.v1));
         if (cdir.x * fdir.x + cdir.y * fdir.y + cdir.z * fdir.z < 0.0)
             continue;
-
         const uint64_t key = TerrainLeafKey(qp);
-        auto it = m_terrainCache.find(key);
-        if (it == m_terrainCache.end())
-        {
-            // Newly visible: generate + upload a write-once patch mesh, cache it.
-            terrain::ChunkParams tp;
-            tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
-            tp.gridN = 33;
-            tp.planetRadius = bodyR; tp.amplitudeMeters = amplitude;
-            tp.type = cfg.type; tp.seed = cfg.seed; tp.seaLevel = cfg.seaLevel; tp.coastWidth = cfg.coastWidth;
-            terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
+        if (m_terrainCache.find(key) == m_terrainCache.end())
+            missIdx.push_back(visible.size());
+        visible.push_back({ key, qp });
+    }
 
-            std::vector<render::Vertex> tv(chunk.vertices.size());
-            for (size_t i = 0; i < chunk.vertices.size(); ++i)
-            {
-                const terrain::ChunkVertex& cv = chunk.vertices[i];
-                const core::Vec3d bp{ chunk.origin.x + cv.position.x,
-                                      chunk.origin.y + cv.position.y,
-                                      chunk.origin.z + cv.position.z };
-                const double bl = bp.Length();
-                const core::Vec3f od = (bl > 0.0)
-                    ? core::Vec3f{ static_cast<float>(bp.x / bl),
-                                   static_cast<float>(bp.y / bl),
-                                   static_cast<float>(bp.z / bl) }
-                    : core::Vec3f{ 0.0f, 0.0f, 1.0f };
-                tv[i].position = cv.position;
-                tv[i].normal   = cv.normal;
-                tv[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
-                tv[i].uv       = cv.uv;
-            }
-            render::Mesh lm = render::CreateUploadMesh(
-                m_device.Device(),
-                tv.data(), static_cast<uint32_t>(tv.size()),
-                chunk.indices.data(), static_cast<uint32_t>(chunk.indices.size()));
-            if (!lm.IsValid()) continue;
-            it = m_terrainCache.emplace(key, TerrainLeaf{ lm, chunk.origin, 0 }).first;
+    // Generate the missing patches' meshes in parallel. terrain::GenerateChunk and
+    // the ChunkVertex->render::Vertex / objectDir conversion are pure CPU — no GPU,
+    // no shared mutable state, no logger — so one patch per worker index is race-free
+    // (JobSystem runs each index exactly once, and each writes only its own `gen`
+    // slot). This turns the first Surface frame's ~hundreds-of-chunks build from a
+    // serial hitch into a parallel one, and keeps the descent's per-frame streaming
+    // off the critical path of a single core. GPU upload + cache insert stay on main.
+    struct GenResult { std::vector<render::Vertex> verts; std::vector<uint16_t> indices; core::Vec3d origin; };
+    std::vector<GenResult> gen(missIdx.size());
+    auto genOne = [&](uint32_t m)
+    {
+        const terrain::QuadPatch& qp = visible[missIdx[m]].qp;
+        terrain::ChunkParams tp;
+        tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
+        tp.gridN = 33;
+        tp.planetRadius = bodyR; tp.amplitudeMeters = amplitude;
+        tp.type = cfg.type; tp.seed = cfg.seed; tp.seaLevel = cfg.seaLevel; tp.coastWidth = cfg.coastWidth;
+        terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
+
+        GenResult& r = gen[m];
+        r.origin  = chunk.origin;
+        r.indices = std::move(chunk.indices);
+        r.verts.resize(chunk.vertices.size());
+        for (size_t i = 0; i < chunk.vertices.size(); ++i)
+        {
+            const terrain::ChunkVertex& cv = chunk.vertices[i];
+            const core::Vec3d bp{ chunk.origin.x + cv.position.x,
+                                  chunk.origin.y + cv.position.y,
+                                  chunk.origin.z + cv.position.z };
+            const double bl = bp.Length();
+            const core::Vec3f od = (bl > 0.0)
+                ? core::Vec3f{ static_cast<float>(bp.x / bl),
+                               static_cast<float>(bp.y / bl),
+                               static_cast<float>(bp.z / bl) }
+                : core::Vec3f{ 0.0f, 0.0f, 1.0f };
+            r.verts[i].position = cv.position;
+            r.verts[i].normal   = cv.normal;
+            r.verts[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
+            r.verts[i].uv       = cv.uv;
         }
+    };
+    if (missIdx.size() > 1)
+    {
+        if (!m_terrainJobs) m_terrainJobs = std::make_unique<core::JobSystem>();
+        m_terrainJobs->ParallelFor(static_cast<uint32_t>(missIdx.size()), genOne, 1);
+    }
+    else
+    {
+        for (uint32_t m = 0; m < missIdx.size(); ++m) genOne(m); // one miss: no dispatch overhead
+    }
+
+    // Upload the freshly-generated meshes and insert them into the cache — main
+    // thread only (D3D12 resource creation and the shared cache map).
+    for (size_t m = 0; m < missIdx.size(); ++m)
+    {
+        GenResult& r = gen[m];
+        if (r.verts.empty()) continue;
+        render::Mesh lm = render::CreateUploadMesh(
+            m_device.Device(),
+            r.verts.data(), static_cast<uint32_t>(r.verts.size()),
+            r.indices.data(), static_cast<uint32_t>(r.indices.size()));
+        if (!lm.IsValid()) continue;
+        m_terrainCache.emplace(visible[missIdx[m]].key, TerrainLeaf{ lm, r.origin, 0 });
+    }
+
+    // Draw all visible cached patches, camera-relative.
+    for (const VisiblePatch& vp : visible)
+    {
+        auto it = m_terrainCache.find(vp.key);
+        if (it == m_terrainCache.end()) continue; // generation or upload failed
         it->second.lastSeen = m_terrainStreamFrame;
 
         const core::Vec3d tD{ bodyPos.x + it->second.originBody.x - camPos.x,

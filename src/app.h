@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/job_system.h"
 #include "core/timer.h"
 #include "core/window.h"
 #include "gameplay/pilot_possession.h"
@@ -13,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -211,6 +213,10 @@ private:
     uint32_t    m_terrainStreamFrame = 0;   // increments each Surface frame (for LRU)
     double      m_surfaceElapsed = 0.0;      // seconds in Surface mode, drives the descent
     double      m_surfaceEntryTime = -1.0;   // totalTime at Surface entry; <0 = not entered
+    // Worker pool for parallel chunk generation, created lazily on the first Surface
+    // frame that has cache misses (so non-terrain runs spawn no threads). GenerateChunk
+    // + the vertex conversion are pure CPU; only the GPU upload/cache/draw stay on main.
+    std::unique_ptr<core::JobSystem> m_terrainJobs;
     // Stream the quadtree leaf set for the current camera each frame: reselect LOD,
     // generate+cache newly-visible patches (write-once upload meshes), draw the
     // resident visible set camera-relative.
