@@ -2364,7 +2364,7 @@ are now integrated as well. The current order is:
 
 ### WS-033: Interior state and local-light authoring slice
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: add a backward-compatible authored light-fixture contract and a
   deterministic ship-owned interior state coordinator that resolves group,
   circuit, alert, and emergency behavior into bounded camera-relative local
@@ -2421,9 +2421,10 @@ are now integrated as well. The current order is:
   deferred by the shared renderer lock.
 - Latest commits: `74787eb` (implementation) and `1795dea` (clean merge of
   Claude's published SSAO baseline `e4b9116`)
-- Next action: publish the audited branch and fast-forward `main` if the
-  integration checkout remains clean. The renderer-facing GPU phase stays
-  deferred while Claude owns the active atmosphere lane.
+- Final integration: branch tip `8ba5f08` was pushed and fast-forwarded to
+  `origin/main` on 2026-07-22 after the complete post-merge validation matrix.
+- Next action: the renderer-facing GPU phase stays deferred while Claude owns
+  the active atmosphere lane.
 
 ## 20. Helper Commands
 
