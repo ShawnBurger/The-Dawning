@@ -132,6 +132,13 @@ public:
 
     void InvalidatePathTraceHistory();
 
+    // Per-mode render scale K (see ecs::Transform::ToCameraRelativeMatrix): the
+    // camera mode sets it before rendering — 1 for true-scale views, ~1e-9 for
+    // the orrery. Applied AFTER the double camera subtract, so it never costs
+    // precision.
+    void   SetRenderScale(double k) { m_renderScale = k; }
+    double RenderScale() const      { return m_renderScale; }
+
     // --- RT Helpers (public for init) ---
     void EnsureBLAS(render::D3D12Device& device);
 
@@ -155,6 +162,7 @@ private:
     // nothing and its behaviour is unchanged).
     bool                 m_starSystemActive = false;
     double               m_soiHysteresis    = 0.01;
+    double               m_renderScale      = 1.0; // K; per-mode, see SetRenderScale
     sim::FlightAssistParams m_flightAssist;
     sim::CloseEncounterConfig m_closeEncounters;
     std::vector<sim::FtlCommand> m_ftlCommands;

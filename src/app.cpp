@@ -1160,6 +1160,30 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_F1))
             TogglePathTracing();
 
+        // F4 cycles the solar-system camera mode. Reset the chase smoother so it
+        // does not drag the camera across a mode jump.
+        if (input.KeyPressed(VK_F4))
+        {
+            static const char* kCameraModeNames[] =
+                { "ShipChase", "Orrery", "NearBody", "Free" };
+            m_cameraMode = static_cast<CameraMode>(
+                (static_cast<uint32_t>(m_cameraMode) + 1u) %
+                static_cast<uint32_t>(CameraMode::Count));
+            m_chaseCameraInitialized = false;
+            core::Log::Infof("Camera mode: %s",
+                             kCameraModeNames[static_cast<uint32_t>(m_cameraMode)]);
+        }
+
+        // Time warp (KSP-style): ',' slower, '.' faster, '/' reset. Deterministic:
+        // the fixed-step accumulator just drains more/fewer steps per frame, capped
+        // by Timer::kMaxStepsPerTick, so physics stays exact at any warp.
+        if (input.KeyPressed(VK_OEM_PERIOD))
+            m_timer.SetTimeScale((std::min)(m_timer.GetTimeScale() * 2.0, 100000.0));
+        if (input.KeyPressed(VK_OEM_COMMA))
+            m_timer.SetTimeScale((std::max)(m_timer.GetTimeScale() * 0.5, 1.0));
+        if (input.KeyPressed(VK_OEM_2))
+            m_timer.SetTimeScale(1.0);
+
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
         {
             m_exitCode = 12;
@@ -2121,8 +2145,42 @@ void App::UpdatePlayerShipVisuals()
     }
 }
 
+void App::ApplyCameraModeRenderState()
+{
+    // K (Scene render scale) + near plane (the reversed-Z precision lever) per
+    // mode. Reversed-Z is infinite-far, so the far argument is informational.
+    switch (m_cameraMode)
+    {
+        case CameraMode::Orrery:
+            // Compress the whole true-scale system to ~150 units at 1 AU so it
+            // fits in float and a small depth range; tiny near, fast free move.
+            m_scene.SetRenderScale(1.0e-9);
+            m_camera.SetClipPlanes(0.01f, 1.0e6f);
+            m_camera.SetMoveSpeed(5.0e10f);
+            break;
+        case CameraMode::NearBody:
+            m_scene.SetRenderScale(1.0);
+            m_camera.SetClipPlanes(1.0f, 1.0e12f);
+            m_camera.SetMoveSpeed(5.0e6f);
+            break;
+        case CameraMode::Free:
+            m_scene.SetRenderScale(1.0);
+            m_camera.SetClipPlanes(0.1f, 1.0e12f);
+            m_camera.SetMoveSpeed(1.0e7f);
+            break;
+        case CameraMode::ShipChase:
+        default:
+            m_scene.SetRenderScale(1.0);
+            m_camera.SetClipPlanes(0.1f, 10000.0f);
+            m_camera.SetMoveSpeed(5.0f);
+            break;
+    }
+}
+
 bool App::UpdateCamera(const core::TimeStep& timeStep)
 {
+    ApplyCameraModeRenderState();
+
     if (gameplay::OwnsOnFootInput(m_playerPossession))
     {
         ecs::Transform root;

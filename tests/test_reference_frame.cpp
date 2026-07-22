@@ -17,6 +17,7 @@
 
 #include "test_framework.h"
 #include "sim/reference_frame.h"
+#include "ecs/components.h"   // ecs::Transform::ToCameraRelativeMatrix
 
 #include <cmath>
 #include <limits>
@@ -343,6 +344,38 @@ TEST_CASE(ToCameraRelative_SubtractsFirstThenNarrows)
         const Vec3f rel = sim::ToCameraRelative(body, camera);
         CHECK_APPROX_EPS(rel.x, 0.25f, 1e-4f);
     }
+}
+
+// The per-mode render scale K in ecs::Transform::ToCameraRelativeMatrix must be
+// applied AFTER the double camera subtract. A body 100 m from the camera, both
+// ~1 AU from the world origin, must render at exactly 100*K even at K = 1e-9 —
+// which is only possible because the 1 AU magnitude is differenced away in double
+// first. Scaling the absolute positions and narrowing before differencing would
+// leave float noise ~1e-5 instead of the 1e-7 offset (the orrery-jitter failure).
+TEST_CASE(ToCameraRelativeMatrix_RenderScaleAppliedAfterSubtract)
+{
+    const core::Vec3d camera = { kAU, 0.0, 0.0 };
+    ecs::Transform body;
+    body.position = { kAU + 100.0, 0.0, 0.0 };
+    body.rotation = core::Quatf::Identity();
+    body.scale    = { 2.0f, 2.0f, 2.0f };
+
+    const double K = 1.0e-9;
+    const core::Mat4x4 m = body.ToCameraRelativeMatrix(camera, K);
+
+    // Body-local origin maps to (position - camera) * K = 100 m * 1e-9 = 1e-7.
+    const core::Vec3f o = m.TransformPoint({ 0.0f, 0.0f, 0.0f });
+    CHECK_APPROX_EPS(o.x, 1.0e-7f, 1.0e-10f);
+    CHECK_APPROX(o.y, 0.0f);
+    CHECK_APPROX(o.z, 0.0f);
+
+    // K scales SIZE too: a body-local +x unit spans scale*K in render space.
+    const core::Vec3f px = m.TransformPoint({ 1.0f, 0.0f, 0.0f });
+    CHECK_APPROX_EPS(px.x - o.x, static_cast<float>(2.0 * K), 1.0e-10f);
+
+    // K = 1 recovers the true 100 m residual (the existing true-scale behaviour).
+    const core::Mat4x4 m1 = body.ToCameraRelativeMatrix(camera, 1.0);
+    CHECK_APPROX_EPS(m1.TransformPoint({ 0.0f, 0.0f, 0.0f }).x, 100.0f, 1.0e-2f);
 }
 
 // =============================================================================

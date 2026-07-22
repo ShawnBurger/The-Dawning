@@ -315,7 +315,7 @@ void Scene::RenderShadowCasters(render::D3D12Device& device,
         if (!gpuMesh || !gpuMesh->IsValid()) continue;
 
         renderer.DrawMeshShadow(device, *gpuMesh,
-                                transform.ToCameraRelativeMatrix(cameraPosition));
+                                transform.ToCameraRelativeMatrix(cameraPosition, m_renderScale));
     }
 }
 
@@ -362,7 +362,7 @@ void Scene::RenderEntities(render::D3D12Device& device,
                 m_resources.GetTexture(TextureHandle(material.emissiveTextureHandle));
 
         const core::Mat4x4 worldMatrix =
-            transform.ToCameraRelativeMatrix(cameraPosition);
+            transform.ToCameraRelativeMatrix(cameraPosition, m_renderScale);
 
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,
@@ -471,7 +471,7 @@ void Scene::BuildAccelerationStructures(render::D3D12Device& device,
 
         const auto& transform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
         const core::Mat4x4 worldMat =
-            transform.ToCameraRelativeMatrix(cameraPosition);
+            transform.ToCameraRelativeMatrix(cameraPosition, m_renderScale);
 
         render::TLASInstance inst = {};
         // Convert the engine's row-vector matrix to DXR's 3x4 instance
@@ -668,7 +668,7 @@ void Scene::PathTraceEntities(
         // identically under non-uniform scale.
         {
             const core::Mat4x4 instWorld =
-                instTransform.ToCameraRelativeMatrix(cameraPosition);
+                instTransform.ToCameraRelativeMatrix(cameraPosition, m_renderScale);
             const core::Mat4x4 normalMat = core::Mat4x4::InverseTranspose3x3(instWorld);
             for (int row = 0; row < 3; ++row)
             {

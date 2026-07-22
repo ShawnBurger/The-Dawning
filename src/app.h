@@ -75,6 +75,11 @@ private:
     bool ValidateSmokeAssemblyMotion();
     void UpdatePlayerShipVisuals();
     bool UpdateCamera(const core::TimeStep& timeStep);
+    // Set the per-mode render scale K (Scene::SetRenderScale) and camera near
+    // plane (Camera::SetClipPlanes) for the active solar-system camera mode. Under
+    // reversed-Z the near plane is the precision lever; K compresses the world for
+    // the orrery. Called every frame before the camera pose is built.
+    void ApplyCameraModeRenderState();
     bool AdvanceSimulation(double dt);
     bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
@@ -161,6 +166,20 @@ private:
     float m_chaseCameraYaw = 0.0f;
     float m_chaseCameraPitch = 0.0f;
     bool m_chaseCameraInitialized = false;
+
+    // Solar-system camera modes (Prototype). ShipChase is the default meters-scale
+    // follow camera; the others frame the true-scale star system. Cycled with F4.
+    enum class CameraMode : uint32_t
+    {
+        ShipChase = 0, // follow the player ship (K=1, true scale) — the default
+        Orrery,        // whole system, compressed view scale (K<<1), free camera
+        NearBody,      // parked at a real body at true scale (K=1)
+        Free,          // free-fly at true scale (K=1)
+        Count
+    };
+    CameraMode m_cameraMode = CameraMode::ShipChase;
+    uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
+
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
     uint32_t m_smokeSavedNormalTexture = UINT32_MAX;

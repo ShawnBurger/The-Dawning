@@ -22,10 +22,21 @@ struct Transform
     core::Quatf rotation = core::Quatf::Identity();
     core::Vec3f scale    = { 1.0f, 1.0f, 1.0f };
 
-    core::Mat4x4 ToCameraRelativeMatrix(const core::Vec3d& cameraPosition) const
+    // `renderScale` (K) uniformly compresses the whole scene into render space:
+    // a map/orrery view uses K << 1 to fit an astronomical system in float and in
+    // a modest depth range, while true-scale views use K = 1. It MUST be applied
+    // AFTER the double-precision camera subtract (RULE 1): scaling the ~1e11
+    // absolute position before differencing would annihilate the small residual
+    // the camera-relative trick exists to preserve, reintroducing jitter. It
+    // scales position AND size together so bodies keep their true relative
+    // proportions.
+    core::Mat4x4 ToCameraRelativeMatrix(const core::Vec3d& cameraPosition,
+                                        double renderScale = 1.0) const
     {
-        const core::Vec3f relativePosition = (position - cameraPosition).ToFloat();
-        core::Mat4x4 s = core::Mat4x4::Scaling(scale.x, scale.y, scale.z);
+        const core::Vec3f relativePosition =
+            ((position - cameraPosition) * renderScale).ToFloat();
+        const float k = static_cast<float>(renderScale);
+        core::Mat4x4 s = core::Mat4x4::Scaling(scale.x * k, scale.y * k, scale.z * k);
         core::Mat4x4 r = core::Mat4x4::FromQuaternion(rotation.Normalized());
         core::Mat4x4 t = core::Mat4x4::Translation(relativePosition);
         return s * r * t;
