@@ -3126,6 +3126,44 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     else
     {
+        // Light selection for the raster frame, set UNCONDITIONALLY (so no override
+        // leaks across a mode/focus change) BEFORE the shadow pass (which builds its
+        // cascades from the light) and BeginFrame (which uploads lightDir):
+        //  - a true-scale star-system view focused on a PLANET -> light FROM THE STAR
+        //    (frame origin) toward that planet, so the terminator and the atmosphere
+        //    shell agree and both are physically correct;
+        //  - otherwise (the orrery, the demo scene, or focus ON the star itself, whose
+        //    direction would be a degenerate zero) -> the fixed default light.
+        core::Vec3f lightDir   = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
+        core::Vec3f lightColor = { 1.0f, 0.97f, 0.92f };
+        core::Vec3f ambient    = { 0.12f, 0.14f, 0.22f };
+        if (m_options.starSystem && m_cameraMode != CameraMode::Orrery)
+        {
+            const uint64_t focusId = m_focusBodyId
+                ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
+            const auto& reg = m_scene.GetRegistry();
+            if (auto* pool = reg.GetPool<ecs::GravitationalBody>())
+                for (uint32_t i = 0; i < pool->Count(); ++i)
+                    if (pool->DataAt(i).bodyId == focusId)
+                    {
+                        const ecs::Entity e = reg.EntityAtIndex(pool->EntityAt(i));
+                        if (const auto* t = reg.TryGet<ecs::Transform>(e))
+                        {
+                            // The star holds the frame origin: focusing IT gives a zero
+                            // direction (which would zero the light and degenerate the
+                            // shadow cascades), so only realign for a body off the origin.
+                            const core::Vec3d delta = core::Vec3d{ 0.0, 0.0, 0.0 } - t->position;
+                            if (delta.LengthSq() > 1.0)
+                            {
+                                lightDir = delta.Normalized().ToFloat();
+                                ambient  = { 0.02f, 0.03f, 0.05f }; // near-vacuum
+                            }
+                        }
+                        break;
+                    }
+        }
+        m_renderer.SetDirectionalLight(lightDir, lightColor, ambient);
+
         // Shadow depth first, into its own target. Must precede BeginScenePass:
         // it rebinds render targets, viewport and scissor, so running it after
         // would leave the scene pass pointing at a 2048x2048 depth-only target.
@@ -3192,6 +3230,18 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         m_renderer.BeginFrame(m_device, m_camera);
         m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
+
+        // Planetary atmospheres: analytic single-scattering shells over the just-drawn
+        // planets (blue limb glow, day/night terminator). Drawn before the orbit/marker
+        // overlays so those read on top, and only in the true-scale views — the Scene
+        // self-gates on K == 1. Raster-only (composites into the HDR target).
+        if (m_cameraMode != CameraMode::Orrery && !m_usePathTracing)
+        {
+            const float aspect = static_cast<float>(m_device.Width()) /
+                                 static_cast<float>(m_device.Height());
+            m_scene.RenderAtmospheres(m_device, m_renderer, m_camera.Position(),
+                                      m_camera.ViewProjectionMatrix(aspect));
+        }
 
         // Orbit-trace overlay: in the orrery/map view, draw each seeded body's
         // Keplerian orbit as translucent lines over the raster scene. Raster-only

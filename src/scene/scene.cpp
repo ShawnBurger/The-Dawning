@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -220,6 +221,38 @@ constexpr float kBillboardCorners[6][2] = {
     { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f },
     { -1.0f, -1.0f }, { 1.0f,  1.0f }, { -1.0f, 1.0f },
 };
+
+// Per-body atmosphere scattering parameters, keyed by the body's ORIGINAL (un-offset)
+// id. `height` is the atmosphere thickness above the surface (m); `betaR`/`betaM` are
+// the Rayleigh/Mie scattering coefficients at the surface (1/m); Hr/Hm the scale
+// heights (m); g the Mie asymmetry; sunI a radiance scale. valid=false for bodies
+// with no atmosphere (the Moon and the star).
+struct AtmosphereParams
+{
+    bool  valid;
+    float height;
+    float betaR[3];
+    float betaM;
+    float Hr, Hm, g, sunI;
+};
+AtmosphereParams AtmosphereParamsFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        // Earth: the textbook Nishita coefficients — blue sky, orange sunset limb.
+        // The shell is drawn slightly taller than the real ~100 km and a touch
+        // brighter so the limb ring reads at orbital distance (a common, tasteful
+        // exaggeration); the coefficients and scale heights stay physical.
+        case 10: return { true, 180000.0f,
+                          { 5.8e-6f, 13.5e-6f, 33.1e-6f }, 21.0e-6f,
+                          8500.0f, 1200.0f, 0.76f, 40.0f };
+        // Mars: a thin, dusty, reddish atmosphere — weak/ruddy Rayleigh, low density.
+        case 20: return { true, 120000.0f,
+                          { 19.9e-6f, 13.5e-6f, 8.1e-6f }, 10.0e-6f,
+                          11000.0f, 3000.0f, 0.70f, 18.0f };
+        default: return { false, 0.0f, { 0.0f, 0.0f, 0.0f }, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    }
+}
 } // namespace
 
 std::vector<render::Renderer::LineVertex>
@@ -811,6 +844,82 @@ void Scene::RenderEntities(render::D3D12Device& device,
                           material.albedo, material.roughness, material.metallic,
                           albedoTexture, normalTexture, ormTexture, emissiveTexture,
                           material.emissive, material.emissiveStrength);
+    }
+}
+
+void Scene::RenderAtmospheres(render::D3D12Device& device,
+                              render::Renderer& renderer,
+                              const core::Vec3d& cameraPosition,
+                              const core::Mat4x4& viewProj)
+{
+    if (!m_starSystemActive)
+        return;
+    // Compressed (orrery) views scale the world by K ~ 1e-9, where an atmosphere is
+    // sub-pixel; the shell math also assumes metres (K == 1). Only true-scale views.
+    if (m_renderScale < 0.5)
+        return;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return;
+
+    // The star holds the frame origin, so the direction to it from any planet is
+    // simply -planetPos (normalized in double before narrowing).
+    const core::Vec3d starPos{ 0.0, 0.0, 0.0 };
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // seeded celestial bodies only
+        const AtmosphereParams ap = AtmosphereParamsFor(g.bodyId - kStarSystemBodyIdBase);
+        if (!ap.valid)
+            continue;
+
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t  = m_registry.TryGet<ecs::Transform>(e);
+        const auto* mi = m_registry.TryGet<ecs::MeshInstance>(e);
+        if (!t || !mi)
+            continue;
+        const render::Mesh* mesh = m_resources.GetMesh(MeshHandle(mi->meshHandle));
+        if (!mesh || !mesh->IsValid())
+            continue;
+
+        const double K = m_renderScale; // == 1 here
+        const core::Vec3f centerCS = ((t->position - cameraPosition) * K).ToFloat();
+        const float Rp = static_cast<float>(g.radius);
+        const float Ra = Rp + ap.height;
+        const core::Vec3f sunDir = (starPos - t->position).Normalized().ToFloat();
+
+        // Shell world: the shared unit sphere (m_bodyMeshRadius) scaled to Ra and
+        // translated to the camera-relative planet centre — the same S*T convention
+        // ToCameraRelativeMatrix uses (RULE 1: subtract in double, then narrow).
+        const float shellScale = Ra / m_bodyMeshRadius;
+        const core::Mat4x4 shellWorld =
+            core::Mat4x4::Scaling(shellScale) *
+            core::Mat4x4::Translation(centerCS);
+
+        render::Renderer::AtmosphereConstants c = {};
+        std::memcpy(c.world, shellWorld.Data(), sizeof(c.world));
+        std::memcpy(c.viewProj, viewProj.Data(), sizeof(c.viewProj));
+        c.planetCenterRadius[0] = centerCS.x;
+        c.planetCenterRadius[1] = centerCS.y;
+        c.planetCenterRadius[2] = centerCS.z;
+        c.planetCenterRadius[3] = Rp;
+        c.sunDirAtmoRadius[0] = sunDir.x;
+        c.sunDirAtmoRadius[1] = sunDir.y;
+        c.sunDirAtmoRadius[2] = sunDir.z;
+        c.sunDirAtmoRadius[3] = Ra;
+        c.betaRayleighG[0] = ap.betaR[0];
+        c.betaRayleighG[1] = ap.betaR[1];
+        c.betaRayleighG[2] = ap.betaR[2];
+        c.betaRayleighG[3] = ap.g;
+        c.betaMieHeights[0] = ap.betaM;
+        c.betaMieHeights[1] = ap.Hr;
+        c.betaMieHeights[2] = ap.Hm;
+        c.betaMieHeights[3] = ap.sunI;
+
+        renderer.DrawAtmosphere(device, *mesh, c);
     }
 }
 

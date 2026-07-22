@@ -112,6 +112,17 @@ public:
                         render::Renderer& renderer,
                         const core::Vec3d& cameraPosition);
 
+    // Draw an analytic single-scattering atmosphere shell for every seeded body that
+    // has an atmosphere (Earth, Mars). Runs after RenderEntities, in true-scale views
+    // only (K == 1 — at the orrery scale an atmosphere is sub-pixel). The per-planet
+    // sun direction is normalize(star - planet) (the star sits at the frame origin),
+    // computed in double; centre/radius are camera-relative (RULE 1). No-op if no
+    // star system is seeded or the view is compressed.
+    void RenderAtmospheres(render::D3D12Device& device,
+                           render::Renderer& renderer,
+                           const core::Vec3d& cameraPosition,
+                           const core::Mat4x4& viewProj);
+
     // Build camera-relative line segments (render::Renderer::LineVertex pairs) for
     // every seeded on-rails body's orbit trace, ready for Renderer::DrawLines. Each
     // orbit is sampled about its primary via sim::SampleOrbitPath, offset to world,

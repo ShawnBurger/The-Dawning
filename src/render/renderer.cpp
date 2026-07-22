@@ -28,6 +28,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateSkyPSO(device.Device()))        return false;
     if (!CreateLinePipeline(device.Device()))  return false;
     if (!CreateBillboardPipeline(device.Device())) return false;
+    if (!CreateAtmospherePipeline(device.Device())) return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     // The shaders always carry the smoke probe binding, even though normal
     // frames branch around every write. Keep a one-record UAV bound so the root
@@ -2124,6 +2125,126 @@ void Renderer::DrawBillboards(D3D12Device& device, const BillboardVertex* verts,
     cmd->IASetVertexBuffers(0, 1, &vbv);
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmd->DrawInstanced(count, 1, 0, 0); // TRIANGLELIST: six vertices per marker
+}
+
+// =============================================================================
+// Atmosphere pipeline — analytic single-scattering shell
+// =============================================================================
+bool Renderer::CreateAtmospherePipeline(ID3D12Device* device)
+{
+    auto vs = CompileShaderFromFile(L"shaders/atmosphere_vs.hlsl", "main", "vs_5_1");
+    auto ps = CompileShaderFromFile(L"shaders/atmosphere_ps.hlsl", "main", "ps_5_1");
+    if (!vs || !ps)
+    {
+        core::Log::Error("Failed to compile atmosphere shaders");
+        return false;
+    }
+
+    // One root CBV (b0), visible to BOTH stages: the vertex stage transforms the
+    // shell, the pixel stage scatters.
+    D3D12_ROOT_PARAMETER param = {};
+    param.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    param.Descriptor.ShaderRegister = 0;
+    param.Descriptor.RegisterSpace  = 0;
+    param.ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rs = {};
+    rs.NumParameters = 1;
+    rs.pParameters   = &param;
+    rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    ComPtr<ID3DBlob> sig, err;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Atmosphere root signature serialize failed: 0x%08X", hr);
+        return false;
+    }
+    hr = device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
+                                     IID_PPV_ARGS(&m_atmoRootSig));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Atmosphere CreateRootSignature failed: 0x%08X", hr);
+        return false;
+    }
+    m_atmoRootSig->SetName(L"AtmosphereRootSignature");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_atmoRootSig.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    pso.InputLayout = { kVertexLayout, kVertexLayoutCount };
+
+    pso.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    // BACK cull: the camera views planet atmospheres from OUTSIDE in the star-system
+    // views (the ship orbits at ~4 planet radii; the atmosphere top is ~1.03 radii),
+    // so the shell's front (outer) faces cover the atmosphere disc. The pixel shader
+    // ray-marches analytically, so only the ray DIRECTION comes from the fragment —
+    // being on the front face is enough. KNOWN LIMITATION: if the camera descends
+    // INSIDE the shell (below the atmosphere top) the front faces cull and the
+    // atmosphere disappears. That is unreachable until surface flight/landing exists
+    // (a Layer-5 follow-on); a CULL_FRONT variant is not a drop-in fix because the
+    // shell's far (back) faces sit behind the planet and fail the reversed-Z GREATER
+    // test over the planet disc — the inside case needs its own pass/depth handling.
+    pso.RasterizerState.CullMode        = D3D12_CULL_MODE_BACK;
+    pso.RasterizerState.FrontCounterClockwise = FALSE; // CW front (LH), matches the mesh
+    pso.RasterizerState.DepthClipEnable = TRUE;
+
+    // Premultiplied alpha: result = src.rgb + dst*(1 - src.a). src.rgb is the
+    // in-scattered radiance (already the amount to add); src.a is the view-ray
+    // extinction, so the surface/space behind is dimmed by what the atmosphere
+    // absorbs. ONE / INV_SRC_ALPHA, not SRC_ALPHA, so the HDR radiance is added
+    // directly rather than scaled by alpha.
+    pso.BlendState.RenderTarget[0].BlendEnable           = TRUE;
+    pso.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_ONE;
+    pso.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    pso.BlendState.RenderTarget[0].BlendOp               = D3D12_BLEND_OP_ADD;
+    pso.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_ONE;
+    pso.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    pso.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    // Reversed-Z depth TEST (the planet/scene occludes the far shell) but no WRITE.
+    pso.DepthStencilState.DepthEnable    = TRUE;
+    pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    pso.DepthStencilState.DepthFunc      = render::kMainDepthCompare;
+    pso.DepthStencilState.StencilEnable  = FALSE;
+
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets      = 1;
+    pso.RTVFormats[0]         = kHDRFormat;
+    pso.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    pso.SampleDesc            = { 1, 0 };
+    pso.SampleMask            = UINT_MAX;
+
+    hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_atmoPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Atmosphere CreateGraphicsPipelineState failed: 0x%08X", hr);
+        return false;
+    }
+    m_atmoPSO->SetName(L"AtmospherePSO");
+    core::Log::Info("Atmosphere pipeline created (single-scattering shell)");
+    return true;
+}
+
+void Renderer::DrawAtmosphere(D3D12Device& device, const Mesh& mesh,
+                              const AtmosphereConstants& constants)
+{
+    if (!mesh.IsValid() || !m_atmoPSO) return;
+
+    const D3D12_GPU_VIRTUAL_ADDRESS cbVA = UploadCB(&constants, sizeof(constants));
+    if (cbVA == 0)
+        return; // CB ring overflow (already logged)
+
+    auto* cmd = device.CmdList();
+    cmd->SetPipelineState(m_atmoPSO.Get());
+    cmd->SetGraphicsRootSignature(m_atmoRootSig.Get());
+    cmd->SetGraphicsRootConstantBufferView(0, cbVA);
+    cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
+    cmd->IASetIndexBuffer(&mesh.ibView);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 }
 
 // =============================================================================

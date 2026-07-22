@@ -478,6 +478,29 @@ public:
                         uint32_t count, const core::Mat4x4& viewProj,
                         float viewportW, float viewportH);
 
+    // Per-atmosphere-shell constants (matches cbuffer AtmosphereConstants in the
+    // atmosphere shaders). All lengths in metres — the atmosphere pass runs only at
+    // true scale (K == 1). betaRayleigh/betaMie are 1/m; the centre/sun direction
+    // are camera-relative (eye at origin, RULE 1).
+    struct AtmosphereConstants
+    {
+        float world[16];            // camera-relative shell world (scale + translate)
+        float viewProj[16];         // camera-relative view-projection (no K)
+        float planetCenterRadius[4]; // xyz centre, w planet radius
+        float sunDirAtmoRadius[4];   // xyz dir TO star, w atmosphere radius
+        float betaRayleighG[4];      // xyz Rayleigh (1/m), w Mie asymmetry g
+        float betaMieHeights[4];     // x Mie (1/m), y Rayleigh scale height, z Mie scale height, w sun intensity
+    };
+
+    // Draw one planet's atmosphere SHELL (the shared sphere mesh, scaled to the
+    // atmosphere radius by `constants.world`). The pixel shader ray-marches analytic
+    // single-scattering; the pass composites premultiplied (in-scatter + attenuated
+    // background) with the reversed-Z depth TEST (no write) into the HDR target, so
+    // it must run after RenderEntities and before the resolve. Used for the blue limb
+    // glow and day/night terminator seen from space.
+    void DrawAtmosphere(D3D12Device& device, const Mesh& mesh,
+                        const AtmosphereConstants& constants);
+
     // Post-process tuning. Exposure was a constant baked into
     // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
     // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
@@ -773,6 +796,14 @@ private:
     uint32_t                    m_billboardVBCapacity = 0; // in vertices
     bool CreateBillboardPipeline(ID3D12Device* device);
     bool EnsureBillboardVertexBuffer(D3D12Device& device, uint32_t vertexCount);
+
+    // Atmosphere pipeline (single-scattering shell). One root CBV (b0, ALL
+    // visibility — the vertex stage transforms the shell, the pixel stage scatters)
+    // + the shared vertex layout. Premultiplied alpha blend, reversed-Z test/no
+    // write, cull BACK (the camera views atmospheres from outside in the star views).
+    ComPtr<ID3D12RootSignature> m_atmoRootSig;
+    ComPtr<ID3D12PipelineState> m_atmoPSO;
+    bool CreateAtmospherePipeline(ID3D12Device* device);
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
     // slots in the texture table, so the tone-map pass stays independent of
