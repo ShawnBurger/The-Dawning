@@ -6,13 +6,16 @@
 // reversed-Z depth, drawn in the RenderEntities slot BEFORE the atmosphere shell
 // so the analytic scattering composites over it.
 //
-// INCREMENT 0 (this revision): trivial Lambert shading from CBPlanet, proving the
-// dedicated-PSO + root-CBV(b5) + object-space-normal plumbing renders a lit body
-// through the new path with no regression. The procedural surface (continents,
-// ocean, clouds, night lights, Mars/Moon variants) layers on in later increments.
+// The whole surface is analytic — hash-based value-noise fBm over the object-space
+// (planet-fixed) surface direction, so there are no texture assets and the look is
+// seamless with no UV pinch. Layers (INCREMENT 1): continents vs ocean from an fBm
+// height field thresholded at sea level, a latitude+elevation+moisture biome colour
+// ramp with polar ice, ridged mountains, and a Fresnel ocean sun-glint. Clouds,
+// night-side city lights, and crater relief follow in later increments. Branches on
+// params0.x: 0 Earth-like (ocean), 1 Mars-like, 2 Moon-like (sharp terminator), 3
+// generic rock.
 //
-// FXC /WX single-exit: accumulate into `col`, one return (no early returns → no
-// X4000 "potentially uninitialized").
+// FXC /WX single-exit: accumulate into `col`, one return.
 // =============================================================================
 
 // Per-body surface parameters (root CBV b5). Byte-identical to
@@ -42,20 +45,174 @@ struct PSInput
     float3 objectDir  : TEXCOORD3;
 };
 
+// -----------------------------------------------------------------------------
+// Hash-based value noise (Dave Hoskins "hash without sine") — LUT-free, stable
+// across GPUs, no frac(sin()) banding at multi-octave frequencies.
+// -----------------------------------------------------------------------------
+float Hash13(float3 p)
+{
+    p = frac(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return frac((p.x + p.y) * p.z);
+}
+
+float ValueNoise(float3 x)
+{
+    float3 i = floor(x);
+    float3 f = frac(x);
+    float3 u = f * f * (3.0 - 2.0 * f); // smoothstep interpolant
+
+    float n000 = Hash13(i + float3(0, 0, 0));
+    float n100 = Hash13(i + float3(1, 0, 0));
+    float n010 = Hash13(i + float3(0, 1, 0));
+    float n110 = Hash13(i + float3(1, 1, 0));
+    float n001 = Hash13(i + float3(0, 0, 1));
+    float n101 = Hash13(i + float3(1, 0, 1));
+    float n011 = Hash13(i + float3(0, 1, 1));
+    float n111 = Hash13(i + float3(1, 1, 1));
+
+    float nx00 = lerp(n000, n100, u.x);
+    float nx10 = lerp(n010, n110, u.x);
+    float nx01 = lerp(n001, n101, u.x);
+    float nx11 = lerp(n011, n111, u.x);
+    float nxy0 = lerp(nx00, nx10, u.y);
+    float nxy1 = lerp(nx01, nx11, u.y);
+    return lerp(nxy0, nxy1, u.z); // [0,1]
+}
+
+// Per-octave rotation (IQ) so the axis-aligned grid of the value noise does not
+// print through the fBm as a lattice.
+static const float3x3 kNoiseRot = float3x3( 0.00,  0.80,  0.60,
+                                           -0.80,  0.36, -0.48,
+                                           -0.60, -0.48,  0.64);
+
+// fBm in [-1,1]-ish. Fixed octave counts (unrolled) keep FXC /WX happy.
+float Fbm5(float3 p)
+{
+    float sum = 0.0, amp = 0.5;
+    [unroll] for (int i = 0; i < 5; ++i)
+    {
+        sum += amp * (ValueNoise(p) * 2.0 - 1.0);
+        p = mul(kNoiseRot, p) * 2.02;
+        amp *= 0.5;
+    }
+    return sum;
+}
+
+float Fbm3(float3 p)
+{
+    float sum = 0.0, amp = 0.5;
+    [unroll] for (int i = 0; i < 3; ++i)
+    {
+        sum += amp * (ValueNoise(p) * 2.0 - 1.0);
+        p = mul(kNoiseRot, p) * 2.02;
+        amp *= 0.5;
+    }
+    return sum;
+}
+
+// Ridged multifractal — sharp crests for mountain ranges.
+float Ridged3(float3 p)
+{
+    float sum = 0.0, amp = 0.5, prev = 1.0;
+    [unroll] for (int i = 0; i < 3; ++i)
+    {
+        float n = 1.0 - abs(ValueNoise(p) * 2.0 - 1.0);
+        n = n * n;
+        sum += n * amp * prev;
+        prev = n;
+        p = mul(kNoiseRot, p) * 2.02;
+        amp *= 0.5;
+    }
+    return sum;
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
-    float3 N = normalize(input.normalWS);
-    float3 L = normalize(sunDir.xyz);
+    const int   type   = (int)(params0.x + 0.5);
+    const float seed   = params0.z;
+    const float3 seedO = float3(seed, seed * 1.7, seed * 0.3);
 
-    // Softened terminator (no hard cutoff → no stair-step ring at the day/night edge).
-    float ndl       = dot(N, L);
-    float dayFactor = smoothstep(-0.10, 0.10, ndl);
+    float3 N  = normalize(input.objectDir);   // planet-fixed surface direction
+    float3 Nw = normalize(input.normalWS);     // world normal (lighting)
+    float3 L  = normalize(sunDir.xyz);
+    float3 V  = normalize(-input.positionWS);  // camera at origin (camera-relative)
 
-    float3 baseColor = landLow.rgb;
+    const bool hasOcean = (type == 0);
 
-    // Direct sunlight + a small ambient floor so the night side is not pure black
-    // (matches the scene's neutral IBL fill; replaced by SH ambient in increment 1).
-    float3 col = baseColor * (sunColor.rgb * sunColor.w * dayFactor + ambient.rgb);
+    // --- Continent height field --------------------------------------------
+    // Domain-warp the sampling point a little for more organic coastlines.
+    float3 wp = N * 2.1 + seedO;
+    float3 warp = float3(Fbm3(wp + 5.2), Fbm3(wp + 9.1), Fbm3(wp + 1.7));
+    float h = Fbm5(wp + 0.6 * warp) * 0.5 + 0.5;   // ~[0,1]
+
+    float seaLevel   = params0.y;
+    float coastWidth = max(shallowColor.w, 0.001);
+    float landMask   = hasOcean ? smoothstep(seaLevel - coastWidth, seaLevel + coastWidth, h)
+                                : 1.0;
+
+    // --- Elevation & mountains (land only) ---------------------------------
+    float landSpan = max(1.0 - seaLevel, 0.05);
+    float elev     = hasOcean ? saturate((h - seaLevel) / landSpan) : saturate(h);
+    float mtn      = Ridged3(N * 5.7 + seedO * 1.3);
+    elev = saturate(elev + mtn * 0.35 * landMask);
+
+    // --- Latitude & moisture ------------------------------------------------
+    float lat      = abs(N.y);                       // 0 equator, 1 pole
+    float moisture = Fbm3(N * 3.3 + seedO * 2.1) * 0.5 + 0.5;
+
+    // --- Land colour --------------------------------------------------------
+    float3 landColor;
+    if (type == 0)
+    {
+        // Earth: dry desert vs green lowland by moisture, rock by elevation.
+        float3 dry  = float3(0.55, 0.47, 0.29);
+        float3 low  = lerp(dry, landLow.rgb, smoothstep(0.30, 0.62, moisture));
+        landColor   = lerp(low, landHigh.rgb, smoothstep(0.35, 0.85, elev));
+        // Snow on high peaks and cold, moist high latitudes.
+        float snow = saturate(smoothstep(0.80, 0.96, elev) +
+                              smoothstep(iceColor.w, iceColor.w + 0.10, lat) *
+                              smoothstep(0.35, 0.6, moisture));
+        landColor = lerp(landColor, iceColor.rgb, saturate(snow));
+    }
+    else
+    {
+        // Mars / Moon / generic: base→rock by elevation, polar caps by latitude.
+        landColor = lerp(landLow.rgb, landHigh.rgb, smoothstep(0.15, 0.80, elev));
+        float cap = (iceColor.w < 1.5) ? smoothstep(iceColor.w, iceColor.w + 0.06, lat) : 0.0;
+        landColor = lerp(landColor, iceColor.rgb, cap);
+    }
+    // Break up flat albedo with a touch of fine noise so it never reads as paint.
+    landColor *= 0.9 + 0.2 * ValueNoise(N * 40.0 + seedO);
+
+    // --- Ocean colour (Earth) ----------------------------------------------
+    float3 surfaceColor = landColor;
+    if (hasOcean)
+    {
+        float depth = saturate((seaLevel - h) / max(deepColor.w, 0.001));
+        float3 ocean = lerp(shallowColor.rgb, deepColor.rgb, depth);
+        surfaceColor = lerp(ocean, landColor, landMask);
+    }
+
+    // --- Lighting -----------------------------------------------------------
+    float ndl     = dot(Nw, L);
+    // Lambert with a soft terminator; airless Moon gets a crisp one.
+    float termLo  = (type == 2) ? -0.02 : -0.12;
+    float termHi  = (type == 2) ?  0.02 :  0.10;
+    float dayGate = smoothstep(termLo, termHi, ndl);
+    float diffuse = saturate(ndl) * dayGate + 0.0;
+
+    float3 col = surfaceColor * (sunColor.rgb * sunColor.w * diffuse + ambient.rgb);
+
+    // --- Ocean sun-glint (Earth day-side water only) -----------------------
+    if (hasOcean)
+    {
+        float oceanMask = 1.0 - landMask;
+        float3 R = reflect(-L, Nw);
+        float  spec = pow(saturate(dot(R, V)), max(ambient.w, 1.0));
+        float  fres = 0.02 + 0.98 * pow(saturate(1.0 - dot(Nw, V)), 5.0);
+        col += sunColor.rgb * sunColor.w * spec * fres * oceanMask * dayGate;
+    }
 
     return float4(col, 1.0);
 }
