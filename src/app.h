@@ -226,6 +226,22 @@ private:
     // when nothing is locked.
     gameplay::TargetInfo m_hudTargetInfo;
 
+    // Cached ship-status readout (flight mode, thrust demand, felt G, rotation rate),
+    // filled by RenderHud and shown in the overlay FLIGHT block. Same const-safe cache
+    // pattern as m_hudTargetInfo.
+    struct HudFlightStatus
+    {
+        bool  valid = false;
+        bool  coupled = true;
+        float throttleFwd = 0.0f;   // linearDemand.z (-1..1)
+        float throttleLat = 0.0f;   // linearDemand.x
+        float throttleVert = 0.0f;  // linearDemand.y
+        float speedMps = 0.0f;      // speed relative to the SOI primary
+        float gForce = 0.0f;        // |thrust*invMass| / 9.80665
+        float rotRateDeg = 0.0f;    // |angularVelocity| in deg/s
+    };
+    HudFlightStatus m_hudFlight;
+
     // Chunked-LOD terrain preview (Surface camera mode): the quadtree-selected leaf
     // set on the focus body (the Moon), each a displaced cube-sphere patch built
     // once at Init (fine under the camera, coarse toward the horizon) and drawn

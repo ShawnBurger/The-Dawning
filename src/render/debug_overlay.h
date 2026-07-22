@@ -62,6 +62,14 @@ struct DebugOverlayState
     double       targetRange = 0.0;         // m, ship -> target centre
     double       targetClosingSpeed = 0.0;  // m/s, positive = closing
     int          targetRelation = 0;
+
+    // Flight sub-block — the ship-status readout mirroring the HUD's speed bar and
+    // thrust indicator: coupled/decoupled mode, forward throttle, felt G, rotation.
+    bool         flightActive = false;
+    bool         flightCoupled = true;
+    float        flightThrottleFwd = 0.0f;  // -1..1
+    float        flightGForce = 0.0f;
+    float        flightRotRateDeg = 0.0f;
 };
 
 class DebugOverlay

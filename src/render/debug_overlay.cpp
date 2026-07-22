@@ -559,6 +559,22 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
             DrawTextLine(buf, 16, y, text); y += 20;
         }
 
+        // Flight sub-block: mode / forward throttle / felt G / rotation rate.
+        if (state.flightActive)
+        {
+            y += 6;
+            DrawRect(14, y - 4, kOverlayWidth - 28, 1, line);
+            const Pixel modeCol = state.flightCoupled ? Pixel{ 140, 216, 255, 255 }
+                                                      : Pixel{ 255, 205, 120, 255 };
+            std::snprintf(buf, sizeof(buf), "FLIGHT  %s",
+                          state.flightCoupled ? "COUPLED" : "DECOUPLED");
+            DrawTextLine(buf, 16, y, modeCol, true); y += 20;
+            std::snprintf(buf, sizeof(buf), "THR %+.0f%%   G %.1f   ROT %.1f deg/s",
+                          state.flightThrottleFwd * 100.0f, state.flightGForce,
+                          state.flightRotRateDeg);
+            DrawTextLine(buf, 16, y, muted); y += 20;
+        }
+
         footerY = usedHeight - 40;
     }
 

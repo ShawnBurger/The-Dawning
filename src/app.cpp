@@ -3181,6 +3181,16 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
             state.targetClosingSpeed = m_hudTargetInfo.closingSpeed;
             state.targetRelation     = static_cast<int>(m_hudTargetInfo.relation);
         }
+
+        // Flight readout: the ship-status the HUD's speed bar / thrust box surface.
+        if (m_hudFlight.valid)
+        {
+            state.flightActive      = true;
+            state.flightCoupled     = m_hudFlight.coupled;
+            state.flightThrottleFwd = m_hudFlight.throttleFwd;
+            state.flightGForce      = m_hudFlight.gForce;
+            state.flightRotRateDeg  = m_hudFlight.rotRateDeg;
+        }
     }
 
     return state;
@@ -3591,6 +3601,56 @@ void App::RenderHud()
                     m_hud.AddCircle(sp.x, sp.y, 6.0f, core::Color{ 1.0f, 0.35f, 0.28f, 0.95f }, 2.0f, 16);
                 }
             }
+        }
+    }
+
+    // --- ship-status: speed bar + thrust indicator + cached flight readout ----
+    m_hudFlight = {};
+    if (haveShip)
+    {
+        const ecs::FlightControl* fc = reg.TryGet<ecs::FlightControl>(m_playerShip);
+        const ecs::RigidBody*     rb = reg.TryGet<ecs::RigidBody>(m_playerShip);
+        if (fc && rb)
+        {
+            m_hudFlight.valid        = true;
+            m_hudFlight.coupled      = (fc->mode == ecs::FlightMode::Coupled);
+            m_hudFlight.throttleFwd  = fc->linearDemand.z;
+            m_hudFlight.throttleLat  = fc->linearDemand.x;
+            m_hudFlight.throttleVert = fc->linearDemand.y;
+            m_hudFlight.speedMps     = static_cast<float>(m_shipOrbit.valid ? m_shipOrbit.speed : speed);
+            const double gmag = std::sqrt(rb->forceAccum.x * rb->forceAccum.x +
+                                          rb->forceAccum.y * rb->forceAccum.y +
+                                          rb->forceAccum.z * rb->forceAccum.z) * rb->invMass / 9.80665;
+            m_hudFlight.gForce = static_cast<float>(gmag);
+            const double rot = std::sqrt(
+                static_cast<double>(rb->angularVelocity.x) * rb->angularVelocity.x +
+                static_cast<double>(rb->angularVelocity.y) * rb->angularVelocity.y +
+                static_cast<double>(rb->angularVelocity.z) * rb->angularVelocity.z);
+            m_hudFlight.rotRateDeg = static_cast<float>(rot * 57.2957795);
+
+            // Speed bar (left edge, vertical): track + fill against a reference max.
+            const float barX = 62.0f, barTop = cy - 130.0f, barH = 260.0f, barW = 8.0f;
+            m_hud.AddRect(barX, barTop, barW, barH, core::Color{ 0.30f, 0.40f, 0.50f, 0.35f });
+            const float frac = static_cast<float>((std::min)(1.0, m_hudFlight.speedMps / 8000.0));
+            m_hud.AddRect(barX, barTop + barH * (1.0f - frac), barW, barH * frac,
+                          core::Color{ 0.55f, 0.85f, 1.00f, 0.90f });
+            for (int t = 0; t <= 4; ++t)
+                m_hud.AddRect(barX - 4.0f, barTop + barH * (static_cast<float>(t) / 4.0f), barW + 8.0f, 1.5f,
+                              core::Color{ 0.60f, 0.70f, 0.80f, 0.50f });
+
+            // Thrust indicator (bottom-centre): a box with a dot for lateral/vertical
+            // demand and a forward/reverse bar beside it.
+            const float tcx = cx, tcy = h - 96.0f, box = 40.0f;
+            const core::Color faint{ 0.45f, 0.55f, 0.65f, 0.35f };
+            const core::Color live { 0.50f, 1.00f, 0.70f, 0.90f };
+            m_hud.AddRectOutline(tcx - box, tcy - box, box * 2.0f, box * 2.0f, faint, 1.5f);
+            m_hud.AddLine(tcx - box, tcy, tcx + box, tcy, faint, 1.0f);
+            m_hud.AddLine(tcx, tcy - box, tcx, tcy + box, faint, 1.0f);
+            m_hud.AddDiamond(tcx + m_hudFlight.throttleLat * box,
+                             tcy - m_hudFlight.throttleVert * box, 4.0f, live);
+            const float fbX = tcx + box + 16.0f;
+            m_hud.AddLine(fbX, tcy - box, fbX, tcy + box, faint, 2.0f);
+            m_hud.AddRect(fbX - 5.0f, tcy - m_hudFlight.throttleFwd * box - 1.5f, 10.0f, 3.0f, live);
         }
     }
 
