@@ -2279,7 +2279,7 @@ are now integrated as well. The current order is:
 
 ### WS-032: Production hero ship kit and Meshy content acceptance loop
 
-- Status: READY_TO_MERGE
+- Status: MERGED
 - Outcome: create the first high-quality, realistically scaled, boardable
   production spaceship as a modular content kit, then prove the complete
   design-authority -> Meshy source -> reviewed GLB -> deterministic cook ->
@@ -2355,13 +2355,60 @@ are now integrated as well. The current order is:
   deterministic. Entry, seated, and cabin-oblique Blender reviews show one
   continuous enclosure without the earlier blockout voids. The user accepted
   this result as sufficient for testing.
-- Remaining gates: publish and integrate this validated testing baseline. Final
-  hero-room art and the engine systems needed for a high-fidelity cockpit are
-  deliberately moved to later bounded workstreams governed by
+- Final integration: implementation commit `aa38093` and validated branch tip
+  `b794a76` were pushed, then fast-forwarded to `origin/main` on 2026-07-22.
+  Final hero-room art and the engine systems needed for a high-fidelity cockpit
+  remain bounded follow-on work governed by
   `docs/research/HIGH_FIDELITY_SHIP_INTERIORS_AND_COCKPITS_2026-07-22.md`.
-- Next action: commit, rebase onto current `origin/main`, rerun the affected
-  gates, push and integrate WS-032, then claim the separate Interior State and
-  Local Lighting vertical slice without touching Claude-owned `src/sim/**` work.
+- Next action: none; WS-033 owns the first follow-on interior-state slice.
+
+### WS-033: Interior state and local-light authoring slice
+
+- Status: ACTIVE
+- Outcome: add a backward-compatible authored light-fixture contract and a
+  deterministic ship-owned interior state coordinator that resolves group,
+  circuit, alert, and emergency behavior into bounded camera-relative local
+  light records ready for raster and DXR consumption.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit from a stable implementation commit
+- Branch: `codex/interior-state-lighting`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-interior-state-lighting`
+- Base commit: `b794a76`
+- Owned paths: additive assembly manifest validation/cooking/loading for light
+  fixtures; `src/ship/interior_state.*`; `src/ship/interior_lighting.*`; focused
+  assembly, state, lighting, and asset-pipeline tests; Frontier Courier authored
+  fixture data and deterministic recook; narrowly scoped documentation
+- Excluded paths: `src/render/**`, `shaders/**`, `src/app.*`,
+  `src/scene/scene.*`, `tools/smoke_test.ps1`, `src/sim/**`, planetary
+  atmosphere, SSAO, audio, VFX, diegetic displays, GPU clustered-light lists,
+  GPU local-light shading, and local-light shadow maps
+- Shared-file locks: WS-033 owns additive registrations in `CMakeLists.txt` and
+  this coordination entry only. Claude's active SSAO lane retains all excluded
+  renderer, scene, app, shader, and smoke-harness files.
+- Interface contract: manifest schema v1 remains loadable byte-for-byte. Schema
+  v2 appends bounded `light_fixtures` records using stable module IDs, physical
+  units, fixture groups, circuit IDs, and explicit emergency/shadow policy. The
+  coordinator owns copied topology and mutable state; consumers receive an
+  immutable revisioned snapshot in stable fixture order. Camera-relative
+  positions are narrowed from double to float only in the presentation builder.
+- Dependencies: merged WS-032 assembly/content baseline and the existing
+  assembly transform contract. GPU consumption is intentionally deferred until
+  Claude's current SSAO changes release the renderer/shared-file surface.
+- Acceptance gates: schema-v1 compatibility; deterministic schema-v2 cook;
+  strict malformed-input rejection; source-hash integrity; stable fixture order;
+  normal, emergency, and blackout resolution; circuit/group isolation;
+  idempotent state updates; monotonic snapshot revisions; camera-relative
+  translation precision; fixture and output hard limits; Debug and Release
+  builds; full CTest; existing reference and courier smoke profiles remain green
+- Negative controls: duplicate fixture IDs, missing modules, invalid vectors,
+  non-unit directions, unsupported types/policies, nonphysical intensity/range/
+  cone values, unknown group/circuit updates, NaN camera origins, overflowed
+  fixture counts, stale snapshots, and direct presentation-side mutation fail
+  without partially publishing state.
+- Latest commit: none
+- Next action: implement and test the additive schema, coordinator, and
+  renderer-facing CPU light snapshot without entering Claude-owned paths.
 
 ## 20. Helper Commands
 
