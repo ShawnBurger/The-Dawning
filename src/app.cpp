@@ -315,20 +315,15 @@ bool App::InitializeScene()
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
 
-    // Chunked-LOD terrain preview (the Moon): the quadtree-selected leaf set for the
-    // Surface camera, each patch displaced by the shared core::PlanetHeight so it
-    // matches the far shaded sphere. Fine under the camera, coarse toward the
-    // horizon. Built once and batched into this same upload; the staging buffers
-    // live in terrainStaging until the shared execute+wait below.
-    std::vector<ComPtr<ID3D12Resource>> terrainStaging;
+    // Chunked-LOD terrain preview (the Moon): only the FRAMING is fixed here; the
+    // leaf patches are STREAMED per frame in RenderTerrainPreview (reselect LOD for
+    // the live camera, generate+cache newly-visible write-once upload meshes). The
+    // camera pose is body-space (independent of the Moon's world position).
     if (m_options.starSystem && m_options.startCameraMode == 5) // Surface mode only
     {
         const double moonR = 1.7374e6;
-        const double amplitude = 16000.0; // exaggerated so a low-altitude patch reads
         m_terrainBodyId = scene::kStarSystemBodyIdBase + 11;
 
-        // Framing (body space, independent of the Moon's world position): an oblique
-        // aerial pose over a point on the +Z face.
         const core::Vec3d focusDir = terrain::FaceToDirection(terrain::CubeFace::PosZ, 0.2, 0.1);
         m_terrainFocusBody = { focusDir.x * moonR, focusDir.y * moonR, focusDir.z * moonR };
         core::Vec3d tan{ focusDir.y * 0.0 - focusDir.z * 1.0,
@@ -337,68 +332,11 @@ bool App::InitializeScene()
         double tl = tan.Length();
         if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
         tan = { tan.x / tl, tan.y / tl, tan.z / tl };
-        const double altitude = 180000.0, backDist = 260000.0;
+        const double altitude = 120000.0, backDist = 170000.0;
         m_terrainCamBody = { m_terrainFocusBody.x + focusDir.x * altitude - tan.x * backDist,
                              m_terrainFocusBody.y + focusDir.y * altitude - tan.y * backDist,
                              m_terrainFocusBody.z + focusDir.z * altitude - tan.z * backDist };
-
-        terrain::QuadtreeConfig qc;
-        qc.planetRadius = moonR; qc.amplitude = amplitude;
-        qc.pixelError = 7.0; qc.maxLevel = 6;
-        std::vector<terrain::QuadPatch> patches;
-        terrain::SelectQuadtreeLOD(qc, m_terrainCamBody, patches);
-
-        size_t skipped = 0;
-        for (const terrain::QuadPatch& qp : patches)
-        {
-            // Cheap horizon cull: skip the far hemisphere (not visible from a low
-            // camera). Proper altitude-aware horizon culling lands with the streamer.
-            const core::Vec3d cdir = terrain::FaceToDirection(
-                qp.face, 0.5 * (qp.u0 + qp.u1), 0.5 * (qp.v0 + qp.v1));
-            if (cdir.x * focusDir.x + cdir.y * focusDir.y + cdir.z * focusDir.z < 0.0)
-            { ++skipped; continue; }
-
-            terrain::ChunkParams tp;
-            tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
-            tp.gridN = 33;
-            tp.planetRadius = moonR; tp.amplitudeMeters = amplitude;
-            tp.type = 2; tp.seed = 33.0f; tp.seaLevel = 1.0f; tp.coastWidth = 0.0f;
-            terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
-
-            std::vector<render::Vertex> tv(chunk.vertices.size());
-            for (size_t i = 0; i < chunk.vertices.size(); ++i)
-            {
-                const terrain::ChunkVertex& cv = chunk.vertices[i];
-                const core::Vec3d bp{ chunk.origin.x + cv.position.x,
-                                      chunk.origin.y + cv.position.y,
-                                      chunk.origin.z + cv.position.z };
-                const double bl = bp.Length();
-                const core::Vec3f od = (bl > 0.0)
-                    ? core::Vec3f{ static_cast<float>(bp.x / bl),
-                                   static_cast<float>(bp.y / bl),
-                                   static_cast<float>(bp.z / bl) }
-                    : core::Vec3f{ 0.0f, 0.0f, 1.0f };
-                tv[i].position = cv.position;
-                tv[i].normal   = cv.normal;
-                tv[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
-                tv[i].uv       = cv.uv;
-            }
-            ComPtr<ID3D12Resource> vbUp, ibUp;
-            render::Mesh lm = render::CreateMesh(
-                m_device.Device(), m_device.CmdList(),
-                tv.data(), static_cast<uint32_t>(tv.size()),
-                chunk.indices.data(), static_cast<uint32_t>(chunk.indices.size()),
-                vbUp, ibUp);
-            if (lm.IsValid())
-            {
-                m_terrainLeaves.push_back({ lm, chunk.origin });
-                terrainStaging.push_back(vbUp);
-                terrainStaging.push_back(ibUp);
-            }
-        }
-        m_terrainBuilt = !m_terrainLeaves.empty();
-        core::Log::Infof("Terrain LOD built: %zu leaves (%zu far-hemisphere skipped)",
-                         m_terrainLeaves.size(), skipped);
+        m_terrainBuilt = true;
     }
 
     CreateDirectoryA("assets", nullptr);
@@ -3108,6 +3046,23 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     return state;
 }
 
+namespace
+{
+// Exact key for a quadtree leaf: face, level, and the integer cell indices at that
+// level. Two selections that land on the same patch produce the same key, so a
+// resident patch is reused across frames rather than regenerated.
+uint64_t TerrainLeafKey(const terrain::QuadPatch& p)
+{
+    const double cells = std::ldexp(1.0, p.level - 1);          // 2^(level-1)
+    const long long iu = std::llround((p.u0 + 1.0) * cells);
+    const long long iv = std::llround((p.v0 + 1.0) * cells);
+    return (static_cast<uint64_t>(p.face)  << 56)
+         | (static_cast<uint64_t>(p.level) << 48)
+         | ((static_cast<uint64_t>(iu) & 0xFFFFFFull) << 24)
+         |  (static_cast<uint64_t>(iv) & 0xFFFFFFull);
+}
+} // namespace
+
 void App::RenderTerrainPreview()
 {
     if (!m_terrainBuilt) return;
@@ -3125,6 +3080,10 @@ void App::RenderTerrainPreview()
             }
     if (!found) return;
 
+    ++m_terrainStreamFrame;
+    const double moonR = 1.7374e6;
+    const double amplitude = 16000.0;
+
     // Moon surface params (mirrors PlanetParamsFor(11)); sunDir toward the star at
     // the frame origin, computed in double before narrowing (RULE 1).
     render::Renderer::PlanetConstants pc = {};
@@ -3137,16 +3096,74 @@ void App::RenderTerrainPreview()
     pc.iceColor[3] = 2.0f; // no ice cap
     pc.ambient[0] = 0.010f; pc.ambient[1] = 0.010f; pc.ambient[2] = 0.012f;
 
-    // Each leaf patch is chunk-local about its own body-space origin; place that
-    // origin camera-relative in double, then narrow the small residual (RULE 1).
+    // Reselect the LOD for the LIVE camera-relative-to-body position, so the patch
+    // set adapts as the camera moves over the surface.
     const core::Vec3d camPos = m_camera.Position();
-    for (const TerrainLeaf& leaf : m_terrainLeaves)
+    const core::Vec3d camBody{ camPos.x - bodyPos.x, camPos.y - bodyPos.y, camPos.z - bodyPos.z };
+    const core::Vec3d focusDir{ m_terrainFocusBody.x, m_terrainFocusBody.y, m_terrainFocusBody.z };
+    const double fdl = focusDir.Length();
+    const core::Vec3d fdir = (fdl > 0.0)
+        ? core::Vec3d{ focusDir.x / fdl, focusDir.y / fdl, focusDir.z / fdl }
+        : core::Vec3d{ 0, 0, 1 };
+
+    terrain::QuadtreeConfig qc;
+    qc.planetRadius = moonR; qc.amplitude = amplitude;
+    qc.pixelError = 8.0; qc.maxLevel = 6;
+    std::vector<terrain::QuadPatch> patches;
+    terrain::SelectQuadtreeLOD(qc, camBody, patches);
+
+    for (const terrain::QuadPatch& qp : patches)
     {
-        const core::Vec3d tD{ bodyPos.x + leaf.originBody.x - camPos.x,
-                              bodyPos.y + leaf.originBody.y - camPos.y,
-                              bodyPos.z + leaf.originBody.z - camPos.z };
+        // Cheap horizon cull: skip the far hemisphere.
+        const core::Vec3d cdir = terrain::FaceToDirection(
+            qp.face, 0.5 * (qp.u0 + qp.u1), 0.5 * (qp.v0 + qp.v1));
+        if (cdir.x * fdir.x + cdir.y * fdir.y + cdir.z * fdir.z < 0.0)
+            continue;
+
+        const uint64_t key = TerrainLeafKey(qp);
+        auto it = m_terrainCache.find(key);
+        if (it == m_terrainCache.end())
+        {
+            // Newly visible: generate + upload a write-once patch mesh, cache it.
+            terrain::ChunkParams tp;
+            tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
+            tp.gridN = 33;
+            tp.planetRadius = moonR; tp.amplitudeMeters = amplitude;
+            tp.type = 2; tp.seed = 33.0f; tp.seaLevel = 1.0f; tp.coastWidth = 0.0f;
+            terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
+
+            std::vector<render::Vertex> tv(chunk.vertices.size());
+            for (size_t i = 0; i < chunk.vertices.size(); ++i)
+            {
+                const terrain::ChunkVertex& cv = chunk.vertices[i];
+                const core::Vec3d bp{ chunk.origin.x + cv.position.x,
+                                      chunk.origin.y + cv.position.y,
+                                      chunk.origin.z + cv.position.z };
+                const double bl = bp.Length();
+                const core::Vec3f od = (bl > 0.0)
+                    ? core::Vec3f{ static_cast<float>(bp.x / bl),
+                                   static_cast<float>(bp.y / bl),
+                                   static_cast<float>(bp.z / bl) }
+                    : core::Vec3f{ 0.0f, 0.0f, 1.0f };
+                tv[i].position = cv.position;
+                tv[i].normal   = cv.normal;
+                tv[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
+                tv[i].uv       = cv.uv;
+            }
+            render::Mesh lm = render::CreateUploadMesh(
+                m_device.Device(),
+                tv.data(), static_cast<uint32_t>(tv.size()),
+                chunk.indices.data(), static_cast<uint32_t>(chunk.indices.size()));
+            if (!lm.IsValid()) continue;
+            it = m_terrainCache.emplace(key, TerrainLeaf{ lm, chunk.origin, 0 }).first;
+        }
+        it->second.lastSeen = m_terrainStreamFrame;
+
+        const core::Vec3d tD{ bodyPos.x + it->second.originBody.x - camPos.x,
+                              bodyPos.y + it->second.originBody.y - camPos.y,
+                              bodyPos.z + it->second.originBody.z - camPos.z };
         const core::Mat4x4 world = core::Mat4x4::Translation(tD.ToFloat());
-        m_renderer.DrawTerrain(m_device, leaf.mesh, world, pc);
+        m_renderer.DrawTerrain(m_device, it->second.mesh, world, pc);
     }
 }
 
@@ -3207,9 +3224,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         const uint32_t rampPerFrame = m_options.smokeForceGrow ? 16u : 4u;
         maxDrawsHint += static_cast<uint32_t>(m_frameCount) * rampPerFrame;
     }
-    // Terrain leaves each cost one object/material record (Surface mode only).
+    // Terrain leaves each cost one object/material record (Surface mode only). The
+    // streamed leaf set fills in during the frame (after this hint is taken), so
+    // reserve a generous fixed allowance for the visible-hemisphere patch count.
     if (m_cameraMode == CameraMode::Surface)
-        maxDrawsHint += static_cast<uint32_t>(m_terrainLeaves.size());
+        maxDrawsHint += 768u;
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
     const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
                                   !renderedPathTracing;

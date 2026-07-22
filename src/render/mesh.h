@@ -135,6 +135,17 @@ Mesh CreateMesh(
     ComPtr<ID3D12Resource>& outVertexUpload,
     ComPtr<ID3D12Resource>& outIndexUpload);
 
+// Write-once UPLOAD-heap mesh — no staging, no command list, no GPU wait. The
+// buffers live in an upload heap (CPU-writable, GPU-readable), so this is safe to
+// call at RUNTIME (mid-frame) to stream terrain chunks: the data is written once
+// at creation and never rewritten, and the Mesh owns its resources so caching it
+// keeps them resident. Slightly slower for the GPU to read than a DEFAULT-heap
+// mesh, which is the right trade for streamed, frequently-created chunk geometry.
+Mesh CreateUploadMesh(
+    ID3D12Device* device,
+    const Vertex* vertices, uint32_t vertexCount,
+    const uint16_t* indices, uint32_t indexCount);
+
 // 32-bit index variant — for meshes with >65535 vertices
 Mesh CreateMesh32(
     ID3D12Device* device,

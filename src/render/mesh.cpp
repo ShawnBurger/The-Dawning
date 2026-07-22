@@ -253,6 +253,49 @@ Mesh CreateMesh(
 // =============================================================================
 // CreateMesh32 — 32-bit index variant for large meshes
 // =============================================================================
+Mesh CreateUploadMesh(
+    ID3D12Device* device,
+    const Vertex* vertices, uint32_t vertexCount,
+    const uint16_t* indices, uint32_t indexCount)
+{
+    Mesh mesh;
+    if (!device || vertexCount == 0 || indexCount == 0) return Mesh{};
+    mesh.vertexCount = vertexCount;
+    mesh.indexCount  = indexCount;
+
+    const uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
+    const uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(uint16_t);
+
+    // UPLOAD heap in GENERIC_READ — directly GPU-readable as VB/IB, CPU-writable.
+    mesh.vertexBuffer = CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD,
+                                     D3D12_RESOURCE_STATE_GENERIC_READ, L"TerrainChunkVB");
+    mesh.indexBuffer  = CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD,
+                                     D3D12_RESOURCE_STATE_GENERIC_READ, L"TerrainChunkIB");
+    if (!mesh.vertexBuffer || !mesh.indexBuffer)
+    {
+        core::Log::Error("Failed to create upload-mesh buffers");
+        return Mesh{};
+    }
+
+    const D3D12_RANGE noRead{ 0, 0 };
+    void* vp = nullptr;
+    void* ip = nullptr;
+    if (FAILED(mesh.vertexBuffer->Map(0, &noRead, &vp)) || !vp) return Mesh{};
+    std::memcpy(vp, vertices, vbSize);
+    mesh.vertexBuffer->Unmap(0, nullptr);
+    if (FAILED(mesh.indexBuffer->Map(0, &noRead, &ip)) || !ip) return Mesh{};
+    std::memcpy(ip, indices, ibSize);
+    mesh.indexBuffer->Unmap(0, nullptr);
+
+    mesh.vbView.BufferLocation = mesh.vertexBuffer->GetGPUVirtualAddress();
+    mesh.vbView.SizeInBytes    = static_cast<UINT>(vbSize);
+    mesh.vbView.StrideInBytes  = sizeof(Vertex);
+    mesh.ibView.BufferLocation = mesh.indexBuffer->GetGPUVirtualAddress();
+    mesh.ibView.SizeInBytes    = static_cast<UINT>(ibSize);
+    mesh.ibView.Format         = DXGI_FORMAT_R16_UINT;
+    return mesh;
+}
+
 Mesh CreateMesh32(
     ID3D12Device* device,
     ID3D12GraphicsCommandList* cmdList,
