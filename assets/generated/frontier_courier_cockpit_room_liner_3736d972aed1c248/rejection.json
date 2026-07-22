@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "request_hash": "3736d972aed1c2489e5819bc532d281ec475eb181e644356d0a010f3fbdfdf2f",
+  "asset_id": "ship.frontier.courier_mk1",
+  "module_id": "cockpit_module",
+  "status": "rejected_provider_failure",
+  "failure": "The uploaded image is too complex for 3D generation.",
+  "observed_credit_delta": 10,
+  "artifact_created": false,
+  "decision": "replace the monolithic request with modular generated architectural bays"
+}

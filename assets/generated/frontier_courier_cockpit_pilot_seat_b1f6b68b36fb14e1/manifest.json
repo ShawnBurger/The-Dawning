@@ -1,0 +1,85 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T10:10:49.514372+00:00",
+  "request_hash": "b1f6b68b36fb14e15154daaa89012c86538935e5a70c43ce71710b9d638951c1",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic standalone hard-surface pilot seat for a compact frontier spacecraft, 1.25 m tall, 0.68 m wide, 0.85 m deep. Upright crashworthy aerospace frame, padded back and seat cushion, five-point restraint mounts, compact side arm controls, mechanical adjustment rails, titanium and carbon-composite shell, dark charcoal fabric, restrained safety-orange release details. Bilateral symmetry, manufacturable construction, game-ready clean silhouette. No room, floor, pedestal, person, wheel, text, logos, floating parts, background or stand. Seat faces +Z and rests at origin.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 60000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8944-4292-7694-817b-83e7c72fccf8",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784714382018,
+      "started_at": 1784714382064,
+      "finished_at": 1784714510336,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f894c-854f-7475-97a3-2d2b200e3fc1",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784714921317,
+      "started_at": 1784714921336,
+      "finished_at": 1784715042291,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "c73501d4e678b15386da7c27261baa2237677835effc99b0478df927a94836f6",
+    "preview": "preview.glb",
+    "preview_sha256": "a85346a57c25d976448f5117f9ff7b9c72620ea8108c8bcc9401b09d54998594",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "3359de226ab8ae42a26b94690c1fcbdfa1292c90dc234771c6db4057a676bdce",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "df404a6c849d0f673ef726054b323e069b08956b79fd8958bb1834c30af20b60",
+      "metallic_0": "6df3576042794a31574620abb16a9f371fd0c31a446b8d0188663e836e7549d2",
+      "roughness_0": "c30b4d73d203030cc5597fb6d8cee1befec4525429531467a8c1657b8fbd432b",
+      "normal_0": "afb55c5fd326528da271f3b727058d6dd32365cd0e03238eff823a64d11e8af7",
+      "emission_0": "11b9b94fd74cbc9bce0291332b398ae77ce088eb2d5dff4c8f724761929827ab"
+    }
+  },
+  "art_review": {
+    "status": "accepted_geometry_only",
+    "promoted_source": "assets/source/frontier_courier_mk1/frontier_courier_pilot_seat_source.glb",
+    "authored_dimensions_m": [0.68, 0.85, 1.25],
+    "required_cleanup": [
+      "bake the glTF import basis before dimensional normalization",
+      "rotate the generated -Z-facing source to the authored +Z seat heading",
+      "derive bounded cockpit LODs from the retained high-detail master",
+      "replace generated pseudo-labels and text before any PBR texture promotion"
+    ],
+    "runtime_material_policy": "geometry is integrated with sanitized authored vertex colors; generated PBR textures remain source-only"
+  },
+  "consumed_credits": 30
+}

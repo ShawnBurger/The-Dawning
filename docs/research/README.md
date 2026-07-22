@@ -39,6 +39,14 @@ design work. For the user-facing baseline, also read the root `README.md` and
 - **`AUTHORITATIVE_ASSEMBLY_ROOT_PRESENTATION_2026-07-21.md`** - current Stage
   5E playable-root identity, immutable local-pose model, transactional fixed-step
   child publication, and smoke-probe isolation contract.
+- **`FRONTIER_COURIER_RUNTIME_ACCEPTANCE_2026-07-22.md`** - accepted production
+  content, traversal, possession, flight, renderer, and cockpit testing-baseline
+  evidence for the first boardable ship kit.
+- **`HIGH_FIDELITY_SHIP_INTERIORS_AND_COCKPITS_2026-07-22.md`** - binding visual,
+  human-factors, asset, state, lighting, UI, atmosphere, resource-network,
+  audio, damage, and production acceptance direction for future ship interiors.
+- **`MESHY_PRODUCTION_INTERIORS_2026-07-21.md`** - generated-source boundaries,
+  modular asset method, provenance requirements, and content acceptance policy.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and
   **`CLAUDE_PUBLISHED_CHANGES_DEEP_DIVE_2026-07-20.md`** — dated collaboration
   and change reviews; useful provenance, not timeless status.

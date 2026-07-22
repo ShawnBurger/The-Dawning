@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:49:32.900212+00:00",
+  "request_hash": "cf8dd773d5d656592bd80942c1ed6554d78565af2387b53a45a6983eb8230682",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic isolated flat rectangular spacecraft wall panel, front-facing, 2.0 m wide, 2.15 m high, only 0.12 m deep, depth under one fifteenth of width. Straight backplate reaches all four square corners for tiling. Layered titanium and carbon panels, recessed hatches, protected conduits, vents, light channels, fasteners and broad fillets. Dark graphite and gunmetal with cyan and orange details. Not a box, crate, container or room. No open top, side walls, clipped corners, holes, door, furniture, text, logos, people, background, stand or floating parts.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f89a3-1123-7ed8-8ede-f97dd9c8b030",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720595509,
+      "started_at": 1784720595678,
+      "finished_at": 1784720730805,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f89a6-9870-74dc-8b9b-e174f7c74c81",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720824448,
+      "started_at": 1784720824681,
+      "finished_at": 1784720951742,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "a7d7e5febba3c72be24c8a183ca534e99a22fa9aa19b7659a90a3c429af78ae5",
+    "preview": "preview.glb",
+    "preview_sha256": "8d2f2c84c89d0eea5e2b3e723af017be2ba012f9a3b695f5b01c26cf7431328d",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "0784ae7416df5cbe0436a4dee7b2b824a1dc0a9e8097a15a4a8c810d136f1ca5",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "621895b13d14ad566469d5b48e24dfb03b9ed74948cbb3d13143789cab2edfd3",
+      "metallic_0": "1dc388736e27cf0549b17fa834735e2679933d3b52384d0c65e584166addd3a3",
+      "roughness_0": "dbe4ff8a49a96b861419e65d6614e46f125b22866b7ea2a9c416fe0a17c29808",
+      "normal_0": "cf558243aea2f4d5992a42214e139c46d037b236fa14037ff3fe97a781269e56",
+      "emission_0": "eadc5ce4200d60bf013cb08010ee7831bb4b7607062757ff78b278efee48ddfd"
+    }
+  },
+  "art_review": {
+    "status": "accepted_geometry_only_after_authored_normalization",
+    "promoted_source": "assets/source/frontier_courier_mk1/frontier_courier_cockpit_wall_panel_source.glb",
+    "authored_dimensions_m": {
+      "width_x": 2.0,
+      "height_y": 2.15,
+      "depth_z": 0.12
+    },
+    "source_proportion_disposition": "the generated source is a deep closed equipment bay; controlled depth normalization converts its continuous detailed face and backplate into the reviewed wall-liner slab",
+    "required_cleanup": [
+      "bake the glTF import basis before dimensional normalization",
+      "flatten only through the design-authority envelope",
+      "voxel-union fragmented render topology before bounded LOD derivation",
+      "replace generated PBR markings with authored runtime shading"
+    ],
+    "runtime_material_policy": "geometry uses sanitized authored materials; generated PBR textures remain source-only"
+  },
+  "consumed_credits": 30
+}

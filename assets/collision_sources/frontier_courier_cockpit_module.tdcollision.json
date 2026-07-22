@@ -31,30 +31,44 @@
       "walkable": false
     },
     {
-      "id": "console_left",
+      "id": "flight_station_center",
       "center_m": [
-        -1.85,
-        -0.77,
-        1.65
+        0.0,
+        -0.8,
+        3.55
       ],
       "half_extents_m": [
-        0.29,
-        0.29,
-        1.35
+        1.15,
+        0.45,
+        0.35
       ],
       "walkable": false
     },
     {
-      "id": "console_right",
+      "id": "flight_station_left",
       "center_m": [
-        1.85,
-        -0.77,
-        1.65
+        -1.52,
+        -0.8,
+        3.2
       ],
       "half_extents_m": [
-        0.29,
-        0.29,
-        1.35
+        0.33,
+        0.45,
+        0.7
+      ],
+      "walkable": false
+    },
+    {
+      "id": "flight_station_right",
+      "center_m": [
+        1.52,
+        -0.8,
+        3.2
+      ],
+      "half_extents_m": [
+        0.33,
+        0.45,
+        0.7
       ],
       "walkable": false
     },
@@ -71,20 +85,6 @@
         4.05
       ],
       "walkable": true
-    },
-    {
-      "id": "forward_console",
-      "center_m": [
-        0.0,
-        -0.53,
-        2.82
-      ],
-      "half_extents_m": [
-        1.45,
-        0.39,
-        0.24
-      ],
-      "walkable": false
     },
     {
       "id": "frame_aft_left",
@@ -132,12 +132,12 @@
       "id": "pilot_seat_back",
       "center_m": [
         0.0,
-        -0.47,
-        2.28
+        -0.58,
+        1.78
       ],
       "half_extents_m": [
-        0.31,
-        0.46,
+        0.34,
+        0.44,
         0.11
       ],
       "walkable": false
@@ -150,9 +150,9 @@
         2.1
       ],
       "half_extents_m": [
-        0.31,
+        0.34,
         0.23,
-        0.34
+        0.35
       ],
       "walkable": false
     },

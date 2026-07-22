@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:40:48.860339+00:00",
+  "request_hash": "81662bece7e9f0e308db97d49198179d8ebf5b097f4d45baeac8a63e69962329",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "Photorealistic rectangular spacecraft cockpit sidewall liner, 2.0 m long, 2.15 m high, 0.16 m thick. Solid coverage to four straight edges, tileable edge-to-edge. Curved titanium and carbon panels, recessed service hatches, protected conduits, ventilation louvers, indirect light channels, fasteners, soft fillets and broad transitions. Detailed interior face, solid back, dark graphite and gunmetal, restrained cyan and orange controls. Manufacturable hard surface. No clipped corners, perimeter gaps, holes, windows, door, furniture, text, logos, people, background, stand or floating parts.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f899e-97bf-7d1f-b085-59d0665dcb3f",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720302275,
+      "started_at": 1784720302495,
+      "finished_at": 1784720444082,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "190c70476c92bda09ce957efee19dedc60f12c65145bdeabc9a222dedd58f24a",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "b71624937d7b0f176640fb1074868bb2b36c1469710e3957aa31ef0b6438e39e"
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "reasons": [
+      "the result is an open-topped equipment crate rather than a liner slab",
+      "the secondary detached component violates the single structural-bay contract",
+      "flattening the open rail silhouette would leave avoidable seam voids"
+    ],
+    "replacement_request_hash": "cf8dd773d5d656592bd80942c1ed6554d78565af2387b53a45a6983eb8230682"
+  },
+  "consumed_credits": 20
+}

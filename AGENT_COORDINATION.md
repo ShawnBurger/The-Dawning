@@ -2279,7 +2279,7 @@ are now integrated as well. The current order is:
 
 ### WS-032: Production hero ship kit and Meshy content acceptance loop
 
-- Status: ACTIVE
+- Status: READY_TO_MERGE
 - Outcome: create the first high-quality, realistically scaled, boardable
   production spaceship as a modular content kit, then prove the complete
   design-authority -> Meshy source -> reviewed GLB -> deterministic cook ->
@@ -2349,15 +2349,19 @@ are now integrated as well. The current order is:
   is guarded by a pipeline-level distance/facing test. The accepted cooked
   assembly SHA-256 is
   `f396d99f7bb42b560868df0766612d6657dc7961364de91d4e17ce4bbfe07143`.
-- Remaining gates: replace the systems-safe interior blockout dressing with
-  reviewed production consoles, seats, storage, tools, piping, displays,
-  materials, and habitation props; capture close interior and cockpit evidence;
-  and preserve every certified clearance, socket, portal, collision, walkable,
-  interaction, and moving-part identity while doing so.
-- Next action: begin production interior dressing from the accepted runtime
-  checkpoint, prioritizing the cockpit and boarding route while preserving the
-  2.1 m standing clearance, 0.95 m minimum door width, and continuous
-  exterior-to-cockpit traversal.
+  The cockpit testing baseline now uses four accepted generated geometry
+  masters for the seat, flight station, structural wall bays, and deck/overhead
+  bays. All three cockpit LODs are closed and the canonical interior cook is
+  deterministic. Entry, seated, and cabin-oblique Blender reviews show one
+  continuous enclosure without the earlier blockout voids. The user accepted
+  this result as sufficient for testing.
+- Remaining gates: publish and integrate this validated testing baseline. Final
+  hero-room art and the engine systems needed for a high-fidelity cockpit are
+  deliberately moved to later bounded workstreams governed by
+  `docs/research/HIGH_FIDELITY_SHIP_INTERIORS_AND_COCKPITS_2026-07-22.md`.
+- Next action: commit, rebase onto current `origin/main`, rerun the affected
+  gates, push and integrate WS-032, then claim the separate Interior State and
+  Local Lighting vertical slice without touching Claude-owned `src/sim/**` work.
 
 ## 20. Helper Commands
 

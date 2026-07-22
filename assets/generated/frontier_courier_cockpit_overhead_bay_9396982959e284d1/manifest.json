@@ -1,0 +1,82 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:55:03.164570+00:00",
+  "request_hash": "9396982959e284d1451211f1cf5a712b207d8d9f6ac453970d73d5b055335599",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic rectangular spacecraft cockpit overhead panel, 2.25 m wide, 2.0 m long, 0.18 m thick. Solid coverage to all four straight edges, tileable edge-to-edge. Recessed soft area-light housings with solid lenses, protected ducts, conduits, ventilation grilles, maintenance latches, fasteners, layered titanium and carbon composite, soft fillets and large-radius transitions. Dark graphite and gunmetal with restrained cyan lenses. No clipped corners, perimeter gaps, through holes, windows, furniture, console, seat, text, logos, people, background, stand or floating parts.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f89a6-9854-7fbd-8fb4-2fee9f54cc82",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720827165,
+      "started_at": 1784720827286,
+      "finished_at": 1784721088074,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f89aa-b5aa-7f92-8252-78715ee3c05d",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784721094077,
+      "started_at": 1784721094205,
+      "finished_at": 1784721281850,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "be6fb37dffaacfb37734e1742a02c2f573764b76e8ce302e46dd18f0dd8f6b7a",
+    "preview": "preview.glb",
+    "preview_sha256": "8279ca06c0c9ecc9022cc836c9748b4b498dd2bf924fc5029123757e7449bf6f",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "5b5e3c68a706b7310bc4eb6ceb3fb5243ef59aec5f03c17c33014fdf282063b8",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "3741f3b796ba6c937b3450395860df438ec36999424260a40fe8e19534a47b32",
+      "metallic_0": "0d1ca70e55f6018f9aa206401986ddc70d7969c1f1bd20509480d5155328173f",
+      "roughness_0": "767d7db60543347f7b3ab93f51a58c0a83c2b7368a3af93d74f7a329dbf80d29",
+      "normal_0": "8616203ddeaf2ce7b2bf19004f1fb1ad5908cc32a9e678aa446a0c4b980bc07d",
+      "emission_0": "d1c46d66e720b1f81434965a0ae00f6a031bb8afcc80b08aab8827128178133d"
+    }
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "reasons": [
+      "the refined result is a deep machinery enclosure rather than a ceiling liner",
+      "flattening its interior machinery would create incoherent overlapping forms",
+      "the accepted deck bay provides safer generated overhead coverage"
+    ],
+    "replacement_request_hash": "08c94c3825dcd328455fd9577d3c3a085821d53bf5748d30f3ff8a4513b62dd9"
+  },
+  "consumed_credits": 30
+}

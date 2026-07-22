@@ -146,21 +146,64 @@ def end_boxes(
     return boxes
 
 
-def detail_boxes(module_id: str, width: float, height: float) -> list[dict]:
+def fixture_collision_boxes(module_id: str, fixtures: dict) -> list[dict]:
+    boxes = []
+    for fixture_id, fixture in fixtures.items():
+        if not isinstance(fixture, dict):
+            raise CollisionGenerationError(
+                f"{fixture_id} fixture must be an object")
+        if fixture.get("module") != module_id:
+            continue
+        configured = fixture.get("collision_boxes", [])
+        if not isinstance(configured, list):
+            raise CollisionGenerationError(
+                f"{fixture_id} collision_boxes must be a list")
+        for item in configured:
+            if not isinstance(item, dict):
+                raise CollisionGenerationError(
+                    f"{fixture_id} collision box must be an object")
+            box_id = item.get("id")
+            center = item.get("center_m")
+            size = item.get("size_m")
+            walkable = item.get("walkable", False)
+            if not isinstance(box_id, str) or not box_id:
+                raise CollisionGenerationError(
+                    f"{fixture_id} collision box id must be a non-empty string")
+            if not isinstance(center, list) or len(center) != 3 or \
+                    not isinstance(size, list) or len(size) != 3:
+                raise CollisionGenerationError(
+                    f"{fixture_id}.{box_id} collision vectors must contain three numbers")
+            if not isinstance(walkable, bool):
+                raise CollisionGenerationError(
+                    f"{fixture_id}.{box_id} walkable must be a boolean")
+            try:
+                parsed_center = tuple(float(value) for value in center)
+                parsed_size = tuple(float(value) for value in size)
+            except (TypeError, ValueError) as exc:
+                raise CollisionGenerationError(
+                    f"{fixture_id}.{box_id} collision vectors contain non-numbers") from exc
+            boxes.append(box_record(
+                box_id,
+                parsed_center,
+                parsed_size,
+                walkable=walkable,
+            ))
+    ids = [box["id"] for box in boxes]
+    if len(ids) != len(set(ids)):
+        raise CollisionGenerationError(
+            f"{module_id} fixture collision ids are not unique")
+    return boxes
+
+
+def detail_boxes(
+    module_id: str,
+    width: float,
+    height: float,
+    production_fixtures: dict,
+) -> list[dict]:
     floor_y = -height * 0.5
     if module_id == "cockpit_module":
-        return [
-            box_record("pilot_seat_base", (0.0, floor_y + 0.23, 2.1),
-                       (0.62, 0.46, 0.68), walkable=False),
-            box_record("pilot_seat_back", (0.0, floor_y + 0.78, 2.28),
-                       (0.62, 0.92, 0.22), walkable=False),
-            box_record("forward_console", (0.0, floor_y + 0.72, 2.82),
-                       (2.9, 0.78, 0.48), walkable=False),
-            box_record("console_left", (-1.85, floor_y + 0.48, 1.65),
-                       (0.58, 0.58, 2.7), walkable=False),
-            box_record("console_right", (1.85, floor_y + 0.48, 1.65),
-                       (0.58, 0.58, 2.7), walkable=False),
-        ]
+        return fixture_collision_boxes(module_id, production_fixtures)
     if module_id == "engineering_module":
         return [
             box_record(f"machinery_{index}",
@@ -225,6 +268,7 @@ def interior_collision(
     portal_sockets: list[dict],
     door_width: float,
     door_height: float,
+    production_fixtures: dict,
 ) -> list[dict]:
     width, height, length = clear_size
     side_openings, end_portals = portal_boundaries(
@@ -244,7 +288,8 @@ def interior_collision(
             side=side, width=width, height=height, length=length,
             is_portal=end_portals[side], door_width=door_width,
             door_height=door_height))
-    details = detail_boxes(module_id, width, height)
+    details = detail_boxes(
+        module_id, width, height, production_fixtures)
     validate_entry_clearance(
         module_id, clear_size, portal_sockets, details, door_width, door_height)
     boxes.extend(details)
@@ -273,6 +318,9 @@ def generate(dimensions_path: Path, manifest_path: Path, output_dir: Path) -> di
             sockets_by_module.setdefault(socket["module"], []).append(socket)
     door_width = float(dimensions["human_factors"]["nominal_door_clear_width"])
     door_height = float(dimensions["human_factors"]["nominal_door_clear_height"])
+    production_fixtures = dimensions.get("production_fixtures") or {}
+    if not isinstance(production_fixtures, dict):
+        raise CollisionGenerationError("production_fixtures must be an object")
     if door_width < float(dimensions["human_factors"]["minimum_door_clear_width"]):
         raise CollisionGenerationError("nominal door is narrower than the minimum")
 
@@ -285,7 +333,7 @@ def generate(dimensions_path: Path, manifest_path: Path, output_dir: Path) -> di
             size = tuple(float(value) for value in modules[module_id]["clear_size_m"])
             boxes = interior_collision(
                 module_id, size, sockets_by_module.get(module_id, []),
-                door_width, door_height)
+                door_width, door_height, production_fixtures)
         document = {
             "schema_version": 1,
             "collision_id": f"frontier_courier.{module_id}",

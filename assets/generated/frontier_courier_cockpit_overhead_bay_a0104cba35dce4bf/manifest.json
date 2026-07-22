@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:41:09.260250+00:00",
+  "request_hash": "a0104cba35dce4bf7dc6feb09bb3ddcad0786ea8b811afc15929a087abb18506",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "Photorealistic rectangular spacecraft cockpit overhead panel, 2.25 m wide, 2.0 m long, 0.18 m thick. Solid coverage to four straight edges, tileable edge-to-edge. Recessed soft area-light housings with solid lenses, protected ducts, conduits, ventilation grilles, maintenance latches, fasteners, titanium and carbon composite, soft fillets and broad transitions. Dark graphite and gunmetal with cyan lenses. No clipped corners, perimeter gaps, through holes, windows, furniture, console, seat, text, logos, people, background, stand or floating parts.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f899e-97b1-7d1e-a317-264c6f2d5db7",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720302523,
+      "started_at": 1784720302529,
+      "finished_at": 1784720458706,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "4b940c87606512e465f5fbe49c3e4c16684a9ba761585d2069f9663dabbba300",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "5d05871d6d0d813c96a6c60582ae187a38d2e8a814f0fb712a5910eeef03c252"
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "reasons": [
+      "the result is a deep equipment crate rather than a ceiling liner",
+      "the raised perimeter would create a head-clearance hazard after normalization",
+      "the accepted deck bay provides safer generated overhead coverage"
+    ],
+    "replacement_request_hash": "08c94c3825dcd328455fd9577d3c3a085821d53bf5748d30f3ff8a4513b62dd9"
+  },
+  "consumed_credits": 20
+}

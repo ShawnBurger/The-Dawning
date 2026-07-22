@@ -5,11 +5,2498 @@
   "blender_version": "4.5.0",
   "design_authority": {
     "path": "assets/design/frontier_courier_mk1/dimensions.json",
-    "sha256": "db3b7eb7ed0b78a75da1f87b7582f7550088d06618304fc5b2aa752b2d101fd8"
+    "sha256": "79207c34349d139ff25b075b88749173fc64bdced70ca40f6a90c1eea017016c"
   },
   "assembly_manifest": {
     "path": "assets/manifests/frontier_courier_mk1.design.tdasset.json",
-    "sha256": "f73f7adf701c3630fbb58ccae215f41473b42414bde49bbc805b7c2417f67800"
+    "sha256": "b8c1bb6f16a55f81572f4a2e1942037cf91c67bc9840a9a21a721da96cf6bbd5"
+  },
+  "production_dressing": {
+    "pilot_seat": {
+      "source": {
+        "path": "assets/source/frontier_courier_mk1/frontier_courier_pilot_seat_source.glb",
+        "sha256": "c73501d4e678b15386da7c27261baa2237677835effc99b0478df927a94836f6",
+        "geometry": {
+          "vertices": 74797,
+          "edges": 123856,
+          "faces": 59708,
+          "triangles": 59708,
+          "connected_components": 10649,
+          "largest_component_vertices": 127,
+          "boundary_edges": 68588,
+          "non_manifold_edges": 68588,
+          "wire_edges": 0,
+          "loose_vertices": 0,
+          "signed_volume_m3": 0.42965254676659403,
+          "dimensions_blender_xyz_m": [
+            1.0921299457550049,
+            1.0030850172042847,
+            1.8993489742279053
+          ],
+          "uv_layers": 1,
+          "materials": 1
+        }
+      },
+      "authored_envelope_m": {
+        "width_x": 0.68,
+        "height_y": 1.25,
+        "depth_z": 0.85
+      },
+      "module": "cockpit_module",
+      "source_forward": "-Z",
+      "authored_forward": "+Z",
+      "applied_yaw_degrees": 180.0,
+      "voxel_union_size_m": 0.006,
+      "maximum_lod_cleanup_faces": 16,
+      "maximum_module_overhang_m": 0.0,
+      "instances": [
+        {
+          "id": "pilot_seat",
+          "position_m": [
+            0.0,
+            -1.25,
+            2.0999999046325684
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.3400000035762787,
+            -1.25,
+            1.6749999523162842
+          ],
+          "bounds_max_m": [
+            0.3400000035762787,
+            0.0,
+            2.5249998569488525
+          ]
+        }
+      ],
+      "repaired_geometry": {
+        "vertices": 194016,
+        "edges": 388252,
+        "faces": 194126,
+        "triangles": 388252,
+        "connected_components": 7,
+        "largest_component_vertices": 187324,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.15012332084406865,
+        "dimensions_blender_xyz_m": [
+          0.6799069046974182,
+          0.8493633270263672,
+          1.2498432397842407
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      },
+      "lods": [
+        {
+          "lod": 0,
+          "target_triangles": 24000,
+          "instance_count": 1,
+          "instanced_triangles": 23992,
+          "removed_degenerate_faces": 4,
+          "removed_open_fragment_faces": 4,
+          "geometry": {
+            "vertices": 11878,
+            "edges": 35988,
+            "faces": 23992,
+            "triangles": 23992,
+            "connected_components": 3,
+            "largest_component_vertices": 11161,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.14994807107681798,
+            "dimensions_blender_xyz_m": [
+              0.6797114610671997,
+              0.8486406803131104,
+              1.2500046491622925
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 1,
+          "target_triangles": 9000,
+          "instance_count": 1,
+          "instanced_triangles": 8992,
+          "removed_degenerate_faces": 4,
+          "removed_open_fragment_faces": 4,
+          "geometry": {
+            "vertices": 4378,
+            "edges": 13488,
+            "faces": 8992,
+            "triangles": 8992,
+            "connected_components": 3,
+            "largest_component_vertices": 4107,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.14957699946154646,
+            "dimensions_blender_xyz_m": [
+              0.6796280741691589,
+              0.8489403128623962,
+              1.2500115633010864
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 2,
+          "target_triangles": 2500,
+          "instance_count": 1,
+          "instanced_triangles": 2492,
+          "removed_degenerate_faces": 4,
+          "removed_open_fragment_faces": 4,
+          "geometry": {
+            "vertices": 1128,
+            "edges": 3738,
+            "faces": 2492,
+            "triangles": 2492,
+            "connected_components": 3,
+            "largest_component_vertices": 1067,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.1477501722527848,
+            "dimensions_blender_xyz_m": [
+              0.6713281869888306,
+              0.8492392897605896,
+              1.2471939325332642
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        }
+      ],
+      "runtime_material": "sanitized authored vertex color",
+      "module_local_bottom_center_m": [
+        0.0,
+        -1.25,
+        2.0999999046325684
+      ],
+      "mount_socket": "pilot_seat_anchor",
+      "module_local_anchor_m": [
+        0.0,
+        -0.44999998807907104,
+        2.0999999046325684
+      ],
+      "floor_y_m": -1.25
+    },
+    "flight_station": {
+      "source": {
+        "path": "assets/source/frontier_courier_mk1/frontier_courier_flight_station_source.glb",
+        "sha256": "a7d8ef497d56a6ace415433d2b163f8e0f3308306b53c38a1163225ff4b166cc",
+        "geometry": {
+          "vertices": 77773,
+          "edges": 122460,
+          "faces": 57216,
+          "triangles": 57216,
+          "connected_components": 12530,
+          "largest_component_vertices": 92,
+          "boundary_edges": 73272,
+          "non_manifold_edges": 73272,
+          "wire_edges": 0,
+          "loose_vertices": 0,
+          "signed_volume_m3": 0.855503994527669,
+          "dimensions_blender_xyz_m": [
+            1.899350881576538,
+            1.9084789752960205,
+            1.0642640590667725
+          ],
+          "uv_layers": 1,
+          "materials": 1
+        }
+      },
+      "authored_envelope_m": {
+        "width_x": 3.7,
+        "height_y": 0.9,
+        "depth_z": 1.1
+      },
+      "module": "cockpit_module",
+      "source_forward": "+Z",
+      "authored_forward": "-Z",
+      "applied_yaw_degrees": 180.0,
+      "voxel_union_size_m": 0.008,
+      "maximum_lod_cleanup_faces": 32,
+      "maximum_module_overhang_m": 0.0,
+      "instances": [
+        {
+          "id": "flight_station",
+          "position_m": [
+            0.0,
+            -1.25,
+            3.3499999046325684
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -1.850000023841858,
+            -1.25,
+            2.799999952316284
+          ],
+          "bounds_max_m": [
+            1.850000023841858,
+            -0.3500000238418579,
+            3.8999998569488525
+          ]
+        }
+      ],
+      "repaired_geometry": {
+        "vertices": 536402,
+        "edges": 1073088,
+        "faces": 536544,
+        "triangles": 1073088,
+        "connected_components": 3,
+        "largest_component_vertices": 536378,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.8181869868172895,
+        "dimensions_blender_xyz_m": [
+          3.699547290802002,
+          1.099866509437561,
+          0.9005343914031982
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      },
+      "lods": [
+        {
+          "lod": 0,
+          "target_triangles": 30000,
+          "instance_count": 1,
+          "instanced_triangles": 29996,
+          "removed_degenerate_faces": 2,
+          "removed_open_fragment_faces": 2,
+          "geometry": {
+            "vertices": 14852,
+            "edges": 44994,
+            "faces": 29996,
+            "triangles": 29996,
+            "connected_components": 1,
+            "largest_component_vertices": 14852,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.8180435242807563,
+            "dimensions_blender_xyz_m": [
+              3.6998753547668457,
+              1.1001992225646973,
+              0.9012104272842407
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 1,
+          "target_triangles": 12000,
+          "instance_count": 1,
+          "instanced_triangles": 11996,
+          "removed_degenerate_faces": 2,
+          "removed_open_fragment_faces": 2,
+          "geometry": {
+            "vertices": 5852,
+            "edges": 17994,
+            "faces": 11996,
+            "triangles": 11996,
+            "connected_components": 1,
+            "largest_component_vertices": 5852,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.8179666723633525,
+            "dimensions_blender_xyz_m": [
+              3.698540449142456,
+              1.1011474132537842,
+              0.9003338813781738
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 2,
+          "target_triangles": 3500,
+          "instance_count": 1,
+          "instanced_triangles": 3496,
+          "removed_degenerate_faces": 2,
+          "removed_open_fragment_faces": 2,
+          "geometry": {
+            "vertices": 1602,
+            "edges": 5244,
+            "faces": 3496,
+            "triangles": 3496,
+            "connected_components": 1,
+            "largest_component_vertices": 1602,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.8156414958495404,
+            "dimensions_blender_xyz_m": [
+              3.699469566345215,
+              1.0987670421600342,
+              0.9009180665016174
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        }
+      ],
+      "runtime_material": "sanitized authored vertex color",
+      "module_local_bottom_center_m": [
+        0.0,
+        -1.25,
+        3.3499999046325684
+      ]
+    },
+    "cockpit_wall_panel": {
+      "source": {
+        "path": "assets/source/frontier_courier_mk1/frontier_courier_cockpit_wall_panel_source.glb",
+        "sha256": "a7d7e5febba3c72be24c8a183ca534e99a22fa9aa19b7659a90a3c429af78ae5",
+        "geometry": {
+          "vertices": 64338,
+          "edges": 101974,
+          "faces": 47705,
+          "triangles": 47705,
+          "connected_components": 10069,
+          "largest_component_vertices": 71,
+          "boundary_edges": 60833,
+          "non_manifold_edges": 60833,
+          "wire_edges": 0,
+          "loose_vertices": 0,
+          "signed_volume_m3": 1.6756859163755595,
+          "dimensions_blender_xyz_m": [
+            1.073085069656372,
+            1.0732749700546265,
+            1.8993759155273438
+          ],
+          "uv_layers": 1,
+          "materials": 1
+        }
+      },
+      "authored_envelope_m": {
+        "width_x": 2.0,
+        "height_y": 2.15,
+        "depth_z": 0.12
+      },
+      "module": "cockpit_module",
+      "source_forward": "+Z",
+      "authored_forward": "+Z",
+      "applied_yaw_degrees": 0.0,
+      "voxel_union_size_m": 0.005,
+      "maximum_lod_cleanup_faces": 64,
+      "maximum_module_overhang_m": 0.18,
+      "instances": [
+        {
+          "id": "port_wall_0",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0750000476837158,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3999998569488525,
+            -1.0750000476837158,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            -2.2799999713897705,
+            1.0750000476837158,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "port_wall_1",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0750000476837158,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3999998569488525,
+            -1.0750000476837158,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            -2.2799999713897705,
+            1.0750000476837158,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "port_wall_2",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0750000476837158,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3999998569488525,
+            -1.0750000476837158,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            -2.2799999713897705,
+            1.0750000476837158,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "port_wall_3",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0750000476837158,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3999998569488525,
+            -1.0750000476837158,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            -2.2799999713897705,
+            1.0750000476837158,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "starboard_wall_0",
+          "position_m": [
+            2.3399999141693115,
+            -1.0750000476837158,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            2.2799999713897705,
+            -1.0750000476837158,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            2.3999998569488525,
+            1.0750000476837158,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "starboard_wall_1",
+          "position_m": [
+            2.3399999141693115,
+            -1.0750000476837158,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            2.2799999713897705,
+            -1.0750000476837158,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            2.3999998569488525,
+            1.0750000476837158,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "starboard_wall_2",
+          "position_m": [
+            2.3399999141693115,
+            -1.0750000476837158,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            2.2799999713897705,
+            -1.0750000476837158,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            2.3999998569488525,
+            1.0750000476837158,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "starboard_wall_3",
+          "position_m": [
+            2.3399999141693115,
+            -1.0750000476837158,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            1.0,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            2.2799999713897705,
+            -1.0750000476837158,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            2.3999998569488525,
+            1.0750000476837158,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "port_upper_chamfer_0",
+          "position_m": [
+            -2.3399999141693115,
+            1.0199999809265137,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            0.977573573589325,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            1.4272934198379517,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "port_upper_chamfer_1",
+          "position_m": [
+            -2.3399999141693115,
+            1.0199999809265137,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            0.977573573589325,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            1.4272934198379517,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "port_upper_chamfer_2",
+          "position_m": [
+            -2.3399999141693115,
+            1.0199999809265137,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            0.977573573589325,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            1.4272934198379517,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "port_upper_chamfer_3",
+          "position_m": [
+            -2.3399999141693115,
+            1.0199999809265137,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            0.977573573589325,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            1.4272934198379517,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "starboard_upper_chamfer_0",
+          "position_m": [
+            2.3399999141693115,
+            1.0199999809265137,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            0.977573573589325,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            1.4272934198379517,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "starboard_upper_chamfer_1",
+          "position_m": [
+            2.3399999141693115,
+            1.0199999809265137,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            0.977573573589325,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            1.4272934198379517,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "starboard_upper_chamfer_2",
+          "position_m": [
+            2.3399999141693115,
+            1.0199999809265137,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            0.977573573589325,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            1.4272934198379517,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "starboard_upper_chamfer_3",
+          "position_m": [
+            2.3399999141693115,
+            1.0199999809265137,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            0.977573573589325,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            1.4272934198379517,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "port_lower_chamfer_0",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0199999809265137,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            -1.4272934198379517,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            -0.977573573589325,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "port_lower_chamfer_1",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0199999809265137,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            -1.4272934198379517,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            -0.977573573589325,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "port_lower_chamfer_2",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0199999809265137,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            -1.4272934198379517,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            -0.977573573589325,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "port_lower_chamfer_3",
+          "position_m": [
+            -2.3399999141693115,
+            -1.0199999809265137,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "height_axis": [
+              0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3824262619018555,
+            -1.4272934198379517,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            -1.9327064752578735,
+            -0.977573573589325,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "starboard_lower_chamfer_0",
+          "position_m": [
+            2.3399999141693115,
+            -1.0199999809265137,
+            -3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            -1.4272934198379517,
+            -4.039999961853027
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            -0.977573573589325,
+            -1.9600000381469727
+          ]
+        },
+        {
+          "id": "starboard_lower_chamfer_1",
+          "position_m": [
+            2.3399999141693115,
+            -1.0199999809265137,
+            -1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            -1.4272934198379517,
+            -2.0399999618530273
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            -0.977573573589325,
+            0.039999961853027344
+          ]
+        },
+        {
+          "id": "starboard_lower_chamfer_2",
+          "position_m": [
+            2.3399999141693115,
+            -1.0199999809265137,
+            1.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            -1.4272934198379517,
+            -0.039999961853027344
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            -0.977573573589325,
+            2.0399999618530273
+          ]
+        },
+        {
+          "id": "starboard_lower_chamfer_3",
+          "position_m": [
+            2.3399999141693115,
+            -1.0199999809265137,
+            3.0
+          ],
+          "scale": [
+            1.0399999618530273,
+            0.23999999463558197,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "height_axis": [
+              -0.7071067690849304,
+              -0.7071067690849304,
+              0.0
+            ],
+            "depth_axis": [
+              -0.7071067690849304,
+              0.7071067690849304,
+              0.0
+            ]
+          },
+          "bounds_min_m": [
+            1.9327064752578735,
+            -1.4272934198379517,
+            1.9600000381469727
+          ],
+          "bounds_max_m": [
+            2.3824262619018555,
+            -0.977573573589325,
+            4.039999961853027
+          ]
+        },
+        {
+          "id": "forward_bulkhead_port",
+          "position_m": [
+            -1.149999976158142,
+            -1.2200000286102295,
+            3.940000057220459
+          ],
+          "scale": [
+            1.1799999475479126,
+            1.149999976158142,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.3299999237060547,
+            -1.2200000286102295,
+            3.880000114440918
+          ],
+          "bounds_max_m": [
+            0.029999971389770508,
+            1.252500057220459,
+            4.0
+          ]
+        },
+        {
+          "id": "forward_bulkhead_starboard",
+          "position_m": [
+            1.149999976158142,
+            -1.2200000286102295,
+            3.940000057220459
+          ],
+          "scale": [
+            1.1799999475479126,
+            1.149999976158142,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.029999971389770508,
+            -1.2200000286102295,
+            3.880000114440918
+          ],
+          "bounds_max_m": [
+            2.3299999237060547,
+            1.252500057220459,
+            4.0
+          ]
+        },
+        {
+          "id": "aft_bulkhead_port",
+          "position_m": [
+            -1.462499976158142,
+            -1.2200000286102295,
+            -3.940000057220459
+          ],
+          "scale": [
+            0.9399999976158142,
+            1.149999976158142,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.4024999141693115,
+            -1.2200000286102295,
+            -4.0
+          ],
+          "bounds_max_m": [
+            -0.5224999785423279,
+            1.252500057220459,
+            -3.880000114440918
+          ]
+        },
+        {
+          "id": "aft_bulkhead_starboard",
+          "position_m": [
+            1.462499976158142,
+            -1.2200000286102295,
+            -3.940000057220459
+          ],
+          "scale": [
+            0.9399999976158142,
+            1.149999976158142,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            0.5224999785423279,
+            -1.2200000286102295,
+            -4.0
+          ],
+          "bounds_max_m": [
+            2.4024999141693115,
+            1.252500057220459,
+            -3.880000114440918
+          ]
+        },
+        {
+          "id": "aft_door_lintel",
+          "position_m": [
+            0.0,
+            0.949999988079071,
+            -3.940000057220459
+          ],
+          "scale": [
+            0.5299999713897705,
+            0.14000000059604645,
+            1.0
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.5299999713897705,
+            0.949999988079071,
+            -4.0
+          ],
+          "bounds_max_m": [
+            0.5299999713897705,
+            1.2510000467300415,
+            -3.880000114440918
+          ]
+        }
+      ],
+      "repaired_geometry": {
+        "vertices": 472482,
+        "edges": 944960,
+        "faces": 472480,
+        "triangles": 944960,
+        "connected_components": 1,
+        "largest_component_vertices": 472482,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.3984626310278697,
+        "dimensions_blender_xyz_m": [
+          1.9980952739715576,
+          0.11991230398416519,
+          2.1498606204986572
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      },
+      "lods": [
+        {
+          "lod": 0,
+          "target_triangles": 8000,
+          "instance_count": 29,
+          "instanced_triangles": 232000,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 4002,
+            "edges": 12000,
+            "faces": 8000,
+            "triangles": 8000,
+            "connected_components": 1,
+            "largest_component_vertices": 4002,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.3985611598380043,
+            "dimensions_blender_xyz_m": [
+              1.998214602470398,
+              0.12041015923023224,
+              2.1503024101257324
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 1,
+          "target_triangles": 2500,
+          "instance_count": 29,
+          "instanced_triangles": 72500,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 1252,
+            "edges": 3750,
+            "faces": 2500,
+            "triangles": 2500,
+            "connected_components": 1,
+            "largest_component_vertices": 1252,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.399286223451822,
+            "dimensions_blender_xyz_m": [
+              2.0030102729797363,
+              0.118624247610569,
+              2.1495723724365234
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 2,
+          "target_triangles": 700,
+          "instance_count": 29,
+          "instanced_triangles": 20300,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 352,
+            "edges": 1050,
+            "faces": 700,
+            "triangles": 700,
+            "connected_components": 1,
+            "largest_component_vertices": 352,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.39967451842204443,
+            "dimensions_blender_xyz_m": [
+              1.9772101640701294,
+              0.11809657514095306,
+              2.1481173038482666
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        }
+      ],
+      "runtime_material": "sanitized authored vertex color"
+    },
+    "cockpit_deck_panel": {
+      "source": {
+        "path": "assets/source/frontier_courier_mk1/frontier_courier_cockpit_deck_panel_source.glb",
+        "sha256": "7ace54dda437f6dbf8019a98a5362aeedb8516a1f516fbb2831551bdf4175fd5",
+        "geometry": {
+          "vertices": 62573,
+          "edges": 104584,
+          "faces": 50701,
+          "triangles": 50701,
+          "connected_components": 8690,
+          "largest_component_vertices": 89,
+          "boundary_edges": 57065,
+          "non_manifold_edges": 57065,
+          "wire_edges": 0,
+          "loose_vertices": 0,
+          "signed_volume_m3": 0.3314688986847198,
+          "dimensions_blender_xyz_m": [
+            1.897083044052124,
+            1.8976619243621826,
+            0.26683199405670166
+          ],
+          "uv_layers": 1,
+          "materials": 1
+        }
+      },
+      "authored_envelope_m": {
+        "width_x": 2.25,
+        "height_y": 0.14,
+        "depth_z": 2.0
+      },
+      "module": "cockpit_module",
+      "source_forward": "+Z",
+      "authored_forward": "+Z",
+      "applied_yaw_degrees": 0.0,
+      "voxel_union_size_m": 0.006,
+      "maximum_lod_cleanup_faces": 64,
+      "maximum_module_overhang_m": 0.18,
+      "instances": [
+        {
+          "id": "deck_port_0",
+          "position_m": [
+            -1.0499999523162842,
+            -1.3899999856948853,
+            -3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            -1.3899999856948853,
+            -4.079999923706055
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            -1.25,
+            -1.9199999570846558
+          ]
+        },
+        {
+          "id": "deck_port_1",
+          "position_m": [
+            -1.0499999523162842,
+            -1.3899999856948853,
+            -1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            -1.3899999856948853,
+            -2.0799999237060547
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            -1.25,
+            0.08000004291534424
+          ]
+        },
+        {
+          "id": "deck_port_2",
+          "position_m": [
+            -1.0499999523162842,
+            -1.3899999856948853,
+            1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            -1.3899999856948853,
+            -0.08000004291534424
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            -1.25,
+            2.0799999237060547
+          ]
+        },
+        {
+          "id": "deck_port_3",
+          "position_m": [
+            -1.0499999523162842,
+            -1.3899999856948853,
+            3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            -1.3899999856948853,
+            1.9199999570846558
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            -1.25,
+            4.079999923706055
+          ]
+        },
+        {
+          "id": "deck_starboard_0",
+          "position_m": [
+            1.0499999523162842,
+            -1.3899999856948853,
+            -3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            -1.3899999856948853,
+            -4.079999923706055
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            -1.25,
+            -1.9199999570846558
+          ]
+        },
+        {
+          "id": "deck_starboard_1",
+          "position_m": [
+            1.0499999523162842,
+            -1.3899999856948853,
+            -1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            -1.3899999856948853,
+            -2.0799999237060547
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            -1.25,
+            0.08000004291534424
+          ]
+        },
+        {
+          "id": "deck_starboard_2",
+          "position_m": [
+            1.0499999523162842,
+            -1.3899999856948853,
+            1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            -1.3899999856948853,
+            -0.08000004291534424
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            -1.25,
+            2.0799999237060547
+          ]
+        },
+        {
+          "id": "deck_starboard_3",
+          "position_m": [
+            1.0499999523162842,
+            -1.3899999856948853,
+            3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            -1.3899999856948853,
+            1.9199999570846558
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            -1.25,
+            4.079999923706055
+          ]
+        },
+        {
+          "id": "overhead_port_0",
+          "position_m": [
+            -1.0499999523162842,
+            1.3899999856948853,
+            -3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            1.25,
+            -4.079999923706055
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            1.3899999856948853,
+            -1.9199999570846558
+          ]
+        },
+        {
+          "id": "overhead_port_1",
+          "position_m": [
+            -1.0499999523162842,
+            1.3899999856948853,
+            -1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            1.25,
+            -2.0799999237060547
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            1.3899999856948853,
+            0.08000004291534424
+          ]
+        },
+        {
+          "id": "overhead_port_2",
+          "position_m": [
+            -1.0499999523162842,
+            1.3899999856948853,
+            1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            1.25,
+            -0.08000004291534424
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            1.3899999856948853,
+            2.0799999237060547
+          ]
+        },
+        {
+          "id": "overhead_port_3",
+          "position_m": [
+            -1.0499999523162842,
+            1.3899999856948853,
+            3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -2.197499990463257,
+            1.25,
+            1.9199999570846558
+          ],
+          "bounds_max_m": [
+            0.09750008583068848,
+            1.3899999856948853,
+            4.079999923706055
+          ]
+        },
+        {
+          "id": "overhead_starboard_0",
+          "position_m": [
+            1.0499999523162842,
+            1.3899999856948853,
+            -3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            1.25,
+            -4.079999923706055
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            1.3899999856948853,
+            -1.9199999570846558
+          ]
+        },
+        {
+          "id": "overhead_starboard_1",
+          "position_m": [
+            1.0499999523162842,
+            1.3899999856948853,
+            -1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            1.25,
+            -2.0799999237060547
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            1.3899999856948853,
+            0.08000004291534424
+          ]
+        },
+        {
+          "id": "overhead_starboard_2",
+          "position_m": [
+            1.0499999523162842,
+            1.3899999856948853,
+            1.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            1.25,
+            -0.08000004291534424
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            1.3899999856948853,
+            2.0799999237060547
+          ]
+        },
+        {
+          "id": "overhead_starboard_3",
+          "position_m": [
+            1.0499999523162842,
+            1.3899999856948853,
+            3.0
+          ],
+          "scale": [
+            1.0199999809265137,
+            1.0,
+            1.0800000429153442
+          ],
+          "basis_engine_xyz": {
+            "width_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "height_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "depth_axis": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          },
+          "bounds_min_m": [
+            -0.09750008583068848,
+            1.25,
+            1.9199999570846558
+          ],
+          "bounds_max_m": [
+            2.197499990463257,
+            1.3899999856948853,
+            4.079999923706055
+          ]
+        }
+      ],
+      "repaired_geometry": {
+        "vertices": 323428,
+        "edges": 646876,
+        "faces": 323438,
+        "triangles": 646876,
+        "connected_components": 1,
+        "largest_component_vertices": 323428,
+        "boundary_edges": 0,
+        "non_manifold_edges": 0,
+        "wire_edges": 0,
+        "loose_vertices": 0,
+        "signed_volume_m3": 0.21750594855390964,
+        "dimensions_blender_xyz_m": [
+          2.247892379760742,
+          1.9980475902557373,
+          0.13943734765052795
+        ],
+        "uv_layers": 1,
+        "materials": 1
+      },
+      "lods": [
+        {
+          "lod": 0,
+          "target_triangles": 10000,
+          "instance_count": 16,
+          "instanced_triangles": 160000,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 4990,
+            "edges": 15000,
+            "faces": 10000,
+            "triangles": 10000,
+            "connected_components": 1,
+            "largest_component_vertices": 4990,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.21794674100287373,
+            "dimensions_blender_xyz_m": [
+              2.249541759490967,
+              1.999162197113037,
+              0.14146310091018677
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 1,
+          "target_triangles": 3000,
+          "instance_count": 16,
+          "instanced_triangles": 48000,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 1490,
+            "edges": 4500,
+            "faces": 3000,
+            "triangles": 3000,
+            "connected_components": 1,
+            "largest_component_vertices": 1490,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.2200382876746793,
+            "dimensions_blender_xyz_m": [
+              2.2589313983917236,
+              2.0106842517852783,
+              0.14294490218162537
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        },
+        {
+          "lod": 2,
+          "target_triangles": 800,
+          "instance_count": 16,
+          "instanced_triangles": 12800,
+          "removed_degenerate_faces": 0,
+          "removed_open_fragment_faces": 0,
+          "geometry": {
+            "vertices": 390,
+            "edges": 1200,
+            "faces": 800,
+            "triangles": 800,
+            "connected_components": 1,
+            "largest_component_vertices": 390,
+            "boundary_edges": 0,
+            "non_manifold_edges": 0,
+            "wire_edges": 0,
+            "loose_vertices": 0,
+            "signed_volume_m3": 0.2210744049033264,
+            "dimensions_blender_xyz_m": [
+              2.215916872024536,
+              1.9711086750030518,
+              0.13455839455127716
+            ],
+            "uv_layers": 1,
+            "materials": 1
+          }
+        }
+      ],
+      "runtime_material": "sanitized authored vertex color"
+    }
   },
   "primitive_order": [
     "FrontierCourier_BoardingVestibule_LOD0",
@@ -319,21 +2806,21 @@
       "module": "cockpit_module",
       "lod": 0,
       "geometry": {
-        "vertices": 1736,
-        "edges": 3348,
-        "faces": 1674,
-        "triangles": 3348,
-        "connected_components": 31,
-        "largest_component_vertices": 56,
+        "vertices": 223356,
+        "edges": 670386,
+        "faces": 446690,
+        "triangles": 447392,
+        "connected_components": 62,
+        "largest_component_vertices": 14852,
         "boundary_edges": 0,
         "non_manifold_edges": 0,
         "wire_edges": 0,
         "loose_vertices": 0,
-        "signed_volume_m3": 10.585733969868741,
+        "signed_volume_m3": 12.262585202032529,
         "dimensions_blender_xyz_m": [
-          4.900000095367432,
-          8.100000381469727,
-          2.5999999046325684
+          4.8052825927734375,
+          8.15990924835205,
+          2.851267099380493
         ],
         "uv_layers": 0,
         "materials": 1
@@ -345,21 +2832,21 @@
       "module": "cockpit_module",
       "lod": 1,
       "geometry": {
-        "vertices": 1232,
-        "edges": 2376,
-        "faces": 1188,
-        "triangles": 2376,
-        "connected_components": 22,
-        "largest_component_vertices": 56,
+        "vertices": 71106,
+        "edges": 213636,
+        "faces": 142190,
+        "triangles": 142892,
+        "connected_components": 62,
+        "largest_component_vertices": 5852,
         "boundary_edges": 0,
         "non_manifold_edges": 0,
         "wire_edges": 0,
         "loose_vertices": 0,
-        "signed_volume_m3": 7.1308762118909295,
+        "signed_volume_m3": 12.31531129426146,
         "dimensions_blender_xyz_m": [
-          4.900000095367432,
-          8.100000381469727,
-          2.5999999046325684
+          4.807105541229248,
+          8.173773765563965,
+          2.8515095710754395
         ],
         "uv_layers": 0,
         "materials": 1
@@ -371,21 +2858,21 @@
       "module": "cockpit_module",
       "lod": 2,
       "geometry": {
-        "vertices": 64,
-        "edges": 96,
-        "faces": 48,
-        "triangles": 96,
-        "connected_components": 8,
-        "largest_component_vertices": 8,
+        "vertices": 19282,
+        "edges": 58788,
+        "faces": 39166,
+        "triangles": 39244,
+        "connected_components": 62,
+        "largest_component_vertices": 1602,
         "boundary_edges": 0,
         "non_manifold_edges": 0,
         "wire_edges": 0,
         "loose_vertices": 0,
-        "signed_volume_m3": 7.053498762279705,
+        "signed_volume_m3": 12.338582703967326,
         "dimensions_blender_xyz_m": [
-          4.900000095367432,
-          8.100000381469727,
-          2.5999999046325684
+          4.800000190734863,
+          8.132669448852539,
+          2.8519840240478516
         ],
         "uv_layers": 0,
         "materials": 1
@@ -803,8 +3290,8 @@
   ],
   "output": {
     "path": "assets/source/frontier_courier_mk1/frontier_courier_interior_lods.glb",
-    "sha256": "222e7fccfdfb7ee83216bc67cf8759aefeb7b77f343240257dee0093263e158e",
-    "byte_count": 2680664,
+    "sha256": "59be6bb4f39deb693174cc22ef99f585ff28617d9d360a832392121561e9df58",
+    "byte_count": 21001032,
     "mesh_order": [
       "FrontierCourier_BoardingVestibule_LOD0_Mesh",
       "FrontierCourier_BoardingVestibule_LOD1_Mesh",

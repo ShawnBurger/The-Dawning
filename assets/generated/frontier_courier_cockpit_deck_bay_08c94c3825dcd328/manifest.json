@@ -1,0 +1,89 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:49:12.824285+00:00",
+  "request_hash": "08c94c3825dcd328455fd9577d3c3a085821d53bf5748d30f3ff8a4513b62dd9",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic rectangular spacecraft cockpit deck plate, 2.25 m wide, 2.0 m long, 0.14 m thick. Solid footprint to four straight edges, tileable edge-to-edge. Low anti-slip treads, flush service hatches, protected cable access, drainage and ventilation slots, bolted edge rails, titanium and carbon composite, rounded fillets with no tripping hazards. Dark graphite and gunmetal with orange latches. No clipped corners, perimeter gaps, through holes, legs, furniture, walls, console, seat, text, logos, people, background, stand or floating parts.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f899e-97be-7c80-b06f-07048ff43a81",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720303156,
+      "started_at": 1784720303240,
+      "finished_at": 1784720409839,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f89a6-9871-7da9-8b5e-07b74271b9f5",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784720824458,
+      "started_at": 1784720824709,
+      "finished_at": 1784720929693,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "7ace54dda437f6dbf8019a98a5362aeedb8516a1f516fbb2831551bdf4175fd5",
+    "preview": "preview.glb",
+    "preview_sha256": "11eb74d48d785282494e30d9b6b794648391d551296b96c4edfbfae694a66edc",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "717d12c70c1fbb67a165eb2b09cb458b88ccc433f623f2a53f2f3d3df1592998",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "64240a98489836ac0e20f7c8639d6bec747d79d4603b400904db765a5e7701a1",
+      "metallic_0": "c1c777fa70d122edc7f2d96a8098f5e5966f58de9e2fb7543bb019e83b1d8644",
+      "roughness_0": "0b0abe90e014f52bae8cd4f3c97cf5bbb9a2bbd86c7409b4c6054697bb509e3a",
+      "normal_0": "c096badaad47a44c10181e1b0aef2d131048fe43439c471d32c2f7c1d4314366",
+      "emission_0": "ad9a2409e2f1940752f10cef526e511825291d5d677deed98723c531c436eb3b"
+    }
+  },
+  "art_review": {
+    "status": "accepted_geometry_only",
+    "promoted_source": "assets/source/frontier_courier_mk1/frontier_courier_cockpit_deck_panel_source.glb",
+    "authored_dimensions_m": {
+      "width_x": 2.25,
+      "height_y": 0.14,
+      "depth_z": 2.0
+    },
+    "required_cleanup": [
+      "bake the glTF import basis before dimensional normalization",
+      "overlap neighboring bays inside the authored shell to close rounded source corners",
+      "voxel-union fragmented render topology before bounded LOD derivation",
+      "replace generated PBR markings with authored runtime shading"
+    ],
+    "runtime_material_policy": "geometry uses sanitized authored materials; generated PBR textures remain source-only"
+  },
+  "consumed_credits": 30
+}

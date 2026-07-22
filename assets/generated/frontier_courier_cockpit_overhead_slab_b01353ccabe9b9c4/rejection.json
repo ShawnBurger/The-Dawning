@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "request_hash": "b01353ccabe9b9c42feaa4f5047b600bc4e2a0e37798283abd8485b8c42466a0",
+  "asset_id": "ship.frontier.courier_mk1",
+  "module_id": "cockpit_module",
+  "status": "rejected_provider_failure",
+  "failure": "The uploaded image is too complex for 3D generation.",
+  "observed_credit_delta": 0,
+  "artifact_created": false,
+  "decision": "reuse the accepted generated deck bay as the overhead liner"
+}

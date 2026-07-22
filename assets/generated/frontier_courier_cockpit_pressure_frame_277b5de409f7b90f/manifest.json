@@ -1,0 +1,91 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T11:14:46.250978+00:00",
+  "request_hash": "277b5de409f7b90fe2d9a52d10482f0bb4459f7405d6107d1a8acc979188caa4",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic standalone pressure-frame rib for a compact spacecraft cockpit, 4.7 m wide, 2.45 m high, 0.42 m long. Rounded rectangular structural ring with open walk-through center at least 1.4 m wide and 2.2 m high, curved shoulders, layered titanium/carbon armor, cable conduits, vents, service panels, integrated linear lights, fasteners and edge bevels. Continuous manufacturable hard surface, dark graphite and gunmetal, restrained safety-orange latches. No room, furniture, seat, console, window, text, logos, labels, people, floating parts, background or stand.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 50000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8982-f5a0-7034-b309-7f7c82611292",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784718491824,
+      "started_at": 1784718492076,
+      "finished_at": 1784718621158,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8987-1023-759b-aa89-11562f1bffe5",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784718757946,
+      "started_at": 1784718758129,
+      "finished_at": 1784718870863,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "6c7f577da5c313877082e4e328748991b6fc08377e8ed332a0074b2250789d27",
+    "preview": "preview.glb",
+    "preview_sha256": "bd7adc2a0b8b3557cf4c14ac23a03417143335efab2bfbb0b953c919468d64cd",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "90977d7b35b77d5e42d6bc8f196de17db5715363d713270d538b34d9afc41e99",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "f2bba3fee7919ad01f46b7ac9d6d6b08d331fc212a1419bccae10d6347ee4f2a",
+      "metallic_0": "0b39d85367b5cc817bd6cc7db12e1a7a9b25fd91340930f932a38a99bab39e97",
+      "roughness_0": "4764fb474914cb472a88d83bb253fc0f8b626718ccbd6e6782c941e7e2829d45",
+      "normal_0": "2765d603b0d5bfe87e0297a186c5ddf063077c23c7e0da29aed69ede83504321",
+      "emission_0": "5331a2ecc6ab264ac64b9714d36df0a53b5b25fdcbe0eccf0b7f97b37e2a09cd"
+    }
+  },
+  "art_review": {
+    "status": "rejected_after_integration_review",
+    "rejected_requested_role": "walk-through pressure-frame rib",
+    "rejection_reason": "the generated center is sealed, so it cannot own a portal or structural ring",
+    "integration_rejection_reason": "repeated placement left large rounded corner voids and made the cockpit read as tiled pressure pods rather than one immersive room",
+    "replaced_by_request_hashes": [
+      "cf8dd773d5d656592bd80942c1ed6554d78565af2387b53a45a6983eb8230682",
+      "08c94c3825dcd328455fd9577d3c3a085821d53bf5748d30f3ff8a4513b62dd9"
+    ],
+    "authored_panel_dimensions_m": [1.72, 0.14, 2.34],
+    "required_cleanup": [
+      "bake the glTF import basis before dimensional normalization",
+      "treat the result only as a repeated architectural liner panel",
+      "voxel-union fragmented render topology before bounded LOD derivation",
+      "preserve authored door, aisle and pressure-boundary geometry outside the generated source"
+    ],
+    "runtime_material_policy": "geometry uses sanitized authored materials; generated PBR textures remain source-only"
+  },
+  "consumed_credits": 30
+}

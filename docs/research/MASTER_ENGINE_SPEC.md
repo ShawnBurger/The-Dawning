@@ -37,7 +37,8 @@ Build a seamless space simulation inspired by Star Citizen and Starfield while r
   environment; the repository is public and must never contain the key.
 - **Fully realized interiors.** Every boardable ship and station has a walkable
   interior continuous with its exterior, in the same double-precision world. No
-  loading screens, no separate interior origin.
+  loading screens, no separate interior origin. Production room and cockpit
+  design follows `HIGH_FIDELITY_SHIP_INTERIORS_AND_COCKPITS_2026-07-22.md`.
 - **Realistic graphics.** Photorealism is binding, not aspirational. The DXR path
   is the reference; raster/DXR divergence is a defect.
 

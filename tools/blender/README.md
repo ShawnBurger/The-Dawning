@@ -61,16 +61,39 @@ sockets, validates coincident world-space endpoints, and exports:
 
 - seven architectural modules at LOD0, LOD1, and LOD2;
 - a separate rigid mesh for each of the seven moving closures;
+- a generated cockpit pressure-vessel room assembled from authenticated wall,
+  deck/overhead, flight-station, and pilot-seat source masters;
 - one vertex-color PBR material; and
 - a JSON locator-to-primitive map used by the runtime content generator.
+
+The cockpit sources are deliberately modular. Meshy's whole-room attempts were
+rejected by the provider, while a generated sealed frame also failed visual
+integration. The accepted masters are normalized to design-authority
+dimensions, voxel-closed once, decimated into bounded LODs, and instanced with
+explicit right-handed bases. Generated geometry owns every visible wall, deck,
+ceiling, chamfer, and bulkhead skin. The exact aft portal frame, interaction
+sockets, collision, and pressure boundary stay authored gameplay contracts.
 
 ```powershell
 blender --background --factory-startup --python `
   tools/blender/build_frontier_courier_interior.py -- `
   --dimensions assets/design/frontier_courier_mk1/dimensions.json `
   --manifest assets/manifests/frontier_courier_mk1.design.tdasset.json `
+  --pilot-seat-source assets/source/frontier_courier_mk1/frontier_courier_pilot_seat_source.glb `
+  --flight-station-source assets/source/frontier_courier_mk1/frontier_courier_flight_station_source.glb `
+  --cockpit-wall-source assets/source/frontier_courier_mk1/frontier_courier_cockpit_wall_panel_source.glb `
+  --cockpit-deck-source assets/source/frontier_courier_mk1/frontier_courier_cockpit_deck_panel_source.glb `
   --output assets/source/frontier_courier_mk1/frontier_courier_interior_lods.glb `
   --report assets/source/frontier_courier_mk1/frontier_courier_interior_lods.report.json
+```
+
+Render the three deterministic cockpit acceptance views with:
+
+```powershell
+blender --background --factory-startup --python `
+  tools/blender/render_frontier_courier_cockpit_review.py -- `
+  --model assets/source/frontier_courier_mk1/frontier_courier_interior_lods.glb `
+  --output-dir tmp/validation/frontier_courier_cockpit
 ```
 
 Render geometry is never collision. Run

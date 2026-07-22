@@ -1,0 +1,86 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T10:53:18.377567+00:00",
+  "request_hash": "0eb8bdcb89c3dd3753744b9b44ae6e15b65ed0b30771d8885604e67a50d41497",
+  "stage": "refined",
+  "parameters": {
+    "prompt": "Photorealistic standalone U-shaped pilot flight station for a compact frontier spacecraft, 3.7 m wide, 1.05 m tall, 1.45 m deep. Low aerospace dashboard with central and angled side instrument housings, guarded switches, rotary controls, twin hand controllers, service panels, cable channels, ventilation, bolted titanium and carbon composite, dark graphite and gunmetal, restrained cyan emission and safety-orange controls. Operator opening faces -Z. Manufacturable hard surface. No seat, room, walls, floor, canopy, text, logos, labels, people, floating parts, background or stand.",
+    "texture_prompt": "",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 60000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.frontier.courier_mk1",
+    "module_id": "cockpit_module",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8968-dd30-7f17-90c8-e537a9bf1f92",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784716781021,
+      "started_at": 1784716781055,
+      "finished_at": 1784716953000,
+      "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8972-ccba-71b7-8138-909d3a4d84ed",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784717429964,
+      "started_at": 1784717430004,
+      "finished_at": 1784717588936,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "model": "model.glb",
+    "model_sha256": "a7d8ef497d56a6ace415433d2b163f8e0f3308306b53c38a1163225ff4b166cc",
+    "preview": "preview.glb",
+    "preview_sha256": "24a135ad2ef3f6086c04cc4af020cbefbf504b75dc9b241ea4c3a9d0405dc3ee",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "5b88c9a871dadeadd31cf36c720024fb1732714c7c7e081a6241be1f2088a729",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "ca806608ee5c39f886911558c1e7390f8b4aac4f08784620856dc1b1a2993e48",
+      "metallic_0": "7675bd8edfcf18cec0fae8ab6ca6a707577bdd2c9be7bf630294ce3fc7afe2b1",
+      "roughness_0": "1b2bbc1afc6b6ac097b94968a4b4ff668bd13dc9405918551b5d77d33aa48143",
+      "normal_0": "d449c126ef287eb1609d4319249b49ade58eff1be22f68bad076c4cce3b2f752",
+      "emission_0": "7c9176e191426427676c4c2ae12c78420ea4991167b7397b2755caa34b747e1f"
+    }
+  },
+  "art_review": {
+    "status": "accepted_geometry_only",
+    "promoted_source": "assets/source/frontier_courier_mk1/frontier_courier_flight_station_source.glb",
+    "requested_dimensions_m": [3.7, 1.45, 1.05],
+    "authored_dimensions_m": [3.7, 1.1, 0.9],
+    "required_cleanup": [
+      "bake the glTF import basis before dimensional normalization",
+      "rotate the generated +Z operator side to the authored -Z seat approach",
+      "voxel-union fragmented render topology before bounded LOD derivation",
+      "replace generated panel markings with deliberate runtime displays"
+    ],
+    "runtime_material_policy": "geometry uses sanitized authored materials; generated PBR textures remain source-only"
+  },
+  "consumed_credits": 30
+}
