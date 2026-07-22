@@ -7,10 +7,13 @@
 #include "../ecs/systems.h"
 #include "../sim/star_system.h"
 #include "../sim/system_instantiate.h"
+#include "../sim/orbit_trace.h"
 #include "../core/log.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
+#include <vector>
 
 namespace scene
 {
@@ -169,6 +172,88 @@ void Scene::ApplyStarSystemRenderMode(bool orrery)
         }
         t->scale = { s, s, s };
     }
+}
+
+namespace
+{
+struct OrbitColor { float r, g, b, a; };
+
+// Trace color keyed by the body's ORIGINAL (un-offset) id, roughly matching each
+// body's own material. Alpha < 1 so the reversed-Z-depth-tested lines read as a
+// translucent overlay on the sky.
+OrbitColor OrbitColorFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 10: return { 0.35f, 0.55f, 1.00f, 0.75f }; // Earth — blue
+        case 11: return { 0.70f, 0.70f, 0.75f, 0.55f }; // Moon — grey
+        case 20: return { 1.00f, 0.50f, 0.35f, 0.75f }; // Mars — orange
+        default: return { 0.80f, 0.85f, 0.90f, 0.65f };
+    }
+}
+} // namespace
+
+std::vector<render::Renderer::LineVertex>
+Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const
+{
+    std::vector<render::Renderer::LineVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return verts;
+
+    // World position of every gravity body by bodyId. The star sits at the frame
+    // origin, so a body's frame-local Transform.position is its world position.
+    std::unordered_map<uint64_t, core::Vec3d> posById;
+    posById.reserve(gravPool->Count() * 2u);
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        if (const auto* t = m_registry.TryGet<ecs::Transform>(e))
+            posById[gravPool->DataAt(i).bodyId] = t->position;
+    }
+
+    const double K = m_renderScale;
+    constexpr uint32_t kSegments = 128u;
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // seeded celestial bodies only
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* os = m_registry.TryGet<ecs::OrbitState>(e);
+        if (!os)
+            continue; // the star has no orbit
+        const auto primary = posById.find(os->primaryBodyId);
+        if (primary == posById.end())
+            continue;
+        const core::Vec3d primaryPos = primary->second;
+
+        const std::vector<core::Vec3d> local =
+            sim::SampleOrbitPath(os->elements, os->primaryMu, kSegments);
+        if (local.size() < 2u)
+            continue;
+
+        const OrbitColor c = OrbitColorFor(g.bodyId - kStarSystemBodyIdBase);
+        // (worldPt - camera) subtracted in DOUBLE first, then scaled by K, then
+        // narrowed (RULE 1) — the same discipline the entity matrices use.
+        auto toRender = [&](const core::Vec3d& localPt) -> core::Vec3f
+        {
+            return ((primaryPos + localPt - cameraPosition) * K).ToFloat();
+        };
+        verts.reserve(verts.size() + (local.size() - 1u) * 2u);
+        for (size_t k = 0; k + 1u < local.size(); ++k)
+        {
+            const core::Vec3f a = toRender(local[k]);
+            const core::Vec3f b = toRender(local[k + 1u]);
+            verts.push_back({ { a.x, a.y, a.z }, { c.r, c.g, c.b, c.a } });
+            verts.push_back({ { b.x, b.y, b.z }, { c.r, c.g, c.b, c.a } });
+        }
+    }
+    return verts;
 }
 
 void Scene::DestroyEntity(ecs::Entity entity)

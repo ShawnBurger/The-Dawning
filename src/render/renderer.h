@@ -419,6 +419,23 @@ public:
     // mapping would brighten pixels that are already display-saturated.
     void ResolveToBackBuffer(D3D12Device& device);
 
+    // One vertex of a colored world-space line segment, already in CAMERA-RELATIVE
+    // render space (RULE 1: the caller subtracts the camera in double and applies
+    // the render scale K before narrowing).
+    struct LineVertex
+    {
+        float pos[3];
+        float color[4]; // rgba; alpha drives the blend
+    };
+
+    // Draw a LINELIST of colored segments into the bound HDR target, using the
+    // camera-relative `viewProj`. Runs after RenderEntities (the HDR RTV + depth
+    // are already bound): depth-tested against the scene (reversed-Z) but no depth
+    // write, alpha-blended. `count` is the vertex count (must be even). No-op if
+    // count == 0. Used for orbit traces in the map/orrery view.
+    void DrawLines(D3D12Device& device, const LineVertex* verts, uint32_t count,
+                   const core::Mat4x4& viewProj);
+
     // Post-process tuning. Exposure was a constant baked into
     // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
     // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
@@ -693,6 +710,16 @@ private:
     }
 
     ComPtr<ID3D12PipelineState> m_skyPSO;
+
+    // Line pipeline (orbit traces / map overlays). One root CBV (viewProj) and a
+    // per-frame dynamic UPLOAD vertex buffer that grows on demand.
+    ComPtr<ID3D12RootSignature> m_lineRootSig;
+    ComPtr<ID3D12PipelineState> m_linePSO;
+    ComPtr<ID3D12Resource>      m_lineVB[kFrameCount];
+    uint8_t*                    m_lineVBMapped[kFrameCount] = {};
+    uint32_t                    m_lineVBCapacity = 0; // in vertices
+    bool CreateLinePipeline(ID3D12Device* device);
+    bool EnsureLineVertexBuffer(D3D12Device& device, uint32_t vertexCount);
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
     // slots in the texture table, so the tone-map pass stays independent of

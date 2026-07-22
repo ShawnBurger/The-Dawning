@@ -3027,6 +3027,24 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
 
+        // Orbit-trace overlay: in the orrery/map view, draw each seeded body's
+        // Keplerian orbit as translucent lines over the raster scene. Raster-only
+        // (the line pass writes the HDR raster target); path tracing has no
+        // rasterized geometry to overlay, so it is skipped there.
+        if (m_cameraMode == CameraMode::Orrery && !m_usePathTracing)
+        {
+            const std::vector<render::Renderer::LineVertex> orbitVerts =
+                m_scene.BuildOrbitTraceVertices(m_camera.Position());
+            if (!orbitVerts.empty())
+            {
+                const float aspect = static_cast<float>(m_device.Width()) /
+                                     static_cast<float>(m_device.Height());
+                m_renderer.DrawLines(m_device, orbitVerts.data(),
+                                     static_cast<uint32_t>(orbitVerts.size()),
+                                     m_camera.ViewProjectionMatrix(aspect));
+            }
+        }
+
         // Tone-map the linear scene into the back buffer. Post-process passes
         // (bloom, exposure, TAA) belong between the line above and this one,
         // which is the whole reason the HDR intermediate exists.

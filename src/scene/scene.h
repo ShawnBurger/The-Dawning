@@ -92,6 +92,14 @@ public:
                         render::Renderer& renderer,
                         const core::Vec3d& cameraPosition);
 
+    // Build camera-relative line segments (render::Renderer::LineVertex pairs) for
+    // every seeded on-rails body's orbit trace, ready for Renderer::DrawLines. Each
+    // orbit is sampled about its primary via sim::SampleOrbitPath, offset to world,
+    // then subtracted-in-double and scaled by the render scale K (RULE 1). Empty if
+    // no star system is seeded. Used by the orrery/map view.
+    std::vector<render::Renderer::LineVertex>
+    BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const;
+
     // Phase 2a-pre: depth-only pass from the light's point of view. Same
     // traversal and the same visibility rules as RenderEntities - a caster the
     // two passes disagree about is a shadow with no object or an object with no
