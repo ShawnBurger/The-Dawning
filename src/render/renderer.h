@@ -260,6 +260,12 @@ public:
     // Draw the raster sky background before scene geometry.
     void DrawSky(D3D12Device& device);
 
+    // Draw the deep-space background (near-black + procedural starfield) instead of
+    // DrawSky, for the star-system views. Same fullscreen pass shape as DrawSky; only
+    // the pixel shader differs. The IBL environment is unaffected (it bakes the sky,
+    // not this), so this changes only the visible background.
+    void DrawSpace(D3D12Device& device);
+
     // Draw a mesh with a world transform and material properties
     void DrawMesh(D3D12Device& device, const Mesh& mesh,
                   const core::Mat4x4& worldMatrix,
@@ -610,6 +616,7 @@ private:
     bool CreateRootSignature(ID3D12Device* device);
     bool CreatePSO(ID3D12Device* device);
     bool CreateSkyPSO(ID3D12Device* device);
+    bool CreateSpacePSO(ID3D12Device* device);
     bool CreateConstantBuffers(ID3D12Device* device);
     bool CreateTextureHeap(ID3D12Device* device);
     void WriteNullTextureDescriptor(ID3D12Device* device, uint32_t descriptorIndex);
@@ -775,6 +782,7 @@ private:
     }
 
     ComPtr<ID3D12PipelineState> m_skyPSO;
+    ComPtr<ID3D12PipelineState> m_spacePSO; // deep-space starfield background
 
     // Line pipeline (orbit traces / map overlays). One root CBV (viewProj) and a
     // per-frame dynamic UPLOAD vertex buffer that grows on demand.

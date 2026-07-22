@@ -3228,7 +3228,13 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         commandList->RSSetScissorRects(1, &scissor);
 
         m_renderer.BeginFrame(m_device, m_camera);
-        m_renderer.DrawSky(m_device);
+        // Deep-space starfield background in the star-system views; the grey sky
+        // gradient in the demo sandbox. Only the visible background differs — the IBL
+        // environment is baked from the sky and is untouched either way.
+        if (m_options.starSystem)
+            m_renderer.DrawSpace(m_device);
+        else
+            m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
 
         // Planetary atmospheres: analytic single-scattering shells over the just-drawn

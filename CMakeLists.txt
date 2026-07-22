@@ -109,6 +109,7 @@ set(SHADER_FILES
     shaders/basic_ps.hlsl
     shaders/sky_vs.hlsl
     shaders/sky_ps.hlsl
+    shaders/space_ps.hlsl
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
     shaders/bloom_vs.hlsl

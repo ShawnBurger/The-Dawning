@@ -26,6 +26,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateRootSignature(device.Device())) return false;
     if (!CreatePSO(device.Device()))           return false;
     if (!CreateSkyPSO(device.Device()))        return false;
+    if (!CreateSpacePSO(device.Device()))      return false;
     if (!CreateLinePipeline(device.Device()))  return false;
     if (!CreateBillboardPipeline(device.Device())) return false;
     if (!CreateAtmospherePipeline(device.Device())) return false;
@@ -229,6 +230,7 @@ void Renderer::Shutdown()
     m_hdrIsRenderTarget = false;
     m_textureHeap.Reset();
     m_skyPSO.Reset();
+    m_spacePSO.Reset();
     m_pso.Reset();
     m_psoDrawProbe.Reset();
     m_rootSig.Reset();
@@ -1562,6 +1564,51 @@ bool Renderer::CreateSkyPSO(ID3D12Device* device)
 
     m_skyPSO->SetName(L"RasterSkyPSO");
     core::Log::Info("Sky PSO created (full-screen sky, depth off)");
+    return true;
+}
+
+bool Renderer::CreateSpacePSO(ID3D12Device* device)
+{
+    // Identical fullscreen-background pipeline to the sky PSO (same VS, root sig,
+    // no depth, no blend, HDR target) — only the pixel shader differs (near-black +
+    // starfield instead of the grey gradient).
+    auto vsBytecode = CompileShaderFromFile(L"shaders/sky_vs.hlsl", "main", "vs_5_1");
+    auto psBytecode = CompileShaderFromFile(L"shaders/space_ps.hlsl", "main", "ps_5_1");
+    if (!vsBytecode || !psBytecode)
+    {
+        core::Log::Error("Failed to compile shaders for space PSO");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_rootSig.Get();
+    psoDesc.VS = { vsBytecode->GetBufferPointer(), vsBytecode->GetBufferSize() };
+    psoDesc.PS = { psBytecode->GetBufferPointer(), psBytecode->GetBufferSize() };
+    psoDesc.InputLayout = { nullptr, 0 };
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.DepthStencilState.DepthEnable    = FALSE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_ALWAYS;
+    psoDesc.DepthStencilState.StencilEnable  = FALSE;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = kHDRFormat;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spacePSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (space) failed: 0x%08X", hr);
+        return false;
+    }
+    m_spacePSO->SetName(L"SpaceSkyPSO");
+    core::Log::Info("Space PSO created (starfield background, depth off)");
     return true;
 }
 
@@ -2974,6 +3021,17 @@ void Renderer::DrawSky(D3D12Device& device)
 {
     auto* cmd = device.CmdList();
     cmd->SetPipelineState(m_skyPSO.Get());
+    cmd->IASetVertexBuffers(0, 0, nullptr);
+    cmd->IASetIndexBuffer(nullptr);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawInstanced(3, 1, 0, 0);
+    cmd->SetPipelineState(MainPSO());
+}
+
+void Renderer::DrawSpace(D3D12Device& device)
+{
+    auto* cmd = device.CmdList();
+    cmd->SetPipelineState(m_spacePSO ? m_spacePSO.Get() : m_skyPSO.Get());
     cmd->IASetVertexBuffers(0, 0, nullptr);
     cmd->IASetIndexBuffer(nullptr);
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
