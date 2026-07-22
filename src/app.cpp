@@ -3172,8 +3172,10 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
             state.shipPeriodSeconds = m_shipOrbit.period;
         }
 
-        // Target readout: the HUD's locked target (info cached by RenderHud).
-        if (m_hudTargetInfo.valid)
+        // Target readout: the HUD's locked target (info cached by RenderHud). The
+        // m_targetBodyId != 0 guard prevents a SeededBodyName(0 - base) underflow if
+        // the cache is ever valid while nothing is locked.
+        if (m_hudTargetInfo.valid && m_targetBodyId != 0)
         {
             state.targetActive       = true;
             state.targetName         = SeededBodyName(m_targetBodyId - scene::kStarSystemBodyIdBase);
@@ -3654,7 +3656,11 @@ void App::RenderHud()
         }
     }
 
-    m_hud.Draw(m_device, w, h, m_frameCount);
+    // Index the per-frame HUD vertex-buffer ring by the fence-protected backbuffer
+    // index (what WaitForCurrentFrame retires), NOT m_frameCount — matching the
+    // debug overlay's ring, so a future present-skip that does not advance the frame
+    // counter in lockstep cannot race the mapped buffer.
+    m_hud.Draw(m_device, w, h, m_device.FrameIndex());
 }
 
 bool App::RenderFrame(const core::TimeStep& timeStep)
@@ -3671,6 +3677,13 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // into the system). Both the navigation HUD and the orbit-trace overlay read it.
     m_shipOrbit = m_shipInSystem ? m_scene.DeriveOsculatingOrbit(kPlayerShipBodyId)
                                  : scene::OsculatingOrbit{};
+
+    // Clear the HUD readout caches every frame, in EVERY render mode. RenderHud
+    // repopulates them only when it runs (raster, flying views), so path-tracing or
+    // the orrery — where RenderHud is not called — leave them cleared rather than
+    // letting BuildOverlayState draw a stale/ghost target or flight block.
+    m_hudTargetInfo = {};
+    m_hudFlight = {};
 
     // Advance the renderer's per-frame slot BEFORE any pass records anything,
     // and unconditionally - above the raster/path-tracing branch. The shadow
