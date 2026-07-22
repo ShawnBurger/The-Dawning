@@ -25,6 +25,26 @@
 namespace scene
 {
 
+// A body's live osculating orbit about its current sphere-of-influence primary,
+// derived each frame from Cartesian state (position + velocity) via
+// sim::StateToElements. This is how a force-integrated body like the player ship —
+// which carries no OrbitState of its own — gets a Keplerian description for the HUD
+// and a predicted-path trace. `valid` is false when the body is missing, has no
+// resolvable primary, or the fit is degenerate (radial / parabolic).
+struct OsculatingOrbit
+{
+    bool                 valid         = false;
+    uint64_t             primaryBodyId = 0;
+    core::Vec3d          primaryPos;             // primary world position (m)
+    double               primaryMu     = 0.0;    // primary GM (m^3 s^-2)
+    ecs::OrbitalElements elements;               // osculating, this instant
+    double               altitude      = 0.0;    // |r| from primary centre (m)
+    double               speed         = 0.0;    // |v| relative to primary (m/s)
+    double               periapsis     = 0.0;    // r_min = a(1-e) (m); 0 if invalid
+    double               apoapsis      = 0.0;    // r_max = a(1+e) (m); 0 if not elliptic
+    double               period        = 0.0;    // s; 0 if not a closed ellipse
+};
+
 class Scene
 {
 public:
@@ -108,6 +128,21 @@ public:
     // planet or the star — sub-pixel at true scale — still reads as a legible dot.
     std::vector<render::Renderer::BillboardVertex>
     BuildBodyMarkerVertices(const core::Vec3d& cameraPosition) const;
+
+    // Derive `bodyId`'s osculating orbit about its current SOI primary from the live
+    // Cartesian state (Transform.position + RigidBody.linearVelocity). Read-only;
+    // used for the player ship, which is force-integrated and carries no OrbitState.
+    // Returns valid=false if the body/primary is missing or the fit is degenerate.
+    OsculatingOrbit DeriveOsculatingOrbit(uint64_t bodyId) const;
+
+    // Build camera-relative line segments for a derived orbit (e.g. the ship's), the
+    // same way BuildOrbitTraceVertices does for on-rails bodies: SampleOrbitPath about
+    // the primary, offset to world, subtracted-in-double and scaled by K (RULE 1).
+    // Empty if the orbit is invalid. Used to draw the ship's predicted path.
+    std::vector<render::Renderer::LineVertex>
+    BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                                   const OsculatingOrbit& orbit,
+                                   float r, float g, float b, float a) const;
 
     // Phase 2a-pre: depth-only pass from the light's point of view. Same
     // traversal and the same visibility rules as RenderEntities - a caster the

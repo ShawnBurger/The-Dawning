@@ -27,6 +27,25 @@ namespace
 constexpr const char* kSmokeCaptureFile = "smoke_capture.ppm";
 constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
 
+// The player ship's GravitationalBody id. Distinct from the seeded celestial bodies,
+// which live at kStarSystemBodyIdBase + local id (the star's builder id is also 1,
+// hence the offset). Used to look the ship up for its live osculating orbit.
+constexpr uint64_t kPlayerShipBodyId = 1;
+
+// Display name for a seeded body by its LOCAL (un-offset) id. Shared by the HUD's
+// focus block and the ship-orbit block's primary label.
+const char* SeededBodyName(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 1:  return "SUN";
+        case 10: return "EARTH";
+        case 11: return "MOON";
+        case 20: return "MARS";
+        default: return "BODY";
+    }
+}
+
 uint64_t SmokeFrameForTime(double seconds)
 {
     return static_cast<uint64_t>(std::ceil(seconds / kSmokeFixedDeltaSeconds));
@@ -612,7 +631,7 @@ bool App::InitializeScene()
     registry.Assign<ecs::SpatialFrame>(
         m_playerShip, ecs::SpatialFrame{ m_scene.ActiveFrame() });
     ecs::GravitationalBody playerGravity;
-    playerGravity.bodyId = 1;
+    playerGravity.bodyId = kPlayerShipBodyId;
     playerGravity.radius = 2.2;
     playerGravity.isSource = false;
     playerGravity.owner = ecs::OrbitOwner::ForceIntegrated;
@@ -786,7 +805,8 @@ bool App::InitializeScene()
         if (m_options.startCameraMode == 4)
         {
             auto& reg = m_scene.GetRegistry();
-            core::Vec3d earthPos, earthVel; double earthRadius = 0.0; bool found = false;
+            core::Vec3d earthPos, earthVel; double earthRadius = 0.0, earthMu = 0.0;
+            bool found = false;
             if (auto* pool = reg.GetPool<ecs::GravitationalBody>())
                 for (uint32_t i = 0; i < pool->Count(); ++i)
                     if (pool->DataAt(i).bodyId == scene::kStarSystemBodyIdBase + 10)
@@ -795,6 +815,7 @@ bool App::InitializeScene()
                         earthPos = reg.Get<ecs::Transform>(e).position;
                         earthVel = reg.Get<ecs::RigidBody>(e).linearVelocity;
                         earthRadius = pool->DataAt(i).radius;
+                        earthMu = pool->DataAt(i).mu;
                         found = true;
                         break;
                     }
@@ -804,15 +825,36 @@ bool App::InitializeScene()
                 // In front of Earth (−Z) and slightly up, so the ship's default
                 // +Z forward — and the chase camera behind it — look toward Earth,
                 // which then fills the background beyond the ship.
-                t.position = earthPos +
-                    core::Vec3d{ 0.0, earthRadius * 0.35, -earthRadius * 4.0 };
+                const core::Vec3d offset{ 0.0, earthRadius * 0.35, -earthRadius * 4.0 };
+                t.position = earthPos + offset;
                 if (auto* rb = reg.TryGet<ecs::RigidBody>(m_playerShip))
                 {
-                    rb->linearVelocity = earthVel; // co-orbital with Earth
+                    // Put the ship on a CIRCULAR orbit about Earth rather than
+                    // co-moving with it: v = Earth's velocity + the local circular
+                    // speed sqrt(mu/r) perpendicular to the radius, so it coasts on a
+                    // closed orbit the player can then reshape with the engines. A
+                    // co-orbital ship (v == earthVel) has zero velocity relative to
+                    // Earth and simply falls straight in.
+                    const double r = offset.Length();
+                    core::Vec3d perp = offset.Cross(core::Vec3d{ 0.0, 1.0, 0.0 });
+                    if (perp.Length() < 1e-6) // radius nearly parallel to world up
+                        perp = offset.Cross(core::Vec3d{ 1.0, 0.0, 0.0 });
+                    const double vCirc = (earthMu > 0.0 && r > 0.0)
+                        ? std::sqrt(earthMu / r) : 0.0;
+                    rb->linearVelocity = earthVel + perp.Normalized() * vCirc;
                     rb->prevPosition = t.position;
+                    // Newtonian flight: with the assist OFF, zero stick means zero
+                    // force, so the ship coasts on its orbit. Coupled assist brakes
+                    // world velocity toward zero and would fight the orbit.
+                    if (auto* fc = reg.TryGet<ecs::FlightControl>(m_playerShip))
+                        fc->mode = ecs::FlightMode::Decoupled;
+                    m_shipInSystem = true; // the ship now has a real orbit to surface
+
+                    core::Log::Infof(
+                        "Ship spawned on a circular orbit about Earth: alt %.0f km, "
+                        "v_circular %.1f m/s (Newtonian flight)",
+                        (r - earthRadius) / 1000.0, vCirc);
                 }
-                core::Log::Infof("Ship spawned above Earth for solar flight (alt %.0f km)",
-                                 earthRadius / 1000.0);
             }
         }
     }
@@ -2835,14 +2877,7 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
         const uint64_t focusId =
             m_focusBodyId ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
         const uint64_t localId = focusId - scene::kStarSystemBodyIdBase;
-        switch (localId)
-        {
-            case 1:  state.focusName = "SUN";   break;
-            case 10: state.focusName = "EARTH"; break;
-            case 11: state.focusName = "MOON";  break;
-            case 20: state.focusName = "MARS";  break;
-            default: state.focusName = "BODY";  break;
-        }
+        state.focusName = SeededBodyName(localId);
 
         // Look the body up in the (const) registry the same way BuildOrbitTraceVertices
         // does: distance is camera -> body centre, orbit comes from its OrbitState.
@@ -2874,6 +2909,23 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
                 break;
             }
         }
+
+        // Ship-orbit sub-block: the player ship's own live osculating orbit (computed
+        // once per frame into m_shipOrbit), shown only once it has been flown into the
+        // system. This is the orbital-agency readout.
+        if (m_shipInSystem && m_shipOrbit.valid)
+        {
+            state.shipOrbitActive   = true;
+            state.shipPrimaryName   =
+                SeededBodyName(m_shipOrbit.primaryBodyId - scene::kStarSystemBodyIdBase);
+            state.shipAltitude      = m_shipOrbit.altitude;
+            state.shipSpeed         = m_shipOrbit.speed;
+            state.shipSemiMajorAxis = m_shipOrbit.elements.semiMajorAxis;
+            state.shipEccentricity  = m_shipOrbit.elements.eccentricity;
+            state.shipPeriapsis     = m_shipOrbit.periapsis;
+            state.shipApoapsis      = m_shipOrbit.apoapsis;
+            state.shipPeriodSeconds = m_shipOrbit.period;
+        }
     }
 
     return state;
@@ -2888,6 +2940,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     auto* commandList = m_device.CmdList();
     m_renderer.ReclaimTextureDescriptors(m_device);
+
+    // Refresh the ship's live osculating orbit once per frame (only if it was flown
+    // into the system). Both the navigation HUD and the orbit-trace overlay read it.
+    m_shipOrbit = m_shipInSystem ? m_scene.DeriveOsculatingOrbit(kPlayerShipBodyId)
+                                 : scene::OsculatingOrbit{};
 
     // Advance the renderer's per-frame slot BEFORE any pass records anything,
     // and unconditionally - above the raster/path-tracing branch. The shadow
@@ -3120,6 +3177,26 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                 m_renderer.DrawBillboards(m_device, markerVerts.data(),
                                           static_cast<uint32_t>(markerVerts.size()),
                                           m_camera.ViewProjectionMatrix(w / h), w, h);
+            }
+        }
+
+        // Ship-orbit trace: the player ship's own predicted path (green), through the
+        // same reversed-Z line pass as the body orbits. K self-scales it — sub-pixel
+        // and invisible in the compressed orrery, framed nicely around the primary in
+        // the near-body / ship views. Raster-only, and only once the ship is flying
+        // an orbit in the system.
+        if (m_shipOrbit.valid && !m_usePathTracing)
+        {
+            const std::vector<render::Renderer::LineVertex> shipVerts =
+                m_scene.BuildDerivedOrbitTraceVertices(
+                    m_camera.Position(), m_shipOrbit, 0.30f, 1.00f, 0.55f, 0.85f);
+            if (!shipVerts.empty())
+            {
+                const float aspect = static_cast<float>(m_device.Width()) /
+                                     static_cast<float>(m_device.Height());
+                m_renderer.DrawLines(m_device, shipVerts.data(),
+                                     static_cast<uint32_t>(shipVerts.size()),
+                                     m_camera.ViewProjectionMatrix(aspect));
             }
         }
 

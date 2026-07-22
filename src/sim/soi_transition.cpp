@@ -39,6 +39,62 @@ bool IsWellFormedOrbit(const ecs::OrbitState& o)
 }
 } // namespace
 
+ResolvedPrimary ResolvePrimaryFor(const ecs::Registry& registry,
+                                  const Vec3d& where, uint64_t selfBodyId)
+{
+    ResolvedPrimary out;
+
+    const auto* gravPool = registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return out;
+
+    // Same source-well set StepSoiTransitions builds, minus the querying body itself.
+    std::vector<SoiWell> wells;
+    std::unordered_map<uint64_t, uint32_t> rowById; // bodyId -> gravity-pool row
+    wells.reserve(gravPool->Count());
+    rowById.reserve(gravPool->Count() * 2u);
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        rowById[g.bodyId] = i;
+        if (g.bodyId == selfBodyId || !g.isSource || g.mu <= 0.0)
+            continue;
+        const ecs::Entity e = registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t = registry.TryGet<ecs::Transform>(e);
+        if (!t)
+            continue;
+        // A source with an orbit uses its own SOI radius; a source without one is the
+        // unbounded root (the central star), which owns all interplanetary space.
+        double soiR = std::numeric_limits<double>::infinity();
+        if (const auto* o = registry.TryGet<ecs::OrbitState>(e))
+            soiR = SphereOfInfluenceRadius(o->elements.semiMajorAxis, g.mu, o->primaryMu);
+        wells.push_back(SoiWell{ g.bodyId, WorldPos::FromOffset(t->position), soiR });
+    }
+
+    const uint64_t dominant = ResolveDominantSoi(WorldPos::FromOffset(where), wells);
+    if (dominant == kInvalidSoi)
+        return out;
+
+    const auto it = rowById.find(dominant);
+    if (it == rowById.end())
+        return out; // resolved well has no pool row (should not happen)
+
+    const uint32_t row = it->second;
+    const ecs::Entity pe = registry.EntityAtIndex(gravPool->EntityAt(row));
+    const auto* pt = registry.TryGet<ecs::Transform>(pe);
+    if (!pt)
+        return out;
+    const auto* pr = registry.TryGet<ecs::RigidBody>(pe);
+
+    out.found    = true;
+    out.bodyId   = dominant;
+    out.position = pt->position;
+    out.velocity = pr ? pr->linearVelocity : Vec3d{};
+    out.mu       = gravPool->DataAt(row).mu;
+    return out;
+}
+
 SoiTransitionResult StepSoiTransitions(ecs::Registry& registry, double now,
                                        double hysteresis)
 {

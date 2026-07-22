@@ -40,6 +40,19 @@ struct DebugOverlayState
     double       focusSemiMajorAxis = 0.0; // a (m); < 0 for hyperbolic
     double       focusEccentricity = 0.0;  // e
     double       focusPeriodSeconds = 0.0; // 0 when not a closed ellipse
+
+    // Ship orbit sub-block — the player ship's OWN live osculating orbit about its
+    // SOI primary, shown when it has been flown into the system. This is the
+    // orbital-agency readout: a prograde burn visibly raises the apoapsis here.
+    bool         shipOrbitActive = false;
+    const char*  shipPrimaryName = "";
+    double       shipAltitude = 0.0;      // range from primary centre (m)
+    double       shipSpeed = 0.0;         // speed relative to primary (m/s)
+    double       shipSemiMajorAxis = 0.0; // a (m)
+    double       shipEccentricity = 0.0;  // e
+    double       shipPeriapsis = 0.0;     // r_min (m from primary centre)
+    double       shipApoapsis = 0.0;      // r_max (m); 0 if not elliptic
+    double       shipPeriodSeconds = 0.0; // 0 if not a closed ellipse
 };
 
 class DebugOverlay
@@ -72,10 +85,11 @@ private:
     void UploadTexture(D3D12Device& device);
 
     static constexpr uint32_t kOverlayWidth = 520;
-    // Tall enough for the navigation block. When navActive is false the lower
-    // region is left transparent (the panel background is drawn only as tall as
-    // the content), so the compact engine-only overlay is unchanged in look.
-    static constexpr uint32_t kOverlayHeight = 288;
+    // Tall enough for the navigation block plus the optional ship-orbit sub-block.
+    // When navActive is false (or the ship block is absent) the lower region is left
+    // transparent (the panel background is drawn only as tall as the content), so the
+    // compact engine-only overlay is unchanged in look.
+    static constexpr uint32_t kOverlayHeight = 320;
 
     bool m_initialized = false;
     uint32_t m_uploadPitch = 0;

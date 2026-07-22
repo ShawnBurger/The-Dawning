@@ -403,11 +403,14 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
     const Pixel accent = state.pathTracing ? Pixel{ 89, 178, 255, 255 } : Pixel{ 118, 222, 172, 255 };
     const Pixel navAccent = { 255, 209, 102, 255 }; // warm amber for the nav heading
 
-    // The panel is only as tall as its content: the engine block always, plus the
-    // navigation block when a star system is active. The unused lower region of the
-    // fixed-size texture stays transparent (alpha 0), so the compact engine-only
-    // overlay is pixel-identical to before this block existed.
-    const int usedHeight = state.navActive ? static_cast<int>(kOverlayHeight) : 176;
+    // The panel is only as tall as its content: the engine block always, the
+    // navigation block when a star system is active, and the ship-orbit sub-block on
+    // top of that when the ship is flown into the system. The unused lower region of
+    // the fixed-size texture stays transparent (alpha 0), so the compact engine-only
+    // overlay is pixel-identical to before these blocks existed.
+    const int usedHeight = !state.navActive ? 176
+                         : (state.shipOrbitActive ? static_cast<int>(kOverlayHeight)
+                                                  : 252);
 
     DrawRect(0, 0, kOverlayWidth, kOverlayHeight, { 0, 0, 0, 0 });
     DrawRect(0, 0, kOverlayWidth, usedHeight, panel);
@@ -462,49 +465,85 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
             else
                 std::snprintf(out, n, "%.0f km", m / 1000.0);
         };
+        auto fmtPeriod = [&](char* out, size_t n, double s)
+        {
+            if (s >= kYear)     std::snprintf(out, n, "%.2f yr", s / kYear);
+            else if (s >= kDay) std::snprintf(out, n, "%.1f d", s / kDay);
+            else                std::snprintf(out, n, "%.0f s", s);
+        };
 
         DrawRect(0, 118, kOverlayWidth, 1, line); // separator above the nav block
         DrawTextLine("NAVIGATION", 16, 125, navAccent, true);
 
+        int y = 149;
         std::snprintf(buf, sizeof(buf), "VIEW %-10s   WARP %gx",
                       state.cameraModeName, state.timeWarp);
-        DrawTextLine(buf, 16, 151, text);
+        DrawTextLine(buf, 16, y, text); y += 20;
 
         char dist[32];
         fmtLength(dist, sizeof(dist), state.focusDistance);
         std::snprintf(buf, sizeof(buf), "FOCUS %-8s   RANGE %s",
                       state.focusName, dist);
-        DrawTextLine(buf, 16, 171, text);
+        DrawTextLine(buf, 16, y, text); y += 20;
 
         if (state.focusHasOrbit)
         {
-            char sma[32];
+            char sma[32], per[32];
             fmtLength(sma, sizeof(sma), state.focusSemiMajorAxis);
-            std::snprintf(buf, sizeof(buf), "ORBIT  a %s   e %.4f",
-                          sma, state.focusEccentricity);
-            DrawTextLine(buf, 16, 191, text);
-
-            char per[32];
-            if (state.focusPeriodSeconds >= kYear)
-                std::snprintf(per, sizeof(per), "%.2f yr", state.focusPeriodSeconds / kYear);
-            else if (state.focusPeriodSeconds >= kDay)
-                std::snprintf(per, sizeof(per), "%.1f d", state.focusPeriodSeconds / kDay);
-            else
-                std::snprintf(per, sizeof(per), "%.0f s", state.focusPeriodSeconds);
-            std::snprintf(buf, sizeof(buf), "PERIOD %s", per);
-            DrawTextLine(buf, 16, 211, muted);
+            fmtPeriod(per, sizeof(per), state.focusPeriodSeconds);
+            std::snprintf(buf, sizeof(buf), "ORBIT  a %s  e %.4f  T %s",
+                          sma, state.focusEccentricity, per);
+            DrawTextLine(buf, 16, y, muted); y += 20;
         }
         else
         {
-            DrawTextLine("ORBIT  -  central body (frame origin)", 16, 191, muted);
+            DrawTextLine("ORBIT  -  central body (frame origin)", 16, y, muted);
+            y += 20;
         }
 
-        footerY = 240;
+        // Ship-orbit sub-block: the orbital-agency readout.
+        if (state.shipOrbitActive)
+        {
+            const Pixel shipAccent = { 118, 222, 172, 255 }; // green, matches the trace
+            y += 6;
+            DrawRect(14, y - 4, kOverlayWidth - 28, 1, line);
+
+            char alt[32], spd[32];
+            fmtLength(alt, sizeof(alt), state.shipAltitude);
+            if (state.shipSpeed >= 1000.0)
+                std::snprintf(spd, sizeof(spd), "%.3f km/s", state.shipSpeed / 1000.0);
+            else
+                std::snprintf(spd, sizeof(spd), "%.0f m/s", state.shipSpeed);
+            std::snprintf(buf, sizeof(buf), "SHIP  PRI %-6s  ALT %s  V %s",
+                          state.shipPrimaryName, alt, spd);
+            DrawTextLine(buf, 16, y, shipAccent, true); y += 20;
+
+            char sma[32];
+            fmtLength(sma, sizeof(sma), state.shipSemiMajorAxis);
+            std::snprintf(buf, sizeof(buf), "ORBIT  a %s  e %.4f",
+                          sma, state.shipEccentricity);
+            DrawTextLine(buf, 16, y, text); y += 20;
+
+            char pe[32], ap[32], per[32];
+            fmtLength(pe, sizeof(pe), state.shipPeriapsis);
+            if (state.shipApoapsis > 0.0)
+                fmtLength(ap, sizeof(ap), state.shipApoapsis);
+            else
+                std::snprintf(ap, sizeof(ap), "%s", "- (escape)");
+            if (state.shipPeriodSeconds > 0.0)
+                fmtPeriod(per, sizeof(per), state.shipPeriodSeconds);
+            else
+                std::snprintf(per, sizeof(per), "%s", "-");
+            std::snprintf(buf, sizeof(buf), "Pe %s   Ap %s   T %s", pe, ap, per);
+            DrawTextLine(buf, 16, y, muted); y += 20;
+        }
+
+        footerY = usedHeight - 40;
     }
 
     DrawRect(14, footerY, kOverlayWidth - 28, 40, panel2);
     DrawTextLine(state.navActive
-                     ? "F4 VIEW   F5 FOCUS   , . / WARP   F1 RENDER   F3 HIDE"
+                     ? "F4 VIEW   F5 FOCUS   , . / WARP   V ASSIST   F3 HIDE"
                      : "F1 RENDER   F2 QUALITY   F3 OVERLAY   ESC RELEASE/QUIT",
                  24, footerY + 10, muted);
 }

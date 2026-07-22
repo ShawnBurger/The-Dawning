@@ -304,6 +304,7 @@ set(TEST_SOURCES
     tests/test_system_instantiate.cpp
     tests/test_star_system_seed.cpp
     tests/test_soi_transition.cpp
+    tests/test_orbital_agency.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp

@@ -8,8 +8,11 @@
 #include "../sim/star_system.h"
 #include "../sim/system_instantiate.h"
 #include "../sim/orbit_trace.h"
+#include "../sim/soi_transition.h"  // ResolvePrimaryFor
+#include "../sim/kepler.h"          // StateVector, StateToElements
 #include "../core/log.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -320,6 +323,105 @@ Scene::BuildBodyMarkerVertices(const core::Vec3d& cameraPosition) const
                               m.sizePx,
                               { corner[0], corner[1] } });
         }
+    }
+    return verts;
+}
+
+OsculatingOrbit Scene::DeriveOsculatingOrbit(uint64_t bodyId) const
+{
+    OsculatingOrbit out;
+    if (!m_starSystemActive)
+        return out;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return out;
+
+    // Live Cartesian state of the queried body: position in Transform, velocity in
+    // RigidBody (the ship keeps its velocity there — it has no OrbitState of its own).
+    core::Vec3d bodyPos, bodyVel;
+    bool found = false;
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        if (gravPool->DataAt(i).bodyId != bodyId)
+            continue;
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t  = m_registry.TryGet<ecs::Transform>(e);
+        const auto* rb = m_registry.TryGet<ecs::RigidBody>(e);
+        if (!t || !rb)
+            return out;
+        bodyPos = t->position;
+        bodyVel = rb->linearVelocity;
+        found = true;
+        break;
+    }
+    if (!found)
+        return out;
+
+    const sim::ResolvedPrimary primary =
+        sim::ResolvePrimaryFor(m_registry, bodyPos, bodyId);
+    if (!primary.found || primary.mu <= 0.0)
+        return out;
+
+    // Primary-relative state -> osculating elements (the inverse of ElementsToState).
+    const sim::StateVector rel{ bodyPos - primary.position,
+                                bodyVel - primary.velocity };
+    const double r = rel.position.Length();
+    if (r <= 0.0)
+        return out;
+    const ecs::OrbitalElements el = sim::StateToElements(rel, primary.mu);
+    if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+        el.eccentricity < 0.0)
+        return out; // parabolic / radial / otherwise degenerate fit
+
+    out.valid         = true;
+    out.primaryBodyId = primary.bodyId;
+    out.primaryPos    = primary.position;
+    out.primaryMu     = primary.mu;
+    out.elements      = el;
+    out.altitude      = r;
+    out.speed         = rel.velocity.Length();
+
+    const double a = el.semiMajorAxis;
+    const double e = el.eccentricity;
+    out.periapsis = a * (1.0 - e); // positive for both ellipse (a>0) and hyperbola (a<0,e>1)
+    if (a > 0.0 && e < 1.0)
+    {
+        out.apoapsis = a * (1.0 + e);
+        constexpr double kTwoPi = 6.283185307179586;
+        out.period = kTwoPi * std::sqrt(a * a * a / primary.mu);
+    }
+    return out;
+}
+
+std::vector<render::Renderer::LineVertex>
+Scene::BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                                      const OsculatingOrbit& orbit,
+                                      float r, float g, float b, float a) const
+{
+    std::vector<render::Renderer::LineVertex> verts;
+    if (!orbit.valid)
+        return verts;
+
+    const std::vector<core::Vec3d> local =
+        sim::SampleOrbitPath(orbit.elements, orbit.primaryMu, 192u);
+    if (local.size() < 2u)
+        return verts;
+
+    const double K = m_renderScale;
+    // Same RULE-1 discipline as BuildOrbitTraceVertices: subtract the camera in
+    // double, then scale by K, then narrow.
+    auto toRender = [&](const core::Vec3d& localPt) -> core::Vec3f
+    {
+        return ((orbit.primaryPos + localPt - cameraPosition) * K).ToFloat();
+    };
+    verts.reserve((local.size() - 1u) * 2u);
+    for (size_t k = 0; k + 1u < local.size(); ++k)
+    {
+        const core::Vec3f p0 = toRender(local[k]);
+        const core::Vec3f p1 = toRender(local[k + 1u]);
+        verts.push_back({ { p0.x, p0.y, p0.z }, { r, g, b, a } });
+        verts.push_back({ { p1.x, p1.y, p1.z }, { r, g, b, a } });
     }
     return verts;
 }
