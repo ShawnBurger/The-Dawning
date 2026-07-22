@@ -12,6 +12,7 @@
 #include "sim/soi.h"                 // SphereOfInfluenceRadius
 #include "sim/star_system.h"
 #include "sim/system_instantiate.h"
+#include "sim/simulation_system.h"
 #include "sim/reference_frame.h"
 #include "sim/nbody.h"              // PromoteFromRails
 #include "sim/kepler.h"             // StateVector
@@ -160,4 +161,32 @@ TEST_CASE(SoiTransition_DegenerateCoMovingCrossingIsRejectedNotCommitted)
     CHECK(std::isfinite(po.elements.eccentricity));
     CHECK(po.elements.eccentricity != 1.0);
     (void)r;
+}
+
+TEST_CASE(SoiTransition_StepSimulationRunsThePhaseWhenEnabled)
+{
+    FrameGraph frames;
+    const FrameId root = frames.CreateFrame(kInvalidFrame, WorldPos{});
+    ecs::Registry registry;
+    InstantiateStarSystem(registry, root, BuildReferenceSystem());
+
+    SimulationStepConfig config;
+    config.activeFrame = root;
+    config.masterFrame = root;
+    config.coordinateTime = 0.0;
+
+    // Disabled (default): the phase does not run — no on-rails body is evaluated,
+    // and existing scenarios see no behaviour change.
+    config.enableSoiTransitions = false;
+    const SimulationStepResult off = StepSimulation(registry, frames, 1.0, config);
+    CHECK(off.accepted);
+    CHECK_EQ(off.soiTransitions.evaluated, 0u);
+
+    // Enabled: the full orchestrator runs the SOI phase; the pristine system
+    // evaluates its on-rails bodies (two planets + a moon) and transitions none.
+    config.enableSoiTransitions = true;
+    const SimulationStepResult on = StepSimulation(registry, frames, 1.0, config);
+    CHECK(on.accepted);
+    CHECK(on.soiTransitions.evaluated >= 3u);
+    CHECK_EQ(on.soiTransitions.transitions, 0u);
 }

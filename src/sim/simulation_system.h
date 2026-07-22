@@ -11,6 +11,7 @@
 #include "orbit_system.h"
 #include "physics_system.h"
 #include "relativity_system.h"
+#include "soi_transition.h"
 
 #include <span>
 #include <utility>
@@ -42,6 +43,14 @@ struct SimulationStepConfig
     std::span<const FtlCommand> ftlCommands;
     std::span<const AtmosphereBinding> atmosphereBindings;
     std::span<const ClockGravityBinding> clockGravityBindings;
+
+    // Patched-conics: after the passive-orbit phase, reassign each on-rails body's
+    // primary if it has crossed a sphere of influence (real interplanetary travel).
+    // Off by default so scenarios with no celestial bodies are unaffected; a scene
+    // running a star system enables it. `soiHysteresis` in [0,1) is the boundary
+    // deadband that suppresses per-step primary thrash.
+    bool   enableSoiTransitions = false;
+    double soiHysteresis        = 0.01;
 };
 
 enum class SimulationStepStage : uint32_t
@@ -66,6 +75,7 @@ struct SimulationStepResult
     std::vector<AtmosphereStepResult> atmosphere;
     PassiveOrbitStepResult passiveOrbit;
     GravityAccumulationResult gravity;
+    SoiTransitionResult soiTransitions;
     FlightPhysicsStepResult flight;
     RelativisticClockStepResult clocks;
 

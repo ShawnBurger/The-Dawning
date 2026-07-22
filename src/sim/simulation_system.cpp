@@ -215,6 +215,15 @@ SimulationStepResult StepSimulation(
     }
     result.completedStage = SimulationStepStage::PassiveOrbit;
 
+    // Patched conics: now that positions reflect this step (coordinateTime + dt),
+    // reassign any on-rails body's primary if it crossed a sphere of influence.
+    // Best-effort and non-gating — it never rejects the step. Off unless a scene
+    // running a star system opts in, so scenarios with no celestial bodies pay
+    // nothing and see no behaviour change.
+    if (config.enableSoiTransitions)
+        result.soiTransitions = StepSoiTransitions(
+            registry, config.coordinateTime + dt, config.soiHysteresis);
+
     result.gravity = AccumulateForceIntegratedGravity(registry, frames);
     if (!result.gravity.accepted)
         return result;
