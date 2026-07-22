@@ -170,6 +170,16 @@ SamplerComparisonState    shadowSampler : register(s1);
 TextureCube<float4> envCube    : register(t0, space6);
 SamplerState        envSampler : register(s2);
 
+// Screen-space ambient occlusion factor (1 = open, 0 = occluded), computed by the
+// depth-prepass SSAO pass. Its own register space, its own reserved heap slot, the
+// same isolation the shadow map and env cube use. Full-resolution, so it is fetched
+// by integer pixel coordinate (Load) — no sampler, no screen-size constant. Sampled
+// (below) ONLY when iblParams.w flags SSAO active; while inactive the slot is a null
+// placeholder SRV that is never read. It occludes the DIFFUSE ambient only, and only
+// in the OUTPUT (after the consumption probe), so the IBL probe words and the
+// specular path stay byte-identical.
+Texture2D<float> aoTexture : register(t0, space7);
+
 #include "brdf_common.hlsli"   // PI and the microfacet BRDF, shared with path_trace.hlsl
 #include "ibl_common.hlsli"    // the ONE IBL evaluation, shared with the probe (and DXR at Stage 4)
 
@@ -605,6 +615,22 @@ float4 main(PSInput input) : SV_TARGET
         }
     }
 #endif
+
+    // Screen-space ambient occlusion occludes the DIFFUSE ambient in the OUTPUT
+    // only, applied HERE — after the consumption probe — so the probe, and the
+    // raster/DXR SH-diffuse cross-check built on it, never see this raster-only
+    // post-term (the DXR path has no SSAO). envDiffuse is the material-AO'd IBL
+    // diffuse, so subtracting envDiffuse*(1-ssao) leaves direct + envDiffuse*ssao +
+    // envSpecular + emission. Gated on iblParams.w (the raster SSAO-active flag,
+    // distinct from the DXR path's probe-write use of the same slot): when SSAO is
+    // inactive the factor is 1 and aoTexture — which may be a null-SRV placeholder —
+    // is never sampled, so a failed/absent SSAO degrades to exactly the pre-SSAO
+    // image rather than reading an uninitialized descriptor.
+    if (iblParams.w > 0.5)
+    {
+        float ssao = aoTexture.Load(int3(int2(input.positionCS.xy), 0));
+        finalColor -= envDiffuse * (1.0 - ssao);
+    }
 
     // Linear HDR out. Tone mapping happens once, in tonemap_ps.hlsl, so that
     // the scene exists as linear radiance in a buffer that bloom/exposure/TAA

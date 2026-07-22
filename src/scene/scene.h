@@ -169,6 +169,14 @@ public:
                              render::Renderer& renderer,
                              const core::Vec3d& cameraPosition);
 
+    // Depth-only pass from the CAMERA's point of view, for the SSAO prepass. Same
+    // traversal, same visibility filter and — critically — the same camera-relative
+    // matrix as RenderEntities, so the prepass depth equals what the opaque pass
+    // produces. Feeds the SSAO pass; no material/texture binding.
+    void RenderDepthPrepass(render::D3D12Device& device,
+                            render::Renderer& renderer,
+                            const core::Vec3d& cameraPosition);
+
     // Phase 2b: Build acceleration structures and dispatch path tracing
     void BuildAccelerationStructures(render::D3D12Device& device,
                                      const core::Vec3d& cameraPosition);

@@ -867,12 +867,15 @@ if ($markers.ContainsKey("cb_ring_peak") -and $markers.ContainsKey("cb_ring_capa
     }
     $cbPerFrame = [int]$markers["cb_per_frame_bytes"]
 
-    # Per-frame constant (read above), plus one CBPerPass per shadow cascade and
-    # one for the main pass, plus one spare slot of slack for a future per-pass
-    # constant. Scales with cascade count on purpose. Scales with entity count
-    # NEVER - that flatness is the whole property being guarded.
-    $flatBudget = $cbPerFrame + (($cascades + 1) * 256) + 256
-    Write-Host "Constant ring flat budget: $flatBudget bytes (CBPerFrame $cbPerFrame + $cascades+1 pass CBs + 256 slack)"
+    # Per-frame constant (read above), plus one CBPerPass per shadow cascade, one
+    # for the main pass, one for the SSAO depth prepass (a CBPerPass) and one for the
+    # SSAO pass itself (its own small constant), plus one spare slot of slack for a
+    # future per-pass constant. Every one of these is per-PASS: flat in entity count,
+    # which is the whole property being guarded. Scales with cascade count on
+    # purpose. Scales with entity count NEVER.
+    $passCbs = $cascades + 3   # cascades + main + prepass + ssao
+    $flatBudget = $cbPerFrame + ($passCbs * 256) + 256
+    Write-Host "Constant ring flat budget: $flatBudget bytes (CBPerFrame $cbPerFrame + $passCbs pass CBs + 256 slack)"
 
     if ($peak -gt $flatBudget) {
         $perDrawCost = 0

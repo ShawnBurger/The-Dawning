@@ -121,6 +121,7 @@ set(SHADER_FILES
     shaders/line_ps.hlsl
     shaders/billboard_vs.hlsl
     shaders/billboard_ps.hlsl
+    shaders/ssao_ps.hlsl
     shaders/path_trace.hlsl
     shaders/gpu_draw_records.hlsli
     shaders/brdf_common.hlsli

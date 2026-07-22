@@ -419,6 +419,25 @@ public:
     // mapping would brighten pixels that are already display-saturated.
     void ResolveToBackBuffer(D3D12Device& device);
 
+    // ---- Depth prepass + SSAO (raster ambient occlusion) -------------------
+    // A forward renderer combines the IBL ambient in basic_ps DURING the opaque
+    // pass, before any screen-space depth is complete — so SSAO needs a same-frame
+    // depth PREPASS. These run BEFORE BeginScenePass, into a renderer-owned prepass
+    // depth target (the main depth buffer and the whole opaque path stay untouched):
+    //   BeginDepthPrepass -> DrawMeshDepth per caster -> EndDepthPrepass -> RenderSSAO.
+    // RenderSSAO reconstructs view position/normal from the prepass depth, writes a
+    // full-res R8 AO factor, and the main pass samples it to occlude the IBL diffuse.
+    // camera near/fov feed the reversed-Z depth reconstruction. No-op if SSAO
+    // resources failed to create — the main pass then reads a cleared (white) AO
+    // texture, i.e. no occlusion, so the feature degrades to the pre-SSAO image.
+    void BeginDepthPrepass(D3D12Device& device, const core::Mat4x4& viewProj);
+    void DrawMeshDepth(D3D12Device& device, const Mesh& mesh,
+                       const core::Mat4x4& worldMatrix);
+    void EndDepthPrepass(D3D12Device& device);
+    void RenderSSAO(D3D12Device& device, float nearPlane, float tanHalfFovY,
+                    float aspect);
+    bool SSAOAvailable() const { return m_ssaoTarget != nullptr; }
+
     // One vertex of a colored world-space line segment, already in CAMERA-RELATIVE
     // render space (RULE 1: the caller subtracts the camera in double and applies
     // the render scale K before narrowing).
@@ -868,6 +887,57 @@ private:
     static constexpr uint32_t kEnvCubeDescriptorIndex = 2;
     EnvironmentIBL m_environmentIBL;
 
+    // ---- Depth prepass + SSAO ----------------------------------------------
+    // The SSAO AO texture's SRV lives at a RESERVED slot at the very TOP of the
+    // material heap (kAoDescriptorIndex == kMaxRasterTextures, defined beside that
+    // constant below), so the material allocator's range [firstIndex,
+    // kMaxRasterTextures) and the env-cube slot below it are entirely unaffected —
+    // the heap simply grows by one. basic_ps samples it as its own root-parameter
+    // table (t0/space7), the same isolation the shadow map and env cube use.
+
+    // Renderer-owned prepass depth (R32_TYPELESS): its own DSV (depth pass) and an
+    // R32_FLOAT SRV (SSAO reads it). Separate from the device depth buffer so the
+    // opaque path is untouched.
+    ComPtr<ID3D12Resource>       m_prepassDepth;
+    ComPtr<ID3D12DescriptorHeap> m_prepassDsvHeap;   // 1 DSV
+    ComPtr<ID3D12DescriptorHeap> m_ssaoInputHeap;    // shader-visible: [0]=depth SRV
+    ComPtr<ID3D12PipelineState>  m_prepassPSO;       // basic_vs, no PS, reversed-Z
+    bool                         m_prepassIsDepthTarget = false;
+    // Per-draw transforms for the prepass, isolated from the shadow/main object
+    // buffer so their sizing and the shadow/main record-parity invariant are
+    // untouched. Bound at the object root SRV during the prepass only.
+    FrameStructuredBuffer        m_prepassObjectBuffer;
+    uint32_t                     m_prepassCursor = 0; // reset each prepass
+
+    // Full-res R8 AO factor (1 = open, 0 = occluded) written by RenderSSAO, sampled
+    // by basic_ps. Its own RTV heap; its SRV is published at kAoDescriptorIndex.
+    ComPtr<ID3D12Resource>       m_ssaoTarget;
+    ComPtr<ID3D12DescriptorHeap> m_ssaoRtvHeap;       // 1 RTV
+    ComPtr<ID3D12RootSignature>  m_ssaoRootSig;
+    ComPtr<ID3D12PipelineState>  m_ssaoPSO;
+    uint32_t                     m_ssaoWidth  = 0;
+    uint32_t                     m_ssaoHeight = 0;
+    bool                         m_ssaoIsRenderTarget = false;
+    static constexpr DXGI_FORMAT kAoFormat = DXGI_FORMAT_R8_UNORM;
+
+    // True only when a full SSAO pass can and will run this frame (all resources
+    // live). Drives CBPerFrame::iblParams.w, the raster SSAO-active flag basic_ps
+    // gates its AO sample on — so a failed/absent SSAO never darkens the image and
+    // never samples the (then null-placeholder) AO descriptor.
+    bool SsaoActive() const { return m_ssaoTarget && m_ssaoPSO && m_prepassDepth; }
+    // Publish a NULL R8 SRV at kAoDescriptorIndex so the reserved AO slot is ALWAYS a
+    // valid, non-dangling descriptor — before SSAO is created, and after any SSAO
+    // creation/resize failure. basic_ps never samples it while inactive (see
+    // SsaoActive), so its read value is irrelevant; this only keeps the bound table
+    // legal under the debug/GPU-validation layers.
+    void WriteAoFallbackDescriptor(ID3D12Device* device);
+    bool CreatePrepassPSO(ID3D12Device* device);
+    bool CreateSSAOPipeline(ID3D12Device* device);
+    // Creates m_prepassDepth + m_ssaoTarget at (width,height) and (re)publishes the
+    // AO SRV at kAoDescriptorIndex and the depth SRV in m_ssaoInputHeap. Called from
+    // Init and on resize.
+    bool CreateSSAOTargets(D3D12Device& device, uint32_t width, uint32_t height);
+
     // Environment intensity multiplier, uploaded as iblParams.y. One, and
     // deliberately so: this stage replaces the hemisphere ambient with a
     // physically-derived term, and a tuning knob set to anything but 1 would
@@ -889,6 +959,10 @@ private:
     // Shader-visible texture descriptors. Slot 0 is a null SRV fallback,
     // slot 1 the shadow map, slot 2 the environment cube.
     static constexpr uint32_t kMaxRasterTextures = 128;
+    // Reserved top slot for the SSAO AO texture (see the "Depth prepass + SSAO"
+    // block above). One past the material range, so the heap grows by one and
+    // nothing below it shifts.
+    static constexpr uint32_t kAoDescriptorIndex = kMaxRasterTextures;
     ComPtr<ID3D12DescriptorHeap> m_textureHeap;
     uint32_t m_textureDescSize = 0;
     // Replaces a bare monotonic counter. Slot 0 is reserved as the permanent
