@@ -223,7 +223,8 @@ constexpr float kBillboardCorners[6][2] = {
 } // namespace
 
 std::vector<render::Renderer::LineVertex>
-Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const
+Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                               uint64_t focusBodyId) const
 {
     std::vector<render::Renderer::LineVertex> verts;
     if (!m_starSystemActive)
@@ -266,7 +267,16 @@ Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const
         if (local.size() < 2u)
             continue;
 
-        const OrbitColor c = OrbitColorFor(g.bodyId - kStarSystemBodyIdBase);
+        OrbitColor c = OrbitColorFor(g.bodyId - kStarSystemBodyIdBase);
+        if (g.bodyId == focusBodyId)
+        {
+            // The focused body's orbit reads brighter and fully opaque, so the map
+            // shows at a glance which body the view is tracking.
+            c.r = 0.6f + 0.4f * c.r;
+            c.g = 0.6f + 0.4f * c.g;
+            c.b = 0.6f + 0.4f * c.b;
+            c.a = 1.0f;
+        }
         // (worldPt - camera) subtracted in DOUBLE first, then scaled by K, then
         // narrowed (RULE 1) — the same discipline the entity matrices use.
         auto toRender = [&](const core::Vec3d& localPt) -> core::Vec3f
@@ -394,6 +404,44 @@ OsculatingOrbit Scene::DeriveOsculatingOrbit(uint64_t bodyId) const
     return out;
 }
 
+OsculatingOrbit Scene::PreviewProgradeBurn(const OsculatingOrbit& base,
+                                           double deltaV) const
+{
+    OsculatingOrbit out;
+    if (!base.valid || base.primaryMu <= 0.0)
+        return out;
+
+    // Elements -> primary-relative state, add deltaV along the velocity, -> elements.
+    sim::StateVector s = sim::ElementsToState(base.elements, base.primaryMu);
+    const double vmag = s.velocity.Length();
+    if (vmag <= 0.0)
+        return out;
+    s.velocity = s.velocity + s.velocity * (deltaV / vmag);
+
+    const ecs::OrbitalElements el = sim::StateToElements(s, base.primaryMu);
+    if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+        el.eccentricity < 0.0)
+        return out;
+
+    out.valid         = true;
+    out.primaryBodyId = base.primaryBodyId;
+    out.primaryPos    = base.primaryPos;
+    out.primaryMu     = base.primaryMu;
+    out.elements      = el;
+    out.altitude      = s.position.Length();
+    out.speed         = s.velocity.Length();
+    const double a = el.semiMajorAxis;
+    const double e = el.eccentricity;
+    out.periapsis = a * (1.0 - e);
+    if (a > 0.0 && e < 1.0)
+    {
+        out.apoapsis = a * (1.0 + e);
+        constexpr double kTwoPi = 6.283185307179586;
+        out.period = kTwoPi * std::sqrt(a * a * a / base.primaryMu);
+    }
+    return out;
+}
+
 std::vector<render::Renderer::LineVertex>
 Scene::BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
                                       const OsculatingOrbit& orbit,
@@ -422,6 +470,80 @@ Scene::BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
         const core::Vec3f p1 = toRender(local[k + 1u]);
         verts.push_back({ { p0.x, p0.y, p0.z }, { r, g, b, a } });
         verts.push_back({ { p1.x, p1.y, p1.z }, { r, g, b, a } });
+    }
+    return verts;
+}
+
+std::vector<render::Renderer::BillboardVertex>
+Scene::BuildApsisMarkerVertices(const core::Vec3d& cameraPosition,
+                                const OsculatingOrbit& shipOrbit,
+                                uint64_t focusBodyId) const
+{
+    std::vector<render::Renderer::BillboardVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    const double K = m_renderScale;
+    constexpr float kPeColor[4] = { 0.25f, 0.95f, 1.00f, 0.95f }; // periapsis — cyan
+    constexpr float kApColor[4] = { 1.00f, 0.45f, 0.85f, 0.95f }; // apoapsis — magenta
+    constexpr float kApsisSizePx = 9.0f;
+
+    auto emitMarker = [&](const core::Vec3d& worldPos, const float col[4])
+    {
+        const core::Vec3f center = ((worldPos - cameraPosition) * K).ToFloat();
+        for (const auto& corner : kBillboardCorners)
+            verts.push_back({ { center.x, center.y, center.z },
+                              { col[0], col[1], col[2], col[3] },
+                              kApsisSizePx, { corner[0], corner[1] } });
+    };
+
+    // Periapsis (true anomaly 0) and apoapsis (pi) of one orbit about primaryPos,
+    // found by evaluating the shipped ElementsToState at those anomalies — the same
+    // propagator the trace samples, so the markers land exactly on the drawn ellipse.
+    auto emitApsides = [&](const ecs::OrbitalElements& el, double mu,
+                           const core::Vec3d& primaryPos)
+    {
+        if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+            mu <= 0.0)
+            return;
+        ecs::OrbitalElements peEl = el;
+        peEl.trueAnomaly = 0.0;
+        emitMarker(primaryPos + sim::ElementsToState(peEl, mu).position, kPeColor);
+        if (el.eccentricity < 1.0) // apoapsis exists only for a closed ellipse
+        {
+            ecs::OrbitalElements apEl = el;
+            apEl.trueAnomaly = 3.14159265358979323846;
+            emitMarker(primaryPos + sim::ElementsToState(apEl, mu).position, kApColor);
+        }
+    };
+
+    if (shipOrbit.valid)
+        emitApsides(shipOrbit.elements, shipOrbit.primaryMu, shipOrbit.primaryPos);
+
+    // The focused body's apsides on its own orbit — look up its primary's world pos.
+    if (auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>())
+    {
+        std::unordered_map<uint64_t, core::Vec3d> posById;
+        posById.reserve(gravPool->Count() * 2u);
+        for (uint32_t i = 0; i < gravPool->Count(); ++i)
+        {
+            const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+            if (const auto* t = m_registry.TryGet<ecs::Transform>(e))
+                posById[gravPool->DataAt(i).bodyId] = t->position;
+        }
+        for (uint32_t i = 0; i < gravPool->Count(); ++i)
+        {
+            if (gravPool->DataAt(i).bodyId != focusBodyId)
+                continue;
+            const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+            if (const auto* os = m_registry.TryGet<ecs::OrbitState>(e))
+            {
+                const auto pit = posById.find(os->primaryBodyId);
+                if (pit != posById.end())
+                    emitApsides(os->elements, os->primaryMu, pit->second);
+            }
+            break;
+        }
     }
     return verts;
 }

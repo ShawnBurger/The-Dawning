@@ -118,7 +118,8 @@ public:
     // then subtracted-in-double and scaled by the render scale K (RULE 1). Empty if
     // no star system is seeded. Used by the orrery/map view.
     std::vector<render::Renderer::LineVertex>
-    BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const;
+    BuildOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                            uint64_t focusBodyId = 0) const;
 
     // Build camera-relative billboard vertices (render::Renderer::BillboardVertex,
     // six per body) for every seeded celestial body, ready for
@@ -135,6 +136,13 @@ public:
     // Returns valid=false if the body/primary is missing or the fit is degenerate.
     OsculatingOrbit DeriveOsculatingOrbit(uint64_t bodyId) const;
 
+    // Predict the orbit that would result from an impulsive PROGRADE burn of deltaV
+    // (m/s; negative = retrograde) applied at the base orbit's current point. Goes
+    // base elements -> Cartesian (ElementsToState), adds deltaV along the velocity,
+    // -> osculating elements (StateToElements). This is the maneuver-node preview:
+    // it answers "if I burn here, where does my orbit go" without touching the ship.
+    OsculatingOrbit PreviewProgradeBurn(const OsculatingOrbit& base, double deltaV) const;
+
     // Build camera-relative line segments for a derived orbit (e.g. the ship's), the
     // same way BuildOrbitTraceVertices does for on-rails bodies: SampleOrbitPath about
     // the primary, offset to world, subtracted-in-double and scaled by K (RULE 1).
@@ -143,6 +151,15 @@ public:
     BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
                                    const OsculatingOrbit& orbit,
                                    float r, float g, float b, float a) const;
+
+    // Build billboard markers at the periapsis (cyan) and apoapsis (magenta) of the
+    // ship's orbit and the focused body's orbit — the KSP-style apsis map markers.
+    // Apoapsis is omitted for open (e >= 1) arcs. Camera-relative and K-scaled like
+    // the other overlays. Empty if no star system is seeded.
+    std::vector<render::Renderer::BillboardVertex>
+    BuildApsisMarkerVertices(const core::Vec3d& cameraPosition,
+                             const OsculatingOrbit& shipOrbit,
+                             uint64_t focusBodyId) const;
 
     // Phase 2a-pre: depth-only pass from the light's point of view. Same
     // traversal and the same visibility rules as RenderEntities - a caster the

@@ -198,6 +198,9 @@ private:
     // The ship's osculating orbit about its current SOI primary, recomputed once per
     // render frame (m_shipInSystem only) and consumed by the HUD and the orbit trace.
     scene::OsculatingOrbit m_shipOrbit;
+    // Toggled with M: overlay a maneuver-node preview of the orbit a prograde burn
+    // would produce (amber), so the player can plan a burn before committing.
+    bool m_showManeuverPreview = false;
 
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
