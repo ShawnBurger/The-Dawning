@@ -2419,9 +2419,11 @@ are now integrated as well. The current order is:
   configurations, Courier raster/stable/full plus Debug GPU-validation smoke,
   and reference raster/stable/full smoke all pass. GPU consumption remains
   deferred by the shared renderer lock.
-- Latest commit: implementation pending publication
-- Next action: publish the audited branch, sync against current `origin/main`,
-  and integrate only if the shared renderer lane has not introduced conflicts.
+- Latest commits: `74787eb` (implementation) and `1795dea` (clean merge of
+  Claude's published SSAO baseline `e4b9116`)
+- Next action: publish the audited branch and fast-forward `main` if the
+  integration checkout remains clean. The renderer-facing GPU phase stays
+  deferred while Claude owns the active atmosphere lane.
 
 ## 20. Helper Commands
 
