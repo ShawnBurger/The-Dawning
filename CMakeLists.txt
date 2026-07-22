@@ -617,7 +617,8 @@ add_executable(TheDawningTests
     src/core/sh_irradiance.cpp
     # CPU twin of shaders/planet_noise.hlsli — the terrain mesh's height field.
     # GPU-free (types.h + <cmath>); tests/test_planet_height.cpp drives the SHIPPED
-    # twin. Its match to the HLSL is a separate startup GPU value-agreement probe.
+    # twin. Its match to the HLSL is meant to be pinned by a startup GPU
+    # value-agreement probe — PLANNED as the next terrain increment, not yet built.
     src/core/planet_height.h
     src/core/planet_height.cpp
     # Chunked-LOD terrain geometry: cube-sphere mapping + chunk mesh generation.

@@ -1518,13 +1518,20 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_F4))
         {
             static const char* kCameraModeNames[] =
-                { "ShipChase", "Orrery", "NearBody", "Free" };
+                { "ShipChase", "Orrery", "NearBody", "Free", "Surface" };
+            // F4 cycles only the four free-look modes. Surface is excluded: it is a
+            // start-mode preview whose framing / lit-land search / terrain streaming
+            // is set up once at seed time, so cycling into it would show no terrain.
             m_cameraMode = static_cast<CameraMode>(
                 (static_cast<uint32_t>(m_cameraMode) + 1u) %
-                static_cast<uint32_t>(CameraMode::Count));
+                (static_cast<uint32_t>(CameraMode::Count) - 1u));
             m_chaseCameraInitialized = false;
+            // Restart the surface descent clock on any exit from Surface, so a later
+            // re-entry plays the altitude ramp from the top rather than snapping.
+            if (m_cameraMode != CameraMode::Surface) m_surfaceEntryTime = -1.0;
+            const uint32_t nameIdx = static_cast<uint32_t>(m_cameraMode);
             core::Log::Infof("Camera mode: %s",
-                             kCameraModeNames[static_cast<uint32_t>(m_cameraMode)]);
+                             nameIdx < std::size(kCameraModeNames) ? kCameraModeNames[nameIdx] : "?");
         }
 
         // Time warp (KSP-style): ',' slower, '.' faster, '/' reset. Deterministic:
@@ -2564,6 +2571,13 @@ void App::ApplyCameraModeRenderState()
     // Bodies render at true radius everywhere except the orrery, where they are
     // scaled up to visible markers (K set just above cancels in the scale math).
     m_scene.ApplyStarSystemRenderMode(m_cameraMode == CameraMode::Orrery);
+
+    // In Surface mode the focus body is drawn twice — its smooth sphere by
+    // Scene::RenderEntities and its displaced patches by RenderTerrainPreview.
+    // Tell the scene which body that is so its sphere is pulled a hair below the
+    // terrain (see Scene::SetTerrainSurfaceBody); clear it in every other mode.
+    m_scene.SetTerrainSurfaceBody(
+        (m_cameraMode == CameraMode::Surface && m_terrainBuilt) ? m_terrainBodyId : 0);
 }
 
 bool App::UpdateCamera(const core::TimeStep& timeStep)
@@ -2684,7 +2698,13 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
                 }
         if (found)
         {
-            m_surfaceElapsed = timeStep.totalTime;
+            // Seconds since Surface was entered, not total run time: latch the entry
+            // stamp on the first Surface frame (the F4 handler clears it to -1 on any
+            // exit, so a later re-entry restarts the descent from 0). This keeps the
+            // 3s altitude ramp playing on every entry, not only when Surface is the
+            // start mode at totalTime~0.
+            if (m_surfaceEntryTime < 0.0) m_surfaceEntryTime = timeStep.totalTime;
+            m_surfaceElapsed = timeStep.totalTime - m_surfaceEntryTime;
 
             // DESCEND: drive altitude down over the run so the streamer refines LOD
             // as we approach, and drift forward across the surface. m_terrainFocusBody
@@ -3067,10 +3087,10 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     {
         state.navActive = true;
 
-        static const char* kModeNames[] = { "SHIP", "ORRERY", "NEAR-BODY", "FREE" };
+        static const char* kModeNames[] = { "SHIP", "ORRERY", "NEAR-BODY", "FREE", "SURFACE" };
         const uint32_t modeIdx = static_cast<uint32_t>(m_cameraMode);
         state.cameraModeName =
-            modeIdx < static_cast<uint32_t>(CameraMode::Count) ? kModeNames[modeIdx] : "?";
+            modeIdx < std::size(kModeNames) ? kModeNames[modeIdx] : "?";
         state.timeWarp = m_timer.GetTimeScale();
 
         // The F5-selected focus body (near-body/orrery framing), defaulting to Earth.
@@ -3202,6 +3222,22 @@ void App::RenderTerrainPreview()
     terrain::QuadtreeConfig qc;
     qc.planetRadius = bodyR; qc.amplitude = amplitude;
     qc.pixelError = 9.0; qc.maxLevel = 7;
+    // pixelError is a REAL-pixel threshold only if the screen-error projection
+    // uses the live viewport and FOV: SelectQuadtreeLOD forms
+    // screenError = (worldError/dist) * viewportHeight/(2*tanHalfFovY), so leaving
+    // these at the struct defaults (1080p, 60deg) would under-tessellate on a
+    // taller/wider display and over-tessellate on a short window. Mirror the SSAO
+    // path's projection (m_device.Height(), the camera's 70deg FOV).
+    qc.viewportHeight = static_cast<double>(m_device.Height());
+    qc.tanHalfFovY = std::tan(
+        static_cast<double>(m_camera.GetFOV()) * 0.5 * core::DEG_TO_RAD);
+    // Cap the leaf set to the drawn-patch budget. Each visible patch consumes one
+    // aligned CB-ring slot in DrawTerrain (UploadCB of PlanetConstants) and one
+    // object+material record; the ring is 1024 slots shared with per-frame and
+    // per-pass uploads, and the Surface-mode structured-buffer reserve is +1024.
+    // 512 leaves both comfortable headroom so the LOD can never request more
+    // patches than either buffer can hold (the shipped surface view uses ~340).
+    qc.maxLeaves = 512;
     std::vector<terrain::QuadPatch> patches;
     terrain::SelectQuadtreeLOD(qc, camBody, patches);
 

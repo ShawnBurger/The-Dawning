@@ -236,6 +236,15 @@ public:
     void   SetRenderScale(double k) { m_renderScale = k; }
     double RenderScale() const      { return m_renderScale; }
 
+    // Surface-mode terrain compositing. When set to a seeded bodyId, RenderEntities
+    // draws that body's smooth planet sphere at a hair-under-true radius so the
+    // displaced terrain patches (drawn over it by App::RenderTerrainPreview) always
+    // win the reversed-Z depth test — the sphere still fills the far limb and any
+    // not-yet-streamed gaps, but no longer z-fights the terrain where both cover the
+    // near hemisphere (worst over zero-elevation ocean, where sphere==terrain==R).
+    // 0 = no terrain body (every body drawn at true radius).
+    void SetTerrainSurfaceBody(uint64_t bodyId) { m_terrainSurfaceBodyId = bodyId; }
+
     // --- RT Helpers (public for init) ---
     void EnsureBLAS(render::D3D12Device& device);
 
@@ -260,6 +269,7 @@ private:
     bool                 m_starSystemActive = false;
     double               m_soiHysteresis    = 0.01;
     double               m_renderScale      = 1.0; // K; per-mode, see SetRenderScale
+    uint64_t             m_terrainSurfaceBodyId = 0; // see SetTerrainSurfaceBody
     float                m_bodyMeshRadius   = 0.5f; // radius the body sphere mesh spans
     sim::FlightAssistParams m_flightAssist;
     sim::CloseEncounterConfig m_closeEncounters;

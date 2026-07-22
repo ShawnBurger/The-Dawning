@@ -2593,15 +2593,20 @@ D3D12_GPU_VIRTUAL_ADDRESS Renderer::UploadCB(const void* data, uint32_t dataSize
     // harness, which forces a nonzero exit when anything logs an error.
     if (m_cbOffset + alignedSize > kCBRingSize)
     {
-        // The ring now holds only per-FRAME and per-PASS constants: CBPerFrame,
-        // the camera CBPerPass, and one CBPerPass per shadow cascade. Per-object
-        // and per-material data moved to growable structured buffers
-        // (gpu_draw_records.h), so ring usage is FLAT in entity count. An overflow
-        // here means that fixed per-frame/per-pass set outgrew the ring, not that
-        // the scene has too many objects.
+        // The ring holds per-FRAME and per-PASS constants: CBPerFrame, the camera
+        // CBPerPass, and one CBPerPass per shadow cascade. Per-object and
+        // per-material entity data moved to growable structured buffers
+        // (gpu_draw_records.h), so the ordinary opaque pass is FLAT in entity
+        // count. The exceptions are the per-DRAW b5 constant uploads: DrawPlanet
+        // (one per celestial body) and DrawTerrain (one per visible Surface-mode
+        // patch) each take one aligned ring slot per draw. The Surface terrain LOD
+        // caps its leaf set (qc.maxLeaves, app.cpp) so those per-draw uploads stay
+        // well inside the 1024-slot ring. An overflow here means that combined set
+        // outgrew the ring, not that the ordinary scene has too many objects.
         core::Log::Errorf(
-            "CB upload ring overflow at %u/%u bytes. The ring holds only per-frame "
-            "and per-pass constants (flat in entity count); raise kCBRingSize.",
+            "CB upload ring overflow at %u/%u bytes. The ring holds per-frame, "
+            "per-pass, and per-draw planet/terrain constants; raise kCBRingSize "
+            "or lower the terrain leaf budget.",
             m_cbOffset, kCBRingSize);
         return 0;
     }

@@ -2,7 +2,9 @@
 // core/planet_height.cpp — CPU twin of shaders/planet_noise.hlsli
 // =============================================================================
 // Port discipline: every operation mirrors the HLSL in the SAME order, in
-// float32, so a GPU-vs-CPU value-agreement probe agrees to a small tolerance. The
+// float32, so that when the planned GPU-vs-CPU value-agreement probe lands (the
+// next terrain increment) the two will agree to a small tolerance. Today the port
+// is held by the CPU self-consistency tests and the visual crater alignment. The
 // HLSL intrinsics map as: frac(x)=x-floor(x); lerp(a,b,t)=a+(b-a)*t;
 // saturate=clamp[0,1]; step(e,x)=x>=e?1:0; smoothstep as below; mul(M,v) with the
 // HLSL float3x3(row0,row1,row2) constructor = (dot(row0,v),dot(row1,v),dot(row2,v)).

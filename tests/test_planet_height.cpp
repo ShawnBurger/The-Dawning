@@ -5,7 +5,8 @@
 // finiteness (no NaN/Inf from the pow/exp/division in CraterField), and that the
 // field actually varies with direction, type, and seed. The GPU-vs-CPU value
 // agreement (that this twin matches the shader bit-for-close) is a separate
-// startup probe — see the terrain plan.
+// startup probe that is PLANNED, not yet implemented — see the terrain plan. These
+// tests do NOT check the twin against the shader; they check it against itself.
 // =============================================================================
 
 #include "test_framework.h"

@@ -5,9 +5,11 @@
 // sphere (planet_ps.hlsl) and the near-field displaced terrain mesh (chunked-LOD,
 // via the C++ twin core::PlanetHeight) evaluate the EXACT same function. If these
 // diverged by a single hash constant the near terrain would visibly pop/shear as
-// it faded in over the smooth sphere, so a value-agreement probe (GPU vs the C++
-// twin) guards this at startup — NOT a hash tripwire (a re-pinned hash pins
-// agreement in TIME, not VALUE; see sky_radiance.h's own header for the trap).
+// it faded in over the smooth sphere. A value-agreement probe (GPU vs the C++
+// twin) — NOT a hash tripwire (a re-pinned hash pins agreement in TIME, not VALUE;
+// see sky_radiance.h's own header for the trap) — is PLANNED as the next terrain
+// increment to guard this numerically at startup; it does NOT exist yet. Until it
+// lands the match is held by the visual crater alignment and by hand.
 //
 // Keep this byte-for-byte in step with core/planet_height.{h,cpp}: same hash
 // constants, octave counts, kNoiseRot, lacunarity 2.02, gain 0.5, seed derivation.

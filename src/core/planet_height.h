@@ -8,9 +8,13 @@
 // (same hash constants, octave counts, kNoiseRot, lacunarity 2.02, gain 0.5, and
 // seed derivation), evaluated in float32 to match the shader's precision.
 //
-// A GPU-vs-CPU VALUE-agreement probe (not a hash tripwire) guards the match at
-// startup — see the terrain plan. Anything changed in planet_noise.hlsli MUST be
-// mirrored here (and vice versa) or that probe fails.
+// The match is currently verified two ways: the CPU self-consistency tests in
+// tests/test_planet_height.cpp, and VISUALLY — the near mesh's displaced craters
+// line up with the far sphere's shaded craters, which they only can if the twin
+// tracks the shader. A numeric GPU-vs-CPU VALUE-agreement probe (not a hash
+// tripwire — see the terrain plan and [[verification-discipline]]) is PLANNED as
+// the next terrain increment and does NOT yet guard this; until it lands, anything
+// changed in planet_noise.hlsli MUST be mirrored here (and vice versa) by hand.
 // =============================================================================
 
 #ifndef DAWNING_CORE_PLANET_HEIGHT_H

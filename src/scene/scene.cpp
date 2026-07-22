@@ -979,7 +979,28 @@ void Scene::RenderEntities(render::D3D12Device& device,
                 const PlanetSurfaceParams ps = PlanetParamsFor(g.bodyId - kStarSystemBodyIdBase);
                 const render::Renderer::PlanetConstants pc =
                     BuildPlanetConstants(ps, transform, m_renderScale, m_coordinateTime);
-                renderer.DrawPlanet(device, *gpuMesh, worldMatrix,
+                // If this is the Surface-mode terrain body, pull its smooth sphere
+                // radially inward by a hair (1e-4 of radius) so the displaced terrain
+                // patches drawn over it always win the reversed-Z test. The offset is
+                // far below the finest terrain grid-cell chord (~R/2048), so the far
+                // limb the sphere still supplies moves sub-pixel, and far above the
+                // reversed-Z depth quantisation at these ranges. s*r*t keeps the scale
+                // purely radial about the body centre. Note the z-fight this removes is
+                // TEMPORAL: because ConfigForTerrainBody mirrors PlanetParamsFor, sphere
+                // and terrain shade to the same colour, so a still frame is byte-
+                // identical with or without this — the artifact is depth-tie flicker
+                // under the descent camera's motion, which this makes deterministic.
+                core::Mat4x4 planetWorld = worldMatrix;
+                if (m_terrainSurfaceBodyId != 0 && g.bodyId == m_terrainSurfaceBodyId)
+                {
+                    ecs::Transform pulled = transform;
+                    constexpr float kTerrainSpherePullback = 1.0f - 1.0e-4f;
+                    pulled.scale.x *= kTerrainSpherePullback;
+                    pulled.scale.y *= kTerrainSpherePullback;
+                    pulled.scale.z *= kTerrainSpherePullback;
+                    planetWorld = pulled.ToCameraRelativeMatrix(cameraPosition, m_renderScale);
+                }
+                renderer.DrawPlanet(device, *gpuMesh, planetWorld,
                                     material.albedo, material.roughness,
                                     material.metallic, pc);
                 continue;
