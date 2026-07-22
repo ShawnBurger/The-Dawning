@@ -538,6 +538,27 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
             DrawTextLine(buf, 16, y, muted); y += 20;
         }
 
+        // Target sub-block: the HUD lock's range and signed closing speed, coloured
+        // by hostility. Matches the target bracket drawn in the world by RenderHud.
+        if (state.targetActive)
+        {
+            const Pixel tgtCol = (state.targetRelation == 2) ? Pixel{ 255,  90,  72, 255 }  // hostile
+                               : (state.targetRelation == 1) ? Pixel{ 102, 255, 140, 255 }  // friendly
+                                                             : Pixel{ 140, 216, 255, 255 }; // neutral
+            y += 6;
+            DrawRect(14, y - 4, kOverlayWidth - 28, 1, line);
+            char rng[32], cls[32];
+            fmtLength(rng, sizeof(rng), state.targetRange);
+            if (std::fabs(state.targetClosingSpeed) >= 1000.0)
+                std::snprintf(cls, sizeof(cls), "%+.3f km/s", state.targetClosingSpeed / 1000.0);
+            else
+                std::snprintf(cls, sizeof(cls), "%+.0f m/s", state.targetClosingSpeed);
+            std::snprintf(buf, sizeof(buf), "TGT  %-6s  RNG %s", state.targetName, rng);
+            DrawTextLine(buf, 16, y, tgtCol, true); y += 20;
+            std::snprintf(buf, sizeof(buf), "CLOSING %s", cls);
+            DrawTextLine(buf, 16, y, text); y += 20;
+        }
+
         footerY = usedHeight - 40;
     }
 

@@ -290,6 +290,12 @@ bool App::Initialize()
     if (!m_debugOverlayReady)
         core::Log::Warn("Debug overlay failed to initialize - continuing without it");
 
+    // Flight/targeting HUD (self-contained render module). Non-fatal: the flying
+    // views simply show no HUD if it fails to build.
+    m_hudReady = m_hud.Init(m_device.Device());
+    if (!m_hudReady)
+        core::Log::Warn("HUD renderer failed to initialize - continuing without it");
+
     m_camera.Init({ 0.0f, 2.0f, -5.0f }, 0.0f, -10.0f);
     m_camera.SetMoveSpeed(5.0f);
     m_camera.SetFOV(70.0f);
@@ -1566,6 +1572,25 @@ int App::RunMainLoop()
             m_showManeuverPreview = !m_showManeuverPreview;
             core::Log::Infof("Maneuver preview: %s",
                              m_showManeuverPreview ? "on" : "off");
+        }
+
+        // T cycles the HUD target through the seeded bodies (Shift+T steps back);
+        // when nothing is locked it acquires the nearest. G clears the lock.
+        if (input.KeyPressed('T'))
+        {
+            const std::vector<gameplay::TargetCandidate> cands = GatherTargetCandidates();
+            const bool back = input.KeyDown(VK_SHIFT);
+            if (m_targetBodyId == 0 && !back)
+                m_targetBodyId = gameplay::SelectNearest(cands, m_camera.Position());
+            else
+                m_targetBodyId = gameplay::CycleTarget(cands, m_targetBodyId, back ? -1 : 1);
+            core::Log::Infof("Target: bodyId %llu",
+                             static_cast<unsigned long long>(m_targetBodyId));
+        }
+        if (input.KeyPressed('G'))
+        {
+            m_targetBodyId = 0;
+            core::Log::Info("Target cleared");
         }
 
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
@@ -3146,6 +3171,16 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
             state.shipApoapsis      = m_shipOrbit.apoapsis;
             state.shipPeriodSeconds = m_shipOrbit.period;
         }
+
+        // Target readout: the HUD's locked target (info cached by RenderHud).
+        if (m_hudTargetInfo.valid)
+        {
+            state.targetActive       = true;
+            state.targetName         = SeededBodyName(m_targetBodyId - scene::kStarSystemBodyIdBase);
+            state.targetRange        = m_hudTargetInfo.rangeMeters;
+            state.targetClosingSpeed = m_hudTargetInfo.closingSpeed;
+            state.targetRelation     = static_cast<int>(m_hudTargetInfo.relation);
+        }
     }
 
     return state;
@@ -3361,6 +3396,205 @@ void App::RenderTerrainPreview()
         else
             ++it;
     }
+}
+
+std::vector<gameplay::TargetCandidate> App::GatherTargetCandidates()
+{
+    std::vector<gameplay::TargetCandidate> out;
+    if (!m_options.starSystem) return out;
+
+    ecs::Registry& reg = m_scene.GetRegistry();
+    auto* pool = reg.GetPool<ecs::GravitationalBody>();
+    if (!pool) return out;
+    out.reserve(pool->Count());
+    for (uint32_t i = 0; i < pool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = pool->DataAt(i);
+        if (g.bodyId == kPlayerShipBodyId) continue; // never target the player ship
+        const ecs::Entity e = reg.EntityAtIndex(pool->EntityAt(i));
+        const ecs::Transform* t = reg.TryGet<ecs::Transform>(e);
+        if (!t) continue;
+
+        gameplay::TargetCandidate c;
+        c.id       = g.bodyId;
+        c.name     = SeededBodyName(g.bodyId - scene::kStarSystemBodyIdBase);
+        c.worldPos = t->position;
+        if (const ecs::RigidBody* rb = reg.TryGet<ecs::RigidBody>(e))
+            c.worldVel = rb->linearVelocity;
+        c.radius   = g.radius;
+        c.relation = gameplay::TargetRelation::Neutral; // bodies are neutral; ships later
+        out.push_back(c);
+    }
+    return out;
+}
+
+void App::RenderHud()
+{
+    if (!m_hudReady || !m_options.starSystem) return;
+    if (m_cameraMode == CameraMode::Orrery) return; // the map view has its own overlays
+
+    const float w = static_cast<float>(m_device.Width());
+    const float h = static_cast<float>(m_device.Height());
+    const float cx = w * 0.5f, cy = h * 0.5f;
+    const core::Mat4x4 vp = m_camera.ViewProjectionMatrix(w / h);
+    const core::Vec3d camPos = m_camera.Position();
+    const double K = m_scene.RenderScale(); // 1 in the true-scale flying views
+    m_hudTargetInfo = {}; // recomputed below if a target is locked and the ship exists
+
+    // Project an absolute world point to screen pixels (camera-relative, RULE 1).
+    auto toScreen = [&](const core::Vec3d& world) -> render::ScreenPoint {
+        const core::Vec3f rel{
+            static_cast<float>((world.x - camPos.x) * K),
+            static_cast<float>((world.y - camPos.y) * K),
+            static_cast<float>((world.z - camPos.z) * K) };
+        return render::WorldToScreen(vp, rel, w, h);
+    };
+    // Clamp an off-screen (but in-front) point to an inset screen border, returning
+    // the edge pixel and the outward angle for a chevron.
+    auto clampToBorder = [&](float sx, float sy, float& outX, float& outY, float& outAng) {
+        const float margin = 48.0f;
+        float dx = sx - cx, dy = sy - cy;
+        if (std::fabs(dx) < 1e-3f && std::fabs(dy) < 1e-3f) { dx = 0.0f; dy = -1.0f; }
+        const float hx = cx - margin, hy = cy - margin;
+        const float s = (std::min)(hx / (std::fabs(dx) + 1e-4f), hy / (std::fabs(dy) + 1e-4f));
+        outX = cx + dx * s; outY = cy + dy * s;
+        outAng = std::atan2(dy, dx);
+    };
+
+    // --- ship state ---------------------------------------------------------
+    ecs::Registry& reg = m_scene.GetRegistry();
+    core::Vec3d shipPos{ 0, 0, 0 }, shipVel{ 0, 0, 0 };
+    core::Vec3f shipFwd{ 0.0f, 0.0f, 1.0f };
+    bool haveShip = false;
+    if (m_shipInSystem && reg.IsAlive(m_playerShip))
+    {
+        if (const ecs::Transform* t = reg.TryGet<ecs::Transform>(m_playerShip))
+        {
+            shipPos = t->position;
+            shipFwd = core::Mat4x4::FromQuaternion(t->rotation.Normalized())
+                          .TransformDirection({ 0.0f, 0.0f, 1.0f });
+            haveShip = true;
+        }
+        if (const ecs::RigidBody* rb = reg.TryGet<ecs::RigidBody>(m_playerShip))
+            shipVel = rb->linearVelocity;
+    }
+
+    const core::Color kReticleCol { 0.80f, 0.90f, 1.00f, 0.75f };
+    const core::Color kProCol     { 0.45f, 1.00f, 0.65f, 0.90f };
+    const core::Color kRetCol     { 0.95f, 0.55f, 0.40f, 0.75f };
+    const core::Color kNeutral    { 0.55f, 0.85f, 1.00f, 0.95f };
+    const core::Color kHostile    { 1.00f, 0.35f, 0.28f, 0.95f };
+    const core::Color kFriendly   { 0.40f, 1.00f, 0.55f, 0.95f };
+    const core::Color kLeadCol    { 0.40f, 0.80f, 1.00f, 1.00f };
+
+    m_hud.Begin();
+
+    // --- boresight reticle: where the ship's nose points -------------------
+    {
+        render::ScreenPoint sp{ cx, cy, true, true };
+        if (haveShip)
+        {
+            const core::Vec3d nose{ shipPos.x + static_cast<double>(shipFwd.x) * 1.0e6,
+                                    shipPos.y + static_cast<double>(shipFwd.y) * 1.0e6,
+                                    shipPos.z + static_cast<double>(shipFwd.z) * 1.0e6 };
+            const render::ScreenPoint proj = toScreen(nose);
+            if (proj.visible) sp = proj;
+        }
+        m_hud.AddReticle(sp.x, sp.y, 20.0f, 7.0f, kReticleCol, 2.0f);
+        m_hud.AddRect(sp.x - 1.0f, sp.y - 1.0f, 2.0f, 2.0f, kReticleCol); // centre dot
+    }
+
+    // --- prograde / retrograde velocity vectors ----------------------------
+    const double speed = std::sqrt(shipVel.x * shipVel.x + shipVel.y * shipVel.y + shipVel.z * shipVel.z);
+    if (haveShip && speed > 0.5)
+    {
+        const double inv = 1.0 / speed;
+        const core::Vec3d vhat{ shipVel.x * inv, shipVel.y * inv, shipVel.z * inv };
+        const double R = 1.0e6;
+        const render::ScreenPoint pro = toScreen({ shipPos.x + vhat.x * R, shipPos.y + vhat.y * R, shipPos.z + vhat.z * R });
+        const render::ScreenPoint ret = toScreen({ shipPos.x - vhat.x * R, shipPos.y - vhat.y * R, shipPos.z - vhat.z * R });
+        if (pro.visible && pro.onScreen)
+        {
+            m_hud.AddCircle(pro.x, pro.y, 11.0f, kProCol, 2.0f, 24);
+            m_hud.AddReticle(pro.x, pro.y, 17.0f, 11.0f, kProCol, 2.0f); // ticks outside the ring
+            m_hud.AddRect(pro.x - 1.5f, pro.y - 1.5f, 3.0f, 3.0f, kProCol);
+        }
+        else if (pro.visible)
+        {
+            float ex, ey, ang; clampToBorder(pro.x, pro.y, ex, ey, ang);
+            m_hud.AddChevron(ex, ey, 12.0f, ang, kProCol, 3.0f);
+        }
+        if (ret.visible && ret.onScreen)
+        {
+            m_hud.AddCircle(ret.x, ret.y, 9.0f, kRetCol, 2.0f, 20);
+            m_hud.AddLine(ret.x - 9.0f, ret.y, ret.x + 9.0f, ret.y, kRetCol, 2.0f);
+            m_hud.AddLine(ret.x, ret.y - 9.0f, ret.x, ret.y + 9.0f, kRetCol, 2.0f);
+        }
+    }
+
+    // --- target bracket + lead pip -----------------------------------------
+    if (m_targetBodyId != 0)
+    {
+        const std::vector<gameplay::TargetCandidate> cands = GatherTargetCandidates();
+        const int idx = gameplay::FindCandidate(cands, m_targetBodyId);
+        if (idx >= 0)
+        {
+            const gameplay::TargetCandidate& tc = cands[static_cast<size_t>(idx)];
+            if (haveShip) m_hudTargetInfo = gameplay::ComputeTargetInfo(shipPos, shipVel, tc);
+            const core::Color col = (tc.relation == gameplay::TargetRelation::Hostile)  ? kHostile
+                                  : (tc.relation == gameplay::TargetRelation::Friendly) ? kFriendly
+                                                                                        : kNeutral;
+            const render::ScreenPoint sp = toScreen(tc.worldPos);
+            if (sp.visible && sp.onScreen)
+            {
+                // Bracket sized by the target's on-screen angular radius (project a
+                // point one body-radius to the side), clamped to a legible range.
+                float half = 24.0f;
+                if (tc.radius > 0.0)
+                {
+                    // camera "right" from the view matrix rows is complex; approximate
+                    // angular size from range and radius via the vertical FOV.
+                    const double range = std::sqrt(
+                        (tc.worldPos.x - camPos.x) * (tc.worldPos.x - camPos.x) +
+                        (tc.worldPos.y - camPos.y) * (tc.worldPos.y - camPos.y) +
+                        (tc.worldPos.z - camPos.z) * (tc.worldPos.z - camPos.z));
+                    if (range > 1.0)
+                    {
+                        const double tanHalfFov = std::tan(m_camera.GetFOV() * 0.5 * core::DEG_TO_RAD);
+                        const double px = (tc.radius / range) / tanHalfFov * (h * 0.5);
+                        half = static_cast<float>((std::min)((std::max)(px * 1.35, 16.0), 240.0));
+                    }
+                }
+                m_hud.AddBracket(sp.x, sp.y, half, half * 0.4f, col, 2.0f);
+            }
+            else if (sp.visible)
+            {
+                float ex, ey, ang; clampToBorder(sp.x, sp.y, ex, ey, ang);
+                m_hud.AddChevron(ex, ey, 14.0f, ang, col, 3.0f);
+            }
+
+            // Lead pip: where to aim to hit the target with the reference round.
+            if (haveShip)
+            {
+                const gameplay::FiringSolution fs = gameplay::ComputeFiringSolution(
+                    shipPos, shipVel, tc.worldPos, tc.worldVel, kHudMuzzleSpeed);
+                if (fs.valid)
+                {
+                    const render::ScreenPoint lp = toScreen(fs.worldPos);
+                    if (lp.visible && lp.onScreen)
+                        m_hud.AddDiamondOutline(lp.x, lp.y, 7.0f, kLeadCol, 2.0f);
+                }
+                else if (sp.visible && sp.onScreen)
+                {
+                    // No firing solution (target outruns the round): a red no-solution
+                    // ring on the bracket, matching the genre convention.
+                    m_hud.AddCircle(sp.x, sp.y, 6.0f, core::Color{ 1.0f, 0.35f, 0.28f, 0.95f }, 2.0f, 16);
+                }
+            }
+        }
+    }
+
+    m_hud.Draw(m_device, w, h, m_frameCount);
 }
 
 bool App::RenderFrame(const core::TimeStep& timeStep)
@@ -3761,6 +3995,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                                      m_camera.ViewProjectionMatrix(aspect));
             }
         }
+
+        // Flight/targeting HUD: reticle, velocity vectors, target bracket + lead
+        // pip, drawn over the scene in the HDR target (on top of the orbit/marker
+        // overlays), raster-only. Screen-space, so it sits above everything.
+        if (!m_usePathTracing) RenderHud();
 
         // Tone-map the linear scene into the back buffer. Post-process passes
         // (bloom, exposure, TAA) belong between the line above and this one,

@@ -53,6 +53,15 @@ struct DebugOverlayState
     double       shipPeriapsis = 0.0;     // r_min (m from primary centre)
     double       shipApoapsis = 0.0;      // r_max (m); 0 if not elliptic
     double       shipPeriodSeconds = 0.0; // 0 if not a closed ellipse
+
+    // Target sub-block — the HUD's locked target (T cycles, G clears). The range and
+    // signed closing speed the targeting reticle/bracket is drawn around. relation:
+    // 0 neutral, 1 friendly, 2 hostile (drives the label colour).
+    bool         targetActive = false;
+    const char*  targetName = "";
+    double       targetRange = 0.0;         // m, ship -> target centre
+    double       targetClosingSpeed = 0.0;  // m/s, positive = closing
+    int          targetRelation = 0;
 };
 
 class DebugOverlay

@@ -92,6 +92,7 @@ set(RENDER_SOURCES
     src/render/gpu_draw_records.cpp
     src/render/ibl_consume_probe.cpp
     src/render/debug_overlay.cpp
+    src/render/hud.cpp
     src/render/rt_acceleration.cpp
     src/render/rt_pipeline.cpp
     src/render/rt_texture_lod.cpp
@@ -110,6 +111,7 @@ set(RENDER_HEADERS
     src/render/gpu_draw_records.h
     src/render/ibl_consume_probe.h
     src/render/debug_overlay.h
+    src/render/hud.h
     src/render/rt_acceleration.h
     src/render/rt_pipeline.h
     src/render/rt_texture_lod.h
@@ -131,6 +133,8 @@ set(SHADER_FILES
     shaders/terrain_vs.hlsl
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
+    shaders/hud_vs.hlsl
+    shaders/hud_ps.hlsl
     shaders/bloom_vs.hlsl
     shaders/bloom_prefilter_ps.hlsl
     shaders/bloom_blur_ps.hlsl
@@ -171,12 +175,14 @@ set(ECS_HEADERS
 set(GAMEPLAY_SOURCES
     src/gameplay/on_foot_controller.cpp
     src/gameplay/pilot_possession.cpp
+    src/gameplay/targeting.cpp
 )
 
 set(GAMEPLAY_HEADERS
     src/gameplay/on_foot_controller.h
     src/gameplay/pilot_possession.h
     src/gameplay/playable_ship.h
+    src/gameplay/targeting.h
 )
 
 # Ship-owned interior systems. These are renderer- and simulation-free: they
@@ -319,6 +325,7 @@ set(TEST_SOURCES
     tests/test_ibl_consume_probe.cpp
     tests/test_rigid_body.cpp
     tests/test_flight_control.cpp
+    tests/test_targeting.cpp
     tests/test_on_foot_controller.cpp
     tests/test_pilot_possession.cpp
     tests/test_interior_state.cpp
@@ -663,6 +670,10 @@ add_executable(TheDawningTests
     # assembly-local/world transform boundary. GPU- and platform-free.
     src/gameplay/pilot_possession.cpp
     src/gameplay/pilot_possession.h
+    # Target selection, target info (range/closing speed) and the firing-solution
+    # (lead-pip) math. GPU- and platform-free; drives the shipped HUD targeting.
+    src/gameplay/targeting.cpp
+    src/gameplay/targeting.h
     # Camera basis only: no D3D dependency. Tests pin local-up propagation for
     # rolled ship interiors through the same implementation the App calls.
     src/render/camera.cpp

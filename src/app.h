@@ -4,9 +4,11 @@
 #include "core/timer.h"
 #include "core/window.h"
 #include "gameplay/pilot_possession.h"
+#include "gameplay/targeting.h"
 #include "render/camera.h"
 #include "render/d3d12_device.h"
 #include "render/debug_overlay.h"
+#include "render/hud.h"
 #include "render/path_tracer.h"
 #include "render/renderer.h"
 #include "scene/scene.h"
@@ -103,12 +105,24 @@ private:
     bool RenderFrame(const core::TimeStep& timeStep);
     render::DebugOverlayState BuildOverlayState(const core::TimeStep& timeStep) const;
 
+    // Build and draw the flight/targeting HUD (reticle, velocity vectors, target
+    // bracket + lead pip) into the HDR target, over the scene, in the true-scale
+    // flying views. Screen-space via render::HudRenderer; consumes gameplay::
+    // targeting for the selected target's info + firing solution.
+    void RenderHud();
+
+    // The current set of targetable things (seeded celestial bodies for now; the
+    // player ship excluded). Shared by the T/G target keybinds and RenderHud.
+    std::vector<gameplay::TargetCandidate> GatherTargetCandidates();
+
     AppOptions m_options;
 
     core::Window m_window;
     render::D3D12Device m_device;
     render::Renderer m_renderer;
     render::DebugOverlay m_debugOverlay;
+    render::HudRenderer m_hud;
+    bool m_hudReady = false;
     render::Camera m_camera;
     scene::Scene m_scene;
     scene::AssemblyRuntimeHost m_runtimeAssembly;
@@ -199,6 +213,18 @@ private:
     };
     CameraMode m_cameraMode = CameraMode::ShipChase;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
+
+    // Targeting (HUD): the seeded bodyId the player has locked as a target (0 = no
+    // target). Cycled with T, cleared with G. Drives the target bracket, the target
+    // info block, and the lead pip. Distinct from m_focusBodyId, which frames the
+    // camera; a target is a combat/nav lock with range + closing-speed + firing
+    // solution. kHudMuzzleSpeed is the reference projectile speed the lead pip uses.
+    uint64_t m_targetBodyId = 0;
+    static constexpr double kHudMuzzleSpeed = 1500.0; // m/s, reference cannon round
+    // The selected target's derived info, recomputed each HUD frame by RenderHud and
+    // read by the (const) BuildOverlayState to draw the target readout. valid=false
+    // when nothing is locked.
+    gameplay::TargetInfo m_hudTargetInfo;
 
     // Chunked-LOD terrain preview (Surface camera mode): the quadtree-selected leaf
     // set on the focus body (the Moon), each a displaced cube-sphere patch built
