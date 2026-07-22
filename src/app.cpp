@@ -70,6 +70,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     if (HasOption(args, "--camera-mode=orrery"))        options.startCameraMode = 1;
     else if (HasOption(args, "--camera-mode=nearbody")) options.startCameraMode = 2;
     else if (HasOption(args, "--camera-mode=free"))     options.startCameraMode = 3;
+    else if (HasOption(args, "--camera-mode=ship"))     options.startCameraMode = 4; // ship-in-system
     else                                                options.startCameraMode = 0;
 
     if (options.smoke && !HasOption(args, "--show-overlay"))
@@ -846,9 +847,48 @@ bool App::InitializeScene()
     {
         const uint32_t bodies = m_scene.SeedStarSystem(sphere, 0.5f);
         core::Log::Infof("Solar system seeded: %u bodies", bodies);
-        m_cameraMode = static_cast<CameraMode>(m_options.startCameraMode);
+        m_cameraMode = (m_options.startCameraMode == 4)
+            ? CameraMode::ShipChase // ship-in-system uses the chase camera
+            : static_cast<CameraMode>(m_options.startCameraMode);
         if (m_options.startCameraMode == 2) // near-body defaults to Earth
             m_focusBodyId = scene::kStarSystemBodyIdBase + 10;
+
+        // Mode 3 (fly the ship in the real system): teleport the playable ship to
+        // just above Earth with Earth's orbital velocity, so it shares the star
+        // system's frame and feels multi-body gravity (SOI live). The existing
+        // chase camera then frames the ship against a true-scale planet.
+        if (m_options.startCameraMode == 4)
+        {
+            auto& reg = m_scene.GetRegistry();
+            core::Vec3d earthPos, earthVel; double earthRadius = 0.0; bool found = false;
+            if (auto* pool = reg.GetPool<ecs::GravitationalBody>())
+                for (uint32_t i = 0; i < pool->Count(); ++i)
+                    if (pool->DataAt(i).bodyId == scene::kStarSystemBodyIdBase + 10)
+                    {
+                        const ecs::Entity e = reg.EntityAtIndex(pool->EntityAt(i));
+                        earthPos = reg.Get<ecs::Transform>(e).position;
+                        earthVel = reg.Get<ecs::RigidBody>(e).linearVelocity;
+                        earthRadius = pool->DataAt(i).radius;
+                        found = true;
+                        break;
+                    }
+            if (found && reg.IsAlive(m_playerShip))
+            {
+                ecs::Transform& t = reg.Get<ecs::Transform>(m_playerShip);
+                // In front of Earth (−Z) and slightly up, so the ship's default
+                // +Z forward — and the chase camera behind it — look toward Earth,
+                // which then fills the background beyond the ship.
+                t.position = earthPos +
+                    core::Vec3d{ 0.0, earthRadius * 0.35, -earthRadius * 4.0 };
+                if (auto* rb = reg.TryGet<ecs::RigidBody>(m_playerShip))
+                {
+                    rb->linearVelocity = earthVel; // co-orbital with Earth
+                    rb->prevPosition = t.position;
+                }
+                core::Log::Infof("Ship spawned above Earth for solar flight (alt %.0f km)",
+                                 earthRadius / 1000.0);
+            }
+        }
     }
 
     core::Log::Infof("Scene populated: %u entities", m_scene.EntityCount());
@@ -2270,8 +2310,8 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
     }
 
     const ecs::Entity chaseTarget =
-        m_options.smoke && !m_smokeCameraTarget.IsNull()
-            ? m_smokeCameraTarget
+        m_options.smoke && !m_options.starSystem && !m_smokeCameraTarget.IsNull()
+            ? m_smokeCameraTarget   // default smoke probe; NOT when flying the star system
             : m_playerShip;
     if (m_cameraMode == CameraMode::ShipChase &&
         registry.TryGet<ecs::Transform>(chaseTarget))
