@@ -33,6 +33,11 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
             ROOT / "assets" / "manifests" / "reference_ship.tdasset.json"
         )
         cls.reference = json.loads(cls.reference_path.read_text(encoding="utf-8"))
+        cls.frontier_path = (
+            ROOT / "assets" / "manifests" /
+            "frontier_courier_mk1.design.tdasset.json"
+        )
+        cls.frontier = json.loads(cls.frontier_path.read_text(encoding="utf-8"))
 
     def test_compilation_is_canonical_and_byte_deterministic(self) -> None:
         first = COMPILER.compile_document(copy.deepcopy(self.reference))
@@ -48,6 +53,21 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
             reordered[key].reverse()
         reordered["provenance"]["sources"].reverse()
         reordered["navigation"]["required_reachable_zones"].reverse()
+        second = COMPILER.compile_document(reordered)
+        self.assertEqual(first, second)
+
+    def test_schema_v1_compilation_remains_byte_compatible(self) -> None:
+        expected = (ROOT / "assets" / "runtime" /
+                    "reference_ship.tdassembly").read_bytes()
+        self.assertEqual(
+            COMPILER.compile_document(copy.deepcopy(self.reference)),
+            expected,
+        )
+
+    def test_schema_v2_fixture_order_is_canonical_and_deterministic(self) -> None:
+        first = COMPILER.compile_document(copy.deepcopy(self.frontier))
+        reordered = copy.deepcopy(self.frontier)
+        reordered["light_fixtures"].reverse()
         second = COMPILER.compile_document(reordered)
         self.assertEqual(first, second)
 
@@ -147,6 +167,7 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
             self.assertIn("zones=2", inspected.stdout)
             self.assertIn("interactions=3", inspected.stdout)
             self.assertIn("entry_zone=airlock", inspected.stdout)
+            self.assertIn("light_fixtures=0", inspected.stdout)
 
             corrupted = bytearray(output.read_bytes())
             corrupted[-1] ^= 1
@@ -160,6 +181,25 @@ class CookedAssemblyCompilerTests(unittest.TestCase):
             )
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("integrity_mismatch", rejected.stderr)
+
+    def test_cpp_loader_consumes_schema_v2_light_fixtures(self) -> None:
+        if INSPECTOR is None:
+            self.skipTest("cross-language inspector is supplied by CTest")
+        assert INSPECTOR is not None
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "frontier_courier_mk1.tdassembly"
+            COMPILER.compile_file(self.frontier_path, output)
+            inspected = subprocess.run(
+                [str(INSPECTOR), str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(inspected.returncode, 0, inspected.stderr)
+            self.assertIn("schema_version=2", inspected.stdout)
+            self.assertIn("light_fixtures=12", inspected.stdout)
+            self.assertIn("asset_id=ship.frontier.courier_mk1", inspected.stdout)
 
 
 def main(argv: list[str]) -> int:

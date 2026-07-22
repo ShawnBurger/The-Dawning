@@ -619,6 +619,12 @@ Implement in this order:
 7. Drive intensity and color transitions from light-group state, never by
    editing fixtures individually from gameplay code.
 
+WS-033 completes item 1 and the CPU/camera-relative portion of item 2 through
+`INTERIOR_STATE_AND_LOCAL_LIGHTING_CONTRACT_2026-07-22.md`. GPU resource upload,
+cluster construction, raster/DXR evaluation, and local-light shadows remain the
+next renderer-owned phase; authored fixtures are not considered visibly live
+until those paths consume the same immutable frame.
+
 Rectangular luminaires may begin as emissive geometry plus one or more analytic
 area approximations. A later path-tracing milestone can importance-sample
 emissive triangles, but that is not required to make the first cockpit readable.

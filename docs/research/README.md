@@ -45,6 +45,9 @@ design work. For the user-facing baseline, also read the root `README.md` and
 - **`HIGH_FIDELITY_SHIP_INTERIORS_AND_COCKPITS_2026-07-22.md`** - binding visual,
   human-factors, asset, state, lighting, UI, atmosphere, resource-network,
   audio, damage, and production acceptance direction for future ship interiors.
+- **`INTERIOR_STATE_AND_LOCAL_LIGHTING_CONTRACT_2026-07-22.md`** - implemented
+  schema-v2 fixture, ship-owned state, immutable snapshot, camera-relative CPU
+  presentation, validation, and deferred GPU-consumption boundary.
 - **`MESHY_PRODUCTION_INTERIORS_2026-07-21.md`** - generated-source boundaries,
   modular asset method, provenance requirements, and content acceptance policy.
 - **`CODEX_CLAUDE_INTEGRATION_REVIEW_2026-07-20.md`** and

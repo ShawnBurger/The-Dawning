@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "asset_id": "ship.frontier.courier_mk1",
   "asset_kind": "ship",
   "units": "meters",
@@ -16,7 +16,7 @@
     "minimum_door_width_m": 0.95
   },
   "provenance": {
-    "assembly_revision": "frontier-courier-design-2",
+    "assembly_revision": "frontier-courier-design-3",
     "sources": [
       {
         "id": "design_authority",
@@ -239,6 +239,20 @@
     {"id": "engineering_door_panel", "module": "engineering_module", "interaction": "engineering_door", "visual_source": "visual://frontier_courier/engineering_door_panel", "pivot_m": [-1.8, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}},
     {"id": "cargo_door_panel", "module": "cargo_module", "interaction": "cargo_door", "visual_source": "visual://frontier_courier/cargo_door_panel", "pivot_m": [2.75, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}},
     {"id": "crew_door_panel", "module": "crew_module", "interaction": "crew_door", "visual_source": "visual://frontier_courier/crew_door_panel", "pivot_m": [-1.9, 0.0, 0.0], "motion": {"type": "linear", "axis": [0.0, 0.0, 1.0], "travel": 1.15}}
+  ],
+  "light_fixtures": [
+    {"id": "airlock_ceiling", "module": "airlock_module", "type": "spot", "position_m": [0.0, 0.95, 0.0], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4300.0, "intensity_lm_or_cd": 650.0, "range_m": 5.0, "inner_cone_degrees": 45.0, "outer_cone_degrees": 70.0, "group": "airlock", "circuit": "main_bus_b", "importance": 0.65, "shadow_policy": "static", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "airlock_emergency", "module": "airlock_module", "type": "point", "position_m": [0.0, 0.75, -0.9], "direction": [0.0, 0.0, 1.0], "color_temperature_k": 1800.0, "intensity_lm_or_cd": 180.0, "range_m": 3.5, "inner_cone_degrees": 180.0, "outer_cone_degrees": 180.0, "group": "emergency", "circuit": "battery_bus", "importance": 0.9, "shadow_policy": "none", "emergency_behavior": "emergency_only", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.25},
+    {"id": "cargo_overhead", "module": "cargo_module", "type": "spot", "position_m": [0.0, 1.15, 0.0], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4700.0, "intensity_lm_or_cd": 1100.0, "range_m": 8.0, "inner_cone_degrees": 50.0, "outer_cone_degrees": 75.0, "group": "cargo", "circuit": "main_bus_b", "importance": 0.55, "shadow_policy": "static", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "cockpit_console_left", "module": "cockpit_module", "type": "spot", "position_m": [-1.05, -0.15, 2.55], "direction": [0.0, -0.5, 0.8660254038], "color_temperature_k": 6500.0, "intensity_lm_or_cd": 260.0, "range_m": 3.5, "inner_cone_degrees": 22.0, "outer_cone_degrees": 38.0, "group": "cockpit_console", "circuit": "main_bus_a", "importance": 0.75, "shadow_policy": "none", "emergency_behavior": "override", "emergency_color_temperature_k": 4200.0, "emergency_intensity_scale": 0.7},
+    {"id": "cockpit_console_right", "module": "cockpit_module", "type": "spot", "position_m": [1.05, -0.15, 2.55], "direction": [0.0, -0.5, 0.8660254038], "color_temperature_k": 6500.0, "intensity_lm_or_cd": 260.0, "range_m": 3.5, "inner_cone_degrees": 22.0, "outer_cone_degrees": 38.0, "group": "cockpit_console", "circuit": "main_bus_a", "importance": 0.75, "shadow_policy": "none", "emergency_behavior": "override", "emergency_color_temperature_k": 4200.0, "emergency_intensity_scale": 0.7},
+    {"id": "cockpit_emergency", "module": "cockpit_module", "type": "point", "position_m": [0.0, 0.95, -2.5], "direction": [0.0, 0.0, 1.0], "color_temperature_k": 1800.0, "intensity_lm_or_cd": 240.0, "range_m": 5.0, "inner_cone_degrees": 180.0, "outer_cone_degrees": 180.0, "group": "emergency", "circuit": "battery_bus", "importance": 1.0, "shadow_policy": "none", "emergency_behavior": "emergency_only", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.5},
+    {"id": "cockpit_key_left", "module": "cockpit_module", "type": "spot", "position_m": [-1.4, 0.9, 0.8], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4000.0, "intensity_lm_or_cd": 950.0, "range_m": 7.0, "inner_cone_degrees": 38.0, "outer_cone_degrees": 62.0, "group": "cockpit_primary", "circuit": "main_bus_a", "importance": 1.0, "shadow_policy": "dynamic", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "cockpit_key_right", "module": "cockpit_module", "type": "spot", "position_m": [1.4, 0.9, 0.8], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4000.0, "intensity_lm_or_cd": 950.0, "range_m": 7.0, "inner_cone_degrees": 38.0, "outer_cone_degrees": 62.0, "group": "cockpit_primary", "circuit": "main_bus_a", "importance": 1.0, "shadow_policy": "dynamic", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "corridor_strip_a", "module": "main_corridor", "type": "spot", "position_m": [0.0, 1.05, -2.5], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4500.0, "intensity_lm_or_cd": 700.0, "range_m": 6.0, "inner_cone_degrees": 48.0, "outer_cone_degrees": 72.0, "group": "corridor", "circuit": "main_bus_a", "importance": 0.6, "shadow_policy": "static", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "corridor_strip_b", "module": "main_corridor", "type": "spot", "position_m": [0.0, 1.05, 2.5], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 4500.0, "intensity_lm_or_cd": 700.0, "range_m": 6.0, "inner_cone_degrees": 48.0, "outer_cone_degrees": 72.0, "group": "corridor", "circuit": "main_bus_a", "importance": 0.6, "shadow_policy": "static", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "crew_bunk", "module": "crew_module", "type": "point", "position_m": [0.65, 0.55, 0.0], "direction": [0.0, 0.0, 1.0], "color_temperature_k": 3200.0, "intensity_lm_or_cd": 420.0, "range_m": 4.5, "inner_cone_degrees": 180.0, "outer_cone_degrees": 180.0, "group": "crew", "circuit": "main_bus_b", "importance": 0.35, "shadow_policy": "none", "emergency_behavior": "off", "emergency_color_temperature_k": 1800.0, "emergency_intensity_scale": 1.0},
+    {"id": "engineering_task", "module": "engineering_module", "type": "spot", "position_m": [0.6, 0.9, 0.0], "direction": [0.0, -1.0, 0.0], "color_temperature_k": 5000.0, "intensity_lm_or_cd": 1200.0, "range_m": 6.5, "inner_cone_degrees": 35.0, "outer_cone_degrees": 58.0, "group": "engineering", "circuit": "main_bus_b", "importance": 0.85, "shadow_policy": "dynamic", "emergency_behavior": "override", "emergency_color_temperature_k": 3600.0, "emergency_intensity_scale": 0.65}
   ],
   "navigation": {
     "entry_zone": "boarding_vestibule",

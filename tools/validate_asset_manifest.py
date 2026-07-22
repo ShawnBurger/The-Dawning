@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSIONS = {1, 2}
 ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 ASSET_KINDS = {"ship", "structure"}
@@ -33,6 +33,20 @@ INTERACTION_TYPES = {
 MOVING_INTERACTIONS = {"airlock", "door", "elevator", "hatch"}
 COLLISION_TYPES = {"convex", "compound", "mesh"}
 MOTION_TYPES = {"linear", "rotational"}
+LIGHT_TYPES = {"point", "spot"}
+LIGHT_SHADOW_POLICIES = {"none", "static", "dynamic"}
+LIGHT_EMERGENCY_BEHAVIORS = {
+    "unchanged", "off", "emergency_only", "override"
+}
+MIN_COLOR_TEMPERATURE_K = 1000.0
+MAX_COLOR_TEMPERATURE_K = 20000.0
+MAX_LIGHT_INTENSITY = 1.0e9
+MAX_LIGHT_RANGE_M = 10000.0
+MAX_EMERGENCY_INTENSITY_SCALE = 8.0
+MAX_INTERIOR_LIGHT_FIXTURES = 4096
+MAX_INTERIOR_LIGHT_GROUPS = 1024
+MAX_INTERIOR_LIGHT_CIRCUITS = 1024
+MAX_INTERIOR_LIGHT_ID_BYTES = 256
 
 
 class ManifestValidator:
@@ -132,8 +146,13 @@ class ManifestValidator:
         root = self.require_object(self.document, "$")
         if root is None:
             return self.errors
-        if root.get("schema_version") != SCHEMA_VERSION:
-            self.error("$.schema_version", f"must equal {SCHEMA_VERSION}")
+        schema_version = root.get("schema_version")
+        if (isinstance(schema_version, bool) or
+                not isinstance(schema_version, int) or
+                schema_version not in SUPPORTED_SCHEMA_VERSIONS):
+            self.error(
+                "$.schema_version",
+                f"must be one of {sorted(SUPPORTED_SCHEMA_VERSIONS)}")
         self.require_id(root.get("asset_id"), "$.asset_id")
         if root.get("asset_kind") not in ASSET_KINDS:
             self.error("$.asset_kind", f"must be one of {sorted(ASSET_KINDS)}")
@@ -166,6 +185,13 @@ class ManifestValidator:
         portals, portal_by_id = self.collect_objects("portals")
         interactions, interaction_by_id = self.collect_objects("interactions")
         moving_parts, moving_part_by_id = self.collect_objects("moving_parts")
+        light_fixtures: list[dict[str, Any]] = []
+        if schema_version == 2:
+            light_fixtures, _ = self.collect_objects("light_fixtures")
+        elif "light_fixtures" in root:
+            self.error(
+                "$.light_fixtures",
+                "requires schema_version 2")
 
         self.validate_modules(modules, module_by_id, source_ids)
         self.validate_sockets(sockets, module_by_id)
@@ -175,6 +201,7 @@ class ManifestValidator:
             interactions, module_by_id, socket_by_id, portal_by_id, moving_part_by_id)
         self.validate_portals(
             portals, zone_by_id, socket_by_id, module_by_id, interaction_by_id)
+        self.validate_light_fixtures(light_fixtures, module_by_id)
         self.validate_navigation(root.get("navigation"), zone_by_id, portals)
         self.validate_interior_coverage(modules, zones, portals)
         return self.errors
@@ -436,6 +463,145 @@ class ManifestValidator:
                     self.error(f"{path}.motion.type", f"must be one of {sorted(MOTION_TYPES)}")
                 self.require_vector3(motion.get("axis"), f"{path}.motion.axis", nonzero=True)
                 self.require_number(motion.get("travel"), f"{path}.motion.travel", positive=True)
+
+    def validate_light_fixtures(
+        self,
+        fixtures: list[dict[str, Any]],
+        module_by_id: dict[str, dict[str, Any]],
+    ) -> None:
+        if len(fixtures) > MAX_INTERIOR_LIGHT_FIXTURES:
+            self.error(
+                "$.light_fixtures",
+                f"must contain at most {MAX_INTERIOR_LIGHT_FIXTURES} fixtures")
+        group_ids: set[str] = set()
+        circuit_ids: set[str] = set()
+        for index, fixture in enumerate(fixtures):
+            path = f"$.light_fixtures[{index}]"
+            module_id = self.require_id(fixture.get("module"), f"{path}.module")
+            module = module_by_id.get(module_id or "")
+            if module_id is not None and module is None:
+                self.error(f"{path}.module", f"unknown module '{module_id}'")
+            elif module is not None and module.get("role") != "interior":
+                self.error(f"{path}.module", "interior lights require an interior module")
+
+            light_type = fixture.get("type")
+            if light_type not in LIGHT_TYPES:
+                self.error(f"{path}.type", f"must be one of {sorted(LIGHT_TYPES)}")
+            self.require_vector3(fixture.get("position_m"), f"{path}.position_m")
+            direction = self.require_vector3(
+                fixture.get("direction"), f"{path}.direction", nonzero=True)
+            if direction is not None:
+                length = math.sqrt(sum(value * value for value in direction))
+                if abs(length - 1.0) > 1.0e-4:
+                    self.error(f"{path}.direction", "must be normalized")
+
+            temperature = self.require_number(
+                fixture.get("color_temperature_k"),
+                f"{path}.color_temperature_k",
+                positive=True)
+            if (temperature is not None and
+                    not MIN_COLOR_TEMPERATURE_K <= temperature <= MAX_COLOR_TEMPERATURE_K):
+                self.error(
+                    f"{path}.color_temperature_k",
+                    f"must be in [{MIN_COLOR_TEMPERATURE_K}, {MAX_COLOR_TEMPERATURE_K}]")
+
+            intensity = self.require_number(
+                fixture.get("intensity_lm_or_cd"),
+                f"{path}.intensity_lm_or_cd",
+                positive=True)
+            if intensity is not None and intensity > MAX_LIGHT_INTENSITY:
+                self.error(
+                    f"{path}.intensity_lm_or_cd",
+                    f"must not exceed {MAX_LIGHT_INTENSITY}")
+
+            range_m = self.require_number(
+                fixture.get("range_m"), f"{path}.range_m", positive=True)
+            if range_m is not None and range_m > MAX_LIGHT_RANGE_M:
+                self.error(
+                    f"{path}.range_m",
+                    f"must not exceed {MAX_LIGHT_RANGE_M}")
+
+            inner = self.require_number(
+                fixture.get("inner_cone_degrees"),
+                f"{path}.inner_cone_degrees")
+            outer = self.require_number(
+                fixture.get("outer_cone_degrees"),
+                f"{path}.outer_cone_degrees")
+            if inner is not None and outer is not None:
+                if light_type == "point":
+                    if inner != 180.0 or outer != 180.0:
+                        self.error(path, "point lights require 180-degree cone values")
+                elif light_type == "spot" and not (0.0 <= inner < outer <= 89.9):
+                    self.error(
+                        path,
+                        "spot cones must satisfy 0 <= inner < outer <= 89.9 degrees")
+
+            fixture_id = fixture.get("id")
+            if (isinstance(fixture_id, str) and
+                    len(fixture_id.encode("utf-8")) > MAX_INTERIOR_LIGHT_ID_BYTES):
+                self.error(
+                    f"{path}.id",
+                    f"must be at most {MAX_INTERIOR_LIGHT_ID_BYTES} bytes")
+            group_id = self.require_id(fixture.get("group"), f"{path}.group")
+            circuit_id = self.require_id(
+                fixture.get("circuit"), f"{path}.circuit")
+            if group_id is not None:
+                group_ids.add(group_id)
+                if len(group_id.encode("utf-8")) > MAX_INTERIOR_LIGHT_ID_BYTES:
+                    self.error(
+                        f"{path}.group",
+                        f"must be at most {MAX_INTERIOR_LIGHT_ID_BYTES} bytes")
+            if circuit_id is not None:
+                circuit_ids.add(circuit_id)
+                if len(circuit_id.encode("utf-8")) > MAX_INTERIOR_LIGHT_ID_BYTES:
+                    self.error(
+                        f"{path}.circuit",
+                        f"must be at most {MAX_INTERIOR_LIGHT_ID_BYTES} bytes")
+            importance = self.require_number(
+                fixture.get("importance"), f"{path}.importance")
+            if importance is not None and not 0.0 <= importance <= 1.0:
+                self.error(f"{path}.importance", "must be in [0, 1]")
+            if fixture.get("shadow_policy") not in LIGHT_SHADOW_POLICIES:
+                self.error(
+                    f"{path}.shadow_policy",
+                    f"must be one of {sorted(LIGHT_SHADOW_POLICIES)}")
+
+            emergency_behavior = fixture.get("emergency_behavior")
+            if emergency_behavior not in LIGHT_EMERGENCY_BEHAVIORS:
+                self.error(
+                    f"{path}.emergency_behavior",
+                    f"must be one of {sorted(LIGHT_EMERGENCY_BEHAVIORS)}")
+            emergency_temperature = self.require_number(
+                fixture.get("emergency_color_temperature_k"),
+                f"{path}.emergency_color_temperature_k",
+                positive=True)
+            if (emergency_temperature is not None and
+                    not MIN_COLOR_TEMPERATURE_K <= emergency_temperature <=
+                    MAX_COLOR_TEMPERATURE_K):
+                self.error(
+                    f"{path}.emergency_color_temperature_k",
+                    f"must be in [{MIN_COLOR_TEMPERATURE_K}, {MAX_COLOR_TEMPERATURE_K}]")
+            emergency_scale = self.require_number(
+                fixture.get("emergency_intensity_scale"),
+                f"{path}.emergency_intensity_scale")
+            if (emergency_scale is not None and
+                    not 0.0 <= emergency_scale <= MAX_EMERGENCY_INTENSITY_SCALE):
+                self.error(
+                    f"{path}.emergency_intensity_scale",
+                    f"must be in [0, {MAX_EMERGENCY_INTENSITY_SCALE}]")
+            if (emergency_behavior in {"emergency_only", "override"} and
+                    emergency_scale == 0.0):
+                self.error(
+                    f"{path}.emergency_intensity_scale",
+                    "active emergency behaviors require a positive emergency scale")
+        if len(group_ids) > MAX_INTERIOR_LIGHT_GROUPS:
+            self.error(
+                "$.light_fixtures",
+                f"must reference at most {MAX_INTERIOR_LIGHT_GROUPS} groups")
+        if len(circuit_ids) > MAX_INTERIOR_LIGHT_CIRCUITS:
+            self.error(
+                "$.light_fixtures",
+                f"must reference at most {MAX_INTERIOR_LIGHT_CIRCUITS} circuits")
 
     def validate_navigation(
         self,

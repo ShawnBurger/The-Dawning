@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import struct
 import sys
@@ -42,6 +43,14 @@ INTERACTION_TYPE = {
     "seat": 7,
 }
 MOTION_TYPE = {"linear": 1, "rotational": 2}
+LIGHT_TYPE = {"point": 1, "spot": 2}
+LIGHT_SHADOW_POLICY = {"none": 1, "static": 2, "dynamic": 3}
+LIGHT_EMERGENCY_BEHAVIOR = {
+    "unchanged": 1,
+    "off": 2,
+    "emergency_only": 3,
+    "override": 4,
+}
 
 
 class AssemblyCompileError(RuntimeError):
@@ -92,6 +101,9 @@ def _canonical_bytes(document: dict[str, Any]) -> bytes:
         "moving_parts",
     ):
         normalized[key] = sorted(normalized[key], key=lambda item: item["id"])
+    if normalized.get("schema_version", 0) >= 2:
+        normalized["light_fixtures"] = sorted(
+            normalized["light_fixtures"], key=lambda item: item["id"])
     normalized["provenance"]["sources"] = sorted(
         normalized["provenance"]["sources"], key=lambda item: item["id"]
     )
@@ -194,6 +206,10 @@ def compile_document(document: dict[str, Any]) -> bytes:
     portals = _sorted_table(document, "portals")
     interactions = _sorted_table(document, "interactions")
     moving_parts = _sorted_table(document, "moving_parts")
+    light_fixtures = (
+        _sorted_table(document, "light_fixtures")
+        if document["schema_version"] >= 2 else []
+    )
 
     source_index = _index_by_id(sources)
     module_index = _index_by_id(modules)
@@ -322,6 +338,34 @@ def compile_document(document: dict[str, Any]) -> bytes:
     writer.u32(len(required))
     for index in required:
         writer.u32(index)
+
+    if document["schema_version"] >= 2:
+        writer.u32(len(light_fixtures))
+        for fixture in light_fixtures:
+            writer.string(fixture["id"])
+            writer.u32(module_index[fixture["module"]])
+            writer.u8(LIGHT_TYPE[fixture["type"]])
+            writer.u8(LIGHT_SHADOW_POLICY[fixture["shadow_policy"]])
+            writer.u8(LIGHT_EMERGENCY_BEHAVIOR[fixture["emergency_behavior"]])
+            writer.u8(0)
+            writer.vector3(fixture["position_m"])
+            direction = fixture["direction"]
+            direction_length = math.sqrt(
+                sum(float(component) * float(component) for component in direction)
+            )
+            writer.vector3([
+                float(component) / direction_length for component in direction
+            ])
+            writer.f64(fixture["color_temperature_k"])
+            writer.f64(fixture["intensity_lm_or_cd"])
+            writer.f64(fixture["range_m"])
+            writer.f64(fixture["inner_cone_degrees"])
+            writer.f64(fixture["outer_cone_degrees"])
+            writer.f64(fixture["importance"])
+            writer.f64(fixture["emergency_color_temperature_k"])
+            writer.f64(fixture["emergency_intensity_scale"])
+            writer.string(fixture["group"])
+            writer.string(fixture["circuit"])
 
     payload = bytes(writer.data)
     if len(payload) > MAX_OUTPUT_BYTES - HEADER_BYTES:

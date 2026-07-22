@@ -116,13 +116,44 @@ struct FixtureOptions
     bool trailingPayloadByte = false;
     bool unsafeControlCharacter = false;
     bool closureSocketMismatch = false;
+    bool schemaV2 = false;
+    bool duplicateLightId = false;
+    bool invalidLightModule = false;
+    bool invalidLightDirection = false;
+    bool invalidLightCones = false;
+    bool invalidLightType = false;
 };
+
+void WriteLight(
+    Writer& writer,
+    std::string_view id,
+    const FixtureOptions& options)
+{
+    writer.String(id);
+    writer.U32(options.invalidLightModule ? 1u : 0u);
+    writer.U8(options.invalidLightType ? 99u : 2u); // spot
+    writer.U8(1); // no dynamic shadow
+    writer.U8(1); // unchanged during emergency
+    writer.U8(0);
+    writer.Vec3(0.0, 1.8, 0.0);
+    writer.Vec3(0.0, options.invalidLightDirection ? -2.0 : -1.0, 0.0);
+    writer.Double(4300.0);
+    writer.Double(900.0);
+    writer.Double(8.0);
+    writer.Double(options.invalidLightCones ? 50.0 : 25.0);
+    writer.Double(options.invalidLightCones ? 20.0 : 45.0);
+    writer.Double(0.75);
+    writer.Double(1800.0);
+    writer.Double(0.35);
+    writer.String("primary");
+    writer.String("main");
+}
 
 std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
 {
     Writer payload;
     payload.Bytes(asset::ComputeSha256(ToBytes("canonical manifest")).bytes);
-    payload.U32(1); // schema
+    payload.U32(options.schemaV2 ? 2u : 1u); // schema
     payload.U8(1); // ship
     payload.U8(7); // continuous, loading-screen-free, interactive
     payload.U16(0);
@@ -215,6 +246,13 @@ std::vector<std::byte> BuildFixture(const FixtureOptions& options = {})
     payload.U32(0); // entry zone
     payload.U32(1); // required zones
     payload.U32(0);
+    if (options.schemaV2)
+    {
+        payload.U32(options.duplicateLightId ? 2u : 1u);
+        WriteLight(payload, "cockpit_key", options);
+        if (options.duplicateLightId)
+            WriteLight(payload, "cockpit_key", options);
+    }
     if (options.trailingPayloadByte)
         payload.U8(0xff);
 
@@ -261,11 +299,37 @@ TEST_CASE(CookedAssembly_RepresentativeGraphLoadsWithResolvedIdentity)
     CHECK_EQ(assembly.portals.size(), 1u);
     CHECK_EQ(assembly.interactions.size(), 1u);
     CHECK_EQ(assembly.movingParts.size(), 1u);
+    CHECK(assembly.lightFixtures.empty());
     CHECK_EQ(assembly.modules[assembly.zones[0].moduleIndex].id, "cockpit");
     CHECK_EQ(assembly.interactions[assembly.portals[0].closureInteraction].id, "hatch");
     CHECK_EQ(assembly.movingParts[assembly.interactions[0].movingPartIndex].id,
              "hatch_panel");
     CHECK_EQ(assembly.zones[assembly.entryZone].id, "cockpit");
+}
+
+TEST_CASE(CookedAssembly_SchemaV2LoadsAuthoredLightFixtures)
+{
+    const asset::CookedAssemblyResult result =
+        asset::LoadCookedAssemblyMemory(BuildFixture({ .schemaV2 = true }));
+    CHECK(result.Succeeded());
+    if (!result.Succeeded())
+        return;
+
+    const asset::CookedAssembly& assembly = *result.assembly;
+    CHECK_EQ(assembly.schemaVersion, 2u);
+    CHECK_EQ(assembly.lightFixtures.size(), 1u);
+    const asset::AssemblyLightFixture& light = assembly.lightFixtures[0];
+    CHECK_EQ(light.id, "cockpit_key");
+    CHECK_EQ(light.moduleIndex, 0u);
+    CHECK_EQ(light.type, asset::AssemblyLightType::Spot);
+    CHECK_EQ(light.shadowPolicy, asset::AssemblyLightShadowPolicy::None);
+    CHECK_EQ(
+        light.emergencyBehavior,
+        asset::AssemblyLightEmergencyBehavior::Unchanged);
+    CHECK_APPROX_EPS(light.direction[1], -1.0, 1.0e-12);
+    CHECK_APPROX_EPS(light.intensityLumensOrCandela, 900.0, 1.0e-12);
+    CHECK_EQ(light.groupId, "primary");
+    CHECK_EQ(light.circuitId, "main");
 }
 
 TEST_CASE(CookedAssembly_HeaderAndIntegrityFailuresAreDistinctAndFailClosed)
@@ -321,6 +385,15 @@ TEST_CASE(CookedAssembly_ResourceAndPayloadLimitsRejectBeforePublication)
         asset::LoadCookedAssemblyMemory(bytes, limits);
     CHECK_EQ(aggregateLimit.status, asset::CookedAssemblyStatus::ResourceLimitExceeded);
     CHECK(aggregateLimit.assembly == nullptr);
+
+    limits = {};
+    limits.maxLightFixtures = 0;
+    const asset::CookedAssemblyResult lightLimit =
+        asset::LoadCookedAssemblyMemory(
+            BuildFixture({ .schemaV2 = true }),
+            limits);
+    CHECK_EQ(lightLimit.status, asset::CookedAssemblyStatus::ResourceLimitExceeded);
+    CHECK(lightLimit.assembly == nullptr);
 }
 
 TEST_CASE(CookedAssembly_RehashedMalformedGraphsStillFailSemanticValidation)
@@ -349,4 +422,44 @@ TEST_CASE(CookedAssembly_RehashedMalformedGraphsStillFailSemanticValidation)
         asset::LoadCookedAssemblyMemory(BuildFixture({ .closureSocketMismatch = true }));
     CHECK_EQ(wrongClosureSocket.status, asset::CookedAssemblyStatus::InvalidData);
     CHECK(wrongClosureSocket.assembly == nullptr);
+
+    const asset::CookedAssemblyResult duplicateLight =
+        asset::LoadCookedAssemblyMemory(BuildFixture({
+            .schemaV2 = true,
+            .duplicateLightId = true,
+        }));
+    CHECK_EQ(duplicateLight.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(duplicateLight.assembly == nullptr);
+
+    const asset::CookedAssemblyResult wrongLightModule =
+        asset::LoadCookedAssemblyMemory(BuildFixture({
+            .schemaV2 = true,
+            .invalidLightModule = true,
+        }));
+    CHECK_EQ(wrongLightModule.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(wrongLightModule.assembly == nullptr);
+
+    const asset::CookedAssemblyResult badLightDirection =
+        asset::LoadCookedAssemblyMemory(BuildFixture({
+            .schemaV2 = true,
+            .invalidLightDirection = true,
+        }));
+    CHECK_EQ(badLightDirection.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(badLightDirection.assembly == nullptr);
+
+    const asset::CookedAssemblyResult badLightCones =
+        asset::LoadCookedAssemblyMemory(BuildFixture({
+            .schemaV2 = true,
+            .invalidLightCones = true,
+        }));
+    CHECK_EQ(badLightCones.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(badLightCones.assembly == nullptr);
+
+    const asset::CookedAssemblyResult badLightType =
+        asset::LoadCookedAssemblyMemory(BuildFixture({
+            .schemaV2 = true,
+            .invalidLightType = true,
+        }));
+    CHECK_EQ(badLightType.status, asset::CookedAssemblyStatus::InvalidData);
+    CHECK(badLightType.assembly == nullptr);
 }

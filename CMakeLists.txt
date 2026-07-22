@@ -155,6 +155,19 @@ set(GAMEPLAY_HEADERS
     src/gameplay/playable_ship.h
 )
 
+# Ship-owned interior systems. These are renderer- and simulation-free: they
+# consume validated assembly data, publish immutable state, and narrow local
+# lights only after camera subtraction for a later GPU consumer.
+set(SHIP_SOURCES
+    src/ship/interior_state.cpp
+    src/ship/interior_lighting.cpp
+)
+
+set(SHIP_HEADERS
+    src/ship/interior_state.h
+    src/ship/interior_lighting.h
+)
+
 # Flight & physics (Phase 4). GPU-free by construction: sim/*.h include only
 # core/types.h and ecs/components.h (both device-free), so every file here also
 # links into TheDawningTests below and the analytic tests drive the SHIPPED
@@ -281,6 +294,8 @@ set(TEST_SOURCES
     tests/test_flight_control.cpp
     tests/test_on_foot_controller.cpp
     tests/test_pilot_possession.cpp
+    tests/test_interior_state.cpp
+    tests/test_interior_lighting.cpp
     tests/test_physics_system.cpp
     tests/test_reference_frame.cpp
     tests/test_kepler.cpp
@@ -329,6 +344,8 @@ add_executable(TheDawningV3 WIN32
     ${ECS_HEADERS}
     ${GAMEPLAY_SOURCES}
     ${GAMEPLAY_HEADERS}
+    ${SHIP_SOURCES}
+    ${SHIP_HEADERS}
     ${SIM_SOURCES}
     ${SIM_HEADERS}
     ${SCENE_SOURCES}
@@ -466,6 +483,7 @@ source_group("Core"    FILES ${CORE_SOURCES} ${CORE_HEADERS})
 source_group("Asset"   FILES ${ASSET_SOURCES} ${ASSET_HEADERS})
 source_group("Render"  FILES ${RENDER_SOURCES} ${RENDER_HEADERS})
 source_group("ECS"     FILES ${ECS_HEADERS})
+source_group("Ship"    FILES ${SHIP_SOURCES} ${SHIP_HEADERS})
 source_group("Sim"     FILES ${SIM_SOURCES} ${SIM_HEADERS})
 source_group("Scene"   FILES ${SCENE_SOURCES} ${SCENE_HEADERS})
 source_group("Shaders" FILES ${SHADER_FILES})
@@ -572,6 +590,8 @@ add_executable(TheDawningTests
     src/core/sh_irradiance.h
     src/core/sh_irradiance.cpp
     ${ECS_HEADERS}
+    ${SHIP_SOURCES}
+    ${SHIP_HEADERS}
     # Two-phase cooked-assembly scene transaction. This file depends only on
     # asset contracts, ECS data, and packed resource handles; the production
     # Registry target and fault-injected test target both remain GPU-free.

@@ -18,8 +18,15 @@ constexpr std::array<uint8_t, 8> kMagic = {
 };
 constexpr uint32_t kFormatVersion = 1;
 constexpr uint32_t kHeaderBytes = 72;
-constexpr uint32_t kSchemaVersion = 1;
+constexpr uint32_t kMinimumSchemaVersion = 1;
+constexpr uint32_t kMaximumSchemaVersion = 2;
 constexpr uint8_t kRequiredContractFlags = 0x07;
+constexpr double kMinimumColorTemperatureKelvin = 1000.0;
+constexpr double kMaximumColorTemperatureKelvin = 20000.0;
+constexpr double kMaximumLightIntensity = 1.0e9;
+constexpr double kMaximumLightRangeMeters = 10000.0;
+constexpr double kMaximumEmergencyIntensityScale = 8.0;
+constexpr double kUnitDirectionTolerance = 1.0e-4;
 
 CookedAssemblyResult Failure(CookedAssemblyStatus status, std::string error)
 {
@@ -286,7 +293,8 @@ bool DecodePayload(
     {
         return false;
     }
-    if (assembly.schemaVersion != kSchemaVersion || reserved != 0 ||
+    if (assembly.schemaVersion < kMinimumSchemaVersion ||
+        assembly.schemaVersion > kMaximumSchemaVersion || reserved != 0 ||
         contractFlags != kRequiredContractFlags ||
         (assetKind != static_cast<uint8_t>(AssemblyAssetKind::Ship) &&
          assetKind != static_cast<uint8_t>(AssemblyAssetKind::Structure)))
@@ -492,6 +500,61 @@ bool DecodePayload(
         if (!reader.U32(zone))
             return false;
     }
+
+    if (assembly.schemaVersion >= 2)
+    {
+        if (!ReadCount(
+                reader,
+                limits.maxLightFixtures,
+                count,
+                limitExceeded) ||
+            !ChargeCount(
+                count,
+                totalRecords,
+                limits.maxTotalRecords,
+                limitExceeded))
+        {
+            return false;
+        }
+        assembly.lightFixtures.resize(count);
+        for (AssemblyLightFixture& fixture : assembly.lightFixtures)
+        {
+            uint8_t type = 0;
+            uint8_t shadowPolicy = 0;
+            uint8_t emergencyBehavior = 0;
+            uint8_t reserved8 = 0;
+            if (!reader.String(fixture.id, limits.maxStringBytes) ||
+                !reader.U32(fixture.moduleIndex) || !reader.U8(type) ||
+                !reader.U8(shadowPolicy) || !reader.U8(emergencyBehavior) ||
+                !reader.U8(reserved8) ||
+                !ReadVector3(reader, fixture.positionMeters) ||
+                !ReadVector3(reader, fixture.direction) ||
+                !reader.Double(fixture.colorTemperatureKelvin) ||
+                !reader.Double(fixture.intensityLumensOrCandela) ||
+                !reader.Double(fixture.rangeMeters) ||
+                !reader.Double(fixture.innerConeDegrees) ||
+                !reader.Double(fixture.outerConeDegrees) ||
+                !reader.Double(fixture.importance) ||
+                !reader.Double(fixture.emergencyColorTemperatureKelvin) ||
+                !reader.Double(fixture.emergencyIntensityScale) ||
+                !reader.String(fixture.groupId, limits.maxStringBytes) ||
+                !reader.String(fixture.circuitId, limits.maxStringBytes))
+            {
+                return false;
+            }
+            if (type < 1 || type > 2 || shadowPolicy < 1 ||
+                shadowPolicy > 3 || emergencyBehavior < 1 ||
+                emergencyBehavior > 4 || reserved8 != 0)
+            {
+                return false;
+            }
+            fixture.type = static_cast<AssemblyLightType>(type);
+            fixture.shadowPolicy =
+                static_cast<AssemblyLightShadowPolicy>(shadowPolicy);
+            fixture.emergencyBehavior =
+                static_cast<AssemblyLightEmergencyBehavior>(emergencyBehavior);
+        }
+    }
     return reader.Done();
 }
 
@@ -511,7 +574,8 @@ bool ValidateAssembly(const CookedAssembly& assembly, std::string& error)
     if (!HasUniqueIds(assembly.provenance) || !HasUniqueIds(assembly.modules) ||
         !HasUniqueIds(assembly.sockets) || !HasUniqueIds(assembly.zones) ||
         !HasUniqueIds(assembly.portals) || !HasUniqueIds(assembly.interactions) ||
-        !HasUniqueIds(assembly.movingParts))
+        !HasUniqueIds(assembly.movingParts) ||
+        !HasUniqueIds(assembly.lightFixtures))
     {
         return fail("assembly IDs must be valid and unique within each table");
     }
@@ -652,6 +716,59 @@ bool ValidateAssembly(const CookedAssembly& assembly, std::string& error)
             part.travel <= 0.0)
         {
             return fail("moving-part data or reciprocal interaction is invalid");
+        }
+    }
+
+    if (assembly.schemaVersion == 1 && !assembly.lightFixtures.empty())
+        return fail("schema-v1 assembly cannot contain light fixtures");
+    if (assembly.schemaVersion >= 2 && assembly.lightFixtures.empty())
+        return fail("schema-v2 assembly requires authored light fixtures");
+    for (const AssemblyLightFixture& fixture : assembly.lightFixtures)
+    {
+        const double directionLengthSquared = LengthSquared(fixture.direction);
+        const bool pointCones = fixture.innerConeDegrees == 180.0 &&
+                                fixture.outerConeDegrees == 180.0;
+        const bool spotCones = fixture.innerConeDegrees >= 0.0 &&
+                               fixture.innerConeDegrees < fixture.outerConeDegrees &&
+                               fixture.outerConeDegrees <= 89.9;
+        if (fixture.moduleIndex >= assembly.modules.size() ||
+            assembly.modules[fixture.moduleIndex].role !=
+                AssemblyModuleRole::Interior ||
+            !IsFinite(fixture.positionMeters) ||
+            !IsFinite(fixture.direction) ||
+            !IsFinite(directionLengthSquared) ||
+            std::abs(directionLengthSquared - 1.0) >
+                2.0 * kUnitDirectionTolerance ||
+            !IsFinite(fixture.colorTemperatureKelvin) ||
+            fixture.colorTemperatureKelvin < kMinimumColorTemperatureKelvin ||
+            fixture.colorTemperatureKelvin > kMaximumColorTemperatureKelvin ||
+            !IsFinite(fixture.intensityLumensOrCandela) ||
+            fixture.intensityLumensOrCandela <= 0.0 ||
+            fixture.intensityLumensOrCandela > kMaximumLightIntensity ||
+            !IsFinite(fixture.rangeMeters) || fixture.rangeMeters <= 0.0 ||
+            fixture.rangeMeters > kMaximumLightRangeMeters ||
+            !IsFinite(fixture.innerConeDegrees) ||
+            !IsFinite(fixture.outerConeDegrees) ||
+            (fixture.type == AssemblyLightType::Point ? !pointCones : !spotCones) ||
+            !IsFinite(fixture.importance) || fixture.importance < 0.0 ||
+            fixture.importance > 1.0 || !IsId(fixture.groupId) ||
+            !IsId(fixture.circuitId) ||
+            !IsFinite(fixture.emergencyColorTemperatureKelvin) ||
+            fixture.emergencyColorTemperatureKelvin <
+                kMinimumColorTemperatureKelvin ||
+            fixture.emergencyColorTemperatureKelvin >
+                kMaximumColorTemperatureKelvin ||
+            !IsFinite(fixture.emergencyIntensityScale) ||
+            fixture.emergencyIntensityScale < 0.0 ||
+            fixture.emergencyIntensityScale >
+                kMaximumEmergencyIntensityScale ||
+            ((fixture.emergencyBehavior ==
+                  AssemblyLightEmergencyBehavior::EmergencyOnly ||
+              fixture.emergencyBehavior ==
+                  AssemblyLightEmergencyBehavior::Override) &&
+             fixture.emergencyIntensityScale <= 0.0))
+        {
+            return fail("light fixture data or module ownership is invalid");
         }
     }
 

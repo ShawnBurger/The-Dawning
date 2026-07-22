@@ -33,6 +33,7 @@ int main(int argc, char** argv)
     std::cout << "portals=" << assembly.portals.size() << '\n';
     std::cout << "interactions=" << assembly.interactions.size() << '\n';
     std::cout << "moving_parts=" << assembly.movingParts.size() << '\n';
+    std::cout << "light_fixtures=" << assembly.lightFixtures.size() << '\n';
     std::cout << "entry_zone=" << assembly.zones[assembly.entryZone].id << '\n';
     return 0;
 }

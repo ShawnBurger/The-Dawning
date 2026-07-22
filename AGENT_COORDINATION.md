@@ -2364,7 +2364,7 @@ are now integrated as well. The current order is:
 
 ### WS-033: Interior state and local-light authoring slice
 
-- Status: ACTIVE
+- Status: READY_TO_MERGE
 - Outcome: add a backward-compatible authored light-fixture contract and a
   deterministic ship-owned interior state coordinator that resolves group,
   circuit, alert, and emergency behavior into bounded camera-relative local
@@ -2384,7 +2384,7 @@ are now integrated as well. The current order is:
   atmosphere, SSAO, audio, VFX, diegetic displays, GPU clustered-light lists,
   GPU local-light shading, and local-light shadow maps
 - Shared-file locks: WS-033 owns additive registrations in `CMakeLists.txt` and
-  this coordination entry only. Claude's active SSAO lane retains all excluded
+  this coordination entry only. Claude's active atmosphere lane retains all excluded
   renderer, scene, app, shader, and smoke-harness files.
 - Interface contract: manifest schema v1 remains loadable byte-for-byte. Schema
   v2 appends bounded `light_fixtures` records using stable module IDs, physical
@@ -2394,7 +2394,7 @@ are now integrated as well. The current order is:
   positions are narrowed from double to float only in the presentation builder.
 - Dependencies: merged WS-032 assembly/content baseline and the existing
   assembly transform contract. GPU consumption is intentionally deferred until
-  Claude's current SSAO changes release the renderer/shared-file surface.
+  Claude's current atmosphere changes release the renderer/shared-file surface.
 - Acceptance gates: schema-v1 compatibility; deterministic schema-v2 cook;
   strict malformed-input rejection; source-hash integrity; stable fixture order;
   normal, emergency, and blackout resolution; circuit/group isolation;
@@ -2406,9 +2406,22 @@ are now integrated as well. The current order is:
   cone values, unknown group/circuit updates, NaN camera origins, overflowed
   fixture counts, stale snapshots, and direct presentation-side mutation fail
   without partially publishing state.
-- Latest commit: none
-- Next action: implement and test the additive schema, coordinator, and
-  renderer-facing CPU light snapshot without entering Claude-owned paths.
+- Current checkpoint (2026-07-22): schema v2, exact schema-v1 byte compatibility,
+  strict Python/C++ validation, the ship-owned immutable state coordinator, and
+  the camera-relative CPU light-frame builder are implemented. The Courier
+  authors twelve fixtures across three circuits and cooks deterministically to
+  9,720 bytes with SHA-256
+  `bded6f90c8a29cf2b4deae4fadebf062cabdcb2c566aa7b45a66335c0789ad42`.
+  Normal, emergency override, emergency-only, load shedding, blackout,
+  idempotence, stale-update rejection, hard limits, forged snapshots, and
+  astronomical-coordinate precision have focused coverage. Complete Debug and
+  Release builds, 61 Python tests, 539 C++ unit cases, CTest 6/6 in both
+  configurations, Courier raster/stable/full plus Debug GPU-validation smoke,
+  and reference raster/stable/full smoke all pass. GPU consumption remains
+  deferred by the shared renderer lock.
+- Latest commit: implementation pending publication
+- Next action: publish the audited branch, sync against current `origin/main`,
+  and integrate only if the shared renderer lane has not introduced conflicts.
 
 ## 20. Helper Commands
 

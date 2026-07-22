@@ -69,6 +69,27 @@ enum class AssemblyMotionType : uint8_t
     Rotational = 2
 };
 
+enum class AssemblyLightType : uint8_t
+{
+    Point = 1,
+    Spot = 2
+};
+
+enum class AssemblyLightShadowPolicy : uint8_t
+{
+    None = 1,
+    Static = 2,
+    Dynamic = 3
+};
+
+enum class AssemblyLightEmergencyBehavior : uint8_t
+{
+    Unchanged = 1,
+    Off = 2,
+    EmergencyOnly = 3,
+    Override = 4
+};
+
 struct AssemblyProvenance
 {
     std::string id;
@@ -157,6 +178,29 @@ struct AssemblyMovingPart
     double travel = 0.0;
 };
 
+struct AssemblyLightFixture
+{
+    std::string id;
+    uint32_t moduleIndex = kAssemblyNoIndex;
+    AssemblyLightType type = AssemblyLightType::Point;
+    AssemblyLightShadowPolicy shadowPolicy =
+        AssemblyLightShadowPolicy::None;
+    AssemblyLightEmergencyBehavior emergencyBehavior =
+        AssemblyLightEmergencyBehavior::Unchanged;
+    std::array<double, 3> positionMeters{};
+    std::array<double, 3> direction{ 0.0, 0.0, 1.0 };
+    double colorTemperatureKelvin = 6500.0;
+    double intensityLumensOrCandela = 0.0;
+    double rangeMeters = 0.0;
+    double innerConeDegrees = 180.0;
+    double outerConeDegrees = 180.0;
+    double importance = 0.0;
+    double emergencyColorTemperatureKelvin = 6500.0;
+    double emergencyIntensityScale = 1.0;
+    std::string groupId;
+    std::string circuitId;
+};
+
 struct CookedAssembly
 {
     uint32_t schemaVersion = 0;
@@ -175,6 +219,7 @@ struct CookedAssembly
     std::vector<AssemblyMovingPart> movingParts;
     uint32_t entryZone = kAssemblyNoIndex;
     std::vector<uint32_t> requiredReachableZones;
+    std::vector<AssemblyLightFixture> lightFixtures;
 };
 
 enum class CookedAssemblyStatus : uint8_t
@@ -204,6 +249,7 @@ struct CookedAssemblyLimits
     uint32_t maxPortals = 200'000u;
     uint32_t maxInteractions = 200'000u;
     uint32_t maxMovingParts = 200'000u;
+    uint32_t maxLightFixtures = 100'000u;
     uint32_t maxLodsPerModule = 32u;
     uint32_t maxStatesPerInteraction = 256u;
     uint64_t maxTotalRecords = 250'000ull;

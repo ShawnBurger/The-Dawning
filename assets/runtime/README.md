@@ -34,6 +34,26 @@ The executable reads the generic `.tdcontent` manifest and therefore needs no
 asset-specific C++ change when a binding moves to a new cooked model. Runtime
 paths are relative to this directory and may not escape it.
 
+`frontier_courier_mk1.tdassembly` is the first schema-v2 assembly. Its twelve
+authored interior fixtures cover cockpit key/console/emergency lighting,
+corridor strips, airlock normal/emergency lighting, and task lighting for cargo,
+crew, and engineering. The cooked SHA-256 is
+`bded6f90c8a29cf2b4deae4fadebf062cabdcb2c566aa7b45a66335c0789ad42`;
+its embedded canonical source-manifest SHA-256 is
+`1b713519f5261fe3dbc34938602c735d325cb22599532753f4225268cd14883b`.
+The engine-owned coordinator resolves these fixtures through alert, group,
+circuit, and per-fixture state. Renderer upload and local-light shading remain a
+separate milestone; the cooked records do not imply that a fixture is already
+visible in raster or DXR.
+
+Reproduce the Courier assembly with:
+
+```powershell
+python tools/compile_asset_manifest.py `
+  assets/manifests/frontier_courier_mk1.design.tdasset.json `
+  assets/runtime/frontier_courier_mk1.tdassembly
+```
+
 From a configured checkout containing that cached source, reproduce the runtime
 artifact with:
 

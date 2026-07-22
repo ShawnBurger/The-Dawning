@@ -24,12 +24,21 @@ class AssetManifestContractTests(unittest.TestCase):
             (ROOT / "assets" / "manifests" / "reference_ship.tdasset.json")
             .read_text(encoding="utf-8")
         )
+        cls.frontier = json.loads(
+            (ROOT / "assets" / "manifests" /
+             "frontier_courier_mk1.design.tdasset.json")
+            .read_text(encoding="utf-8")
+        )
 
     def validate(self, document: dict) -> list[str]:
         return VALIDATOR.validate_document(document)
 
     def test_reference_ship_satisfies_production_contract(self) -> None:
         self.assertEqual(self.validate(copy.deepcopy(self.reference)), [])
+
+    def test_frontier_courier_schema_v2_light_contract_is_valid(self) -> None:
+        self.assertEqual(self.validate(copy.deepcopy(self.frontier)), [])
+        self.assertEqual(len(self.frontier["light_fixtures"]), 12)
 
     def test_disconnected_interior_is_rejected(self) -> None:
         document = copy.deepcopy(self.reference)
@@ -86,6 +95,80 @@ class AssetManifestContractTests(unittest.TestCase):
         document["portals"][1]["socket_b"] = "airlock_outer"
         errors = self.validate(document)
         self.assertTrue(any("must match zone 'cockpit'" in error for error in errors), errors)
+
+    def test_schema_v1_cannot_smuggle_light_fixture_records(self) -> None:
+        document = copy.deepcopy(self.reference)
+        document["light_fixtures"] = copy.deepcopy(
+            self.frontier["light_fixtures"][:1]
+        )
+        errors = self.validate(document)
+        self.assertTrue(any("requires schema_version 2" in error for error in errors), errors)
+
+    def test_schema_v2_requires_nonempty_authored_fixtures(self) -> None:
+        document = copy.deepcopy(self.frontier)
+        document["light_fixtures"] = []
+        errors = self.validate(document)
+        self.assertTrue(any("must not be empty" in error for error in errors), errors)
+
+    def test_light_fixture_physical_and_ownership_guards(self) -> None:
+        mutations = (
+            ("module", "exterior_hull", "interior module"),
+            ("direction", [0.0, -2.0, 0.0], "normalized"),
+            ("color_temperature_k", 500.0, "must be in"),
+            ("intensity_lm_or_cd", 0.0, "greater than zero"),
+            ("range_m", float("nan"), "finite number"),
+            ("importance", 1.1, "must be in [0, 1]"),
+            ("shadow_policy", "cinematic", "must be one of"),
+            ("emergency_behavior", "flicker", "must be one of"),
+        )
+        for field, value, expected in mutations:
+            with self.subTest(field=field):
+                document = copy.deepcopy(self.frontier)
+                document["light_fixtures"][0][field] = value
+                errors = self.validate(document)
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_light_type_controls_cone_contract(self) -> None:
+        point = copy.deepcopy(self.frontier)
+        point["light_fixtures"][1]["inner_cone_degrees"] = 45.0
+        errors = self.validate(point)
+        self.assertTrue(any("point lights require" in error for error in errors), errors)
+
+        spot = copy.deepcopy(self.frontier)
+        spot["light_fixtures"][0]["inner_cone_degrees"] = 80.0
+        spot["light_fixtures"][0]["outer_cone_degrees"] = 40.0
+        errors = self.validate(spot)
+        self.assertTrue(any("spot cones must satisfy" in error for error in errors), errors)
+
+    def test_active_emergency_behavior_requires_positive_override_scale(self) -> None:
+        document = copy.deepcopy(self.frontier)
+        override = next(
+            fixture for fixture in document["light_fixtures"]
+            if fixture["emergency_behavior"] == "override"
+        )
+        override["emergency_intensity_scale"] = 0.0
+        errors = self.validate(document)
+        self.assertTrue(
+            any("active emergency behaviors" in error for error in errors),
+            errors,
+        )
+
+    def test_light_fixture_runtime_budgets_are_enforced_at_authoring(self) -> None:
+        document = copy.deepcopy(self.frontier)
+        source = document["light_fixtures"][0]
+        document["light_fixtures"] = []
+        for index in range(VALIDATOR.MAX_INTERIOR_LIGHT_GROUPS + 1):
+            fixture = copy.deepcopy(source)
+            fixture["id"] = f"bulk_{index}"
+            fixture["group"] = f"group_{index}"
+            document["light_fixtures"].append(fixture)
+        errors = self.validate(document)
+        self.assertTrue(any("at most 1024 groups" in error for error in errors), errors)
+
+        document = copy.deepcopy(self.frontier)
+        document["light_fixtures"][0]["id"] = "a" * 257
+        errors = self.validate(document)
+        self.assertTrue(any("at most 256 bytes" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

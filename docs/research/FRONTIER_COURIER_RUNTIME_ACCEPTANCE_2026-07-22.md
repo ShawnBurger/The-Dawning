@@ -92,14 +92,17 @@ return silently.
 ## Deterministic Identity
 
 - Cooked assembly SHA-256:
-  `f396d99f7bb42b560868df0766612d6657dc7961364de91d4e17ce4bbfe07143`
+  `bded6f90c8a29cf2b4deae4fadebf062cabdcb2c566aa7b45a66335c0789ad42`
 - Embedded source-manifest SHA-256:
-  `60b18297bc41bb8fdde09084faa661e6b58160bbc4cd3458d4ec9efd17a54b5c`
-- Design-manifest file SHA-256:
-  `c8140d330166123d016bb75a99707feafcf6accd61478909c6bb76262969437e`
+  `1b713519f5261fe3dbc34938602c735d325cb22599532753f4225268cd14883b`
 
 The accepted Meshy source remains Git LFS-backed. Model, collision, assembly,
 and runtime-content cooks reproduce byte-for-byte from their reviewed inputs.
+The assembly is now schema v2 and carries twelve deterministic local-light
+fixtures. This extends state and presentation metadata only; it does not alter
+the accepted geometry, collision, portal, possession, or flight topology.
+The embedded hash is calculated from canonical JSON and is portable across Git
+line-ending policies; raw design-file bytes are intentionally not an identity.
 
 ## Fixture Boundary
 
@@ -115,8 +118,9 @@ same aggregate pixel extrema.
 
 The checkpoint passed:
 
-- 51 focused Python asset, cooker, collision, and Meshy-client tests
-  (49 passed and 2 environment-dependent tests skipped as designed);
+- 61 focused Python asset, cooker, collision, Meshy-client, and Courier pipeline
+  tests (58 passed and 3 environment-dependent tests skipped as designed);
+- 539 C++ unit cases and 19,487 checks with zero failures;
 - Debug and Release builds;
 - Debug and Release CTest, 6/6 in each configuration;
 - courier Release raster, stable DXR, and full-quality DXR smoke with flight;
