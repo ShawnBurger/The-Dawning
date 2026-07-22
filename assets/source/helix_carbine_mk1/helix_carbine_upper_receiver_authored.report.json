@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "tool": "tools/blender/build_helix_carbine_component.py",
+  "blender_version": "4.5.0",
+  "asset_id": "weapon.helix_carbine_mk1",
+  "component_id": "upper_receiver",
+  "module_id": "carbine_upper_receiver",
+  "plan": {
+    "path": "assets/design/helix_carbine_mk1/component_plan.json",
+    "sha256": "8cdcbaa3833118a0a98718078904413fcf6dc595ef78df6e85b3ea51a72dc377"
+  },
+  "authored_envelope_engine_xyz_m": [
+    0.078,
+    0.07,
+    0.3
+  ],
+  "assembly_position_engine_xyz_m": [
+    0.0,
+    0.0,
+    -0.02
+  ],
+  "interfaces": [
+    {
+      "id": "stock_mount",
+      "mates_to": "stock.receiver_mount",
+      "local_position": [
+        0.0,
+        0.0,
+        -0.15
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ]
+    },
+    {
+      "id": "handguard_mount",
+      "mates_to": "thermal_handguard.receiver_mount",
+      "local_position": [
+        0.0,
+        0.0,
+        0.145
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": "lower_mount",
+      "mates_to": "lower_receiver.upper_mount",
+      "local_position": [
+        0.0,
+        -0.035,
+        -0.015
+      ],
+      "normal": [
+        0.0,
+        -1.0,
+        0.0
+      ]
+    },
+    {
+      "id": "optic_mount",
+      "mates_to": "optic.receiver_mount",
+      "local_position": [
+        0.0,
+        0.035,
+        0.02
+      ],
+      "normal": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    {
+      "id": "barrel_socket",
+      "mates_to": "accelerator_barrel.receiver_socket",
+      "local_position": [
+        0.0,
+        0.0,
+        0.045
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "geometry": {
+    "object_count": 32,
+    "vertices": 4392,
+    "edges": 8484,
+    "polygons": 4152,
+    "bounds_blender_xyz_m": {
+      "minimum": [
+        -0.03849999979138374,
+        -0.14999999105930328,
+        -0.03500000014901161
+      ],
+      "maximum": [
+        0.03840000182390213,
+        0.14999999105930328,
+        0.032999999821186066
+      ],
+      "size": [
+        0.07690000534057617,
+        0.29999998211860657,
+        0.06800000369548798
+      ]
+    },
+    "objects": [
+      "UpperReceiver_AftSeamBand",
+      "UpperReceiver_BarrelSocket",
+      "UpperReceiver_ChargingSlider",
+      "UpperReceiver_ForwardAdapter",
+      "UpperReceiver_ForwardSeamBand",
+      "UpperReceiver_LowerMount",
+      "UpperReceiver_LowerMountPin",
+      "UpperReceiver_OpticDatum",
+      "UpperReceiver_Port_Fastener_0_High",
+      "UpperReceiver_Port_Fastener_0_Low",
+      "UpperReceiver_Port_Fastener_1_High",
+      "UpperReceiver_Port_Fastener_1_Low",
+      "UpperReceiver_Port_Fastener_2_High",
+      "UpperReceiver_Port_Fastener_2_Low",
+      "UpperReceiver_Port_Fastener_3_High",
+      "UpperReceiver_Port_Fastener_3_Low",
+      "UpperReceiver_Port_ServicePanel",
+      "UpperReceiver_Port_ThermalInsert",
+      "UpperReceiver_RearAdapter",
+      "UpperReceiver_ReleaseButton",
+      "UpperReceiver_Starboard_Fastener_0_High",
+      "UpperReceiver_Starboard_Fastener_0_Low",
+      "UpperReceiver_Starboard_Fastener_1_High",
+      "UpperReceiver_Starboard_Fastener_1_Low",
+      "UpperReceiver_Starboard_Fastener_2_High",
+      "UpperReceiver_Starboard_Fastener_2_Low",
+      "UpperReceiver_Starboard_Fastener_3_High",
+      "UpperReceiver_Starboard_Fastener_3_Low",
+      "UpperReceiver_Starboard_ServicePanel",
+      "UpperReceiver_Starboard_ThermalInsert",
+      "UpperReceiver_StockSocket",
+      "UpperReceiver_StructuralShell"
+    ],
+    "materials": [
+      "TD_Amber_Witness",
+      "TD_Graphite_Receiver",
+      "TD_Phosphate_Steel",
+      "TD_Thermal_Ceramic"
+    ]
+  },
+  "output": {
+    "path": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb",
+    "sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb",
+    "byte_count": 523544
+  },
+  "elapsed_seconds": 0.609
+}

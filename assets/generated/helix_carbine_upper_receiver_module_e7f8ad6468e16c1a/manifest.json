@@ -1,0 +1,58 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T17:18:55.469668+00:00",
+  "request_hash": "e7f8ad6468e16c1a844106834ea9f4b27ff1ee1eb76dd9cc67eb6f7529bb03b8",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated photorealistic upper receiver for an induction carbine, 0.30 m long, 0.078 m wide and 0.07 m high. Long axis +Z; length is at least 3.8 times width and 4.2 times height. Tapered hexagonal shell, sealed breech, rear stock socket, forward handguard flange, internal barrel socket, lower-receiver lug, low optic datum, charging actuator and service covers. One connected long low part. No barrel, handguard, lower receiver, grip, trigger, magazine, stock, optic, muzzle, ammunition, text, logo, stand, ground or background. Reject cube, ring or short coupling.",
+    "texture_prompt": "De-lit upper receiver: graphite anodized aluminum structural shell, dark phosphate steel breech and actuator, heat-darkened ceramic inserts, restrained amber witness latch and localized handling wear. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 180000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_upper_receiver",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8ad4-bfe2-7a6d-9407-dd2c2956c458",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784740628685,
+      "started_at": 1784740628864,
+      "finished_at": 1784740732138,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "f856797204c275b2e3ee5e368bff0184f99098f98de53e9628892e2480513fe6",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "1709001ef37d3b4d6c31e0528cfb749f43eb84944d11977300371cf1db490767"
+  },
+  "art_review": {
+    "status": "rejected_component_scope_violation",
+    "reviewed_at_utc": "2026-07-22T17:27:50Z",
+    "reasons": [
+      "the preview generated nearly a complete firearm despite explicit component exclusions",
+      "barrel, muzzle, handguard, lower receiver, grip, trigger and magazine geometry are fused into the requested upper receiver",
+      "refining or trimming the preview would make generated geometry authoritative for component interfaces"
+    ],
+    "disposition": "retain as a negative control; do not refine, promote or extract parts",
+    "successor_method": "blender_authored_meshy_retexture"
+  },
+  "consumed_credits": 20
+}

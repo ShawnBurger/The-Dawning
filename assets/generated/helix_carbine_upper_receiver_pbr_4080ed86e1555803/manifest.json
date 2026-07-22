@@ -1,0 +1,78 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/retexture",
+  "generated_at_utc": "2026-07-22T17:31:46.408001+00:00",
+  "request_hash": "4080ed86e1555803d8d7af4755c93550c70cab1d6e63c0244b8d7fd19eb2fa80",
+  "stage": "retexture",
+  "parameters": {
+    "input_model": {
+      "name": "helix_carbine_upper_receiver_authored.glb",
+      "mime_type": "application/octet-stream",
+      "byte_count": 523544,
+      "sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb"
+    },
+    "text_style_prompt": "De-lit upper receiver: graphite anodized aluminum structural shell, dark phosphate steel breech and actuator, heat-darkened ceramic inserts, restrained amber witness latch and localized handling wear. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage.",
+    "ai_model": "meshy-6",
+    "enable_original_uv": false,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_upper_receiver",
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "retexture": {
+      "id": "019f8adf-e418-7bc1-972b-7ad96f96cbfd",
+      "type": "retexture",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784741357064,
+      "started_at": 1784741357194,
+      "finished_at": 1784741484427,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "input_model": "input.glb",
+    "input_model_sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb",
+    "model": "model.glb",
+    "model_sha256": "be23bde09873975271c2e6fbbf53802e0e1ea2d6dc4f5866fab3f5da40c159b8",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "f6e0d7e64207d8f8a4437728de875aaa639646f80e3bd589f0a01c16b17e9cbb",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "3a7c20cf506cf3c06dfe6e101085ba3932e896a46f41925941dd52b6f79ed4e8",
+      "metallic_0": "2650cd5d4a3957fcd14f68e7f7dc23153ed9297e8f30cc8c1363b81fcd13c612",
+      "roughness_0": "e80a3c24a2514f6b663367efce332b1df05925344ecd78e65543a08a42b9c9d8",
+      "normal_0": "ad677a5d0304111387c33e87d937e31044bfe697d6c411c5aa7a4b2af04018fc",
+      "emission_0": "64f5bf91c1b05a72e62894de8469db3f884658d515a215939fd8547d0495b7cb"
+    }
+  },
+  "art_review": {
+    "status": "rejected_material_palette_drift",
+    "reviewed_at_utc": "2026-07-22T17:34:30Z",
+    "strengths": [
+      "all 8664 authored triangles and 32 disconnected hard-surface subparts survive retexture",
+      "uniform provider normalization preserves the authored proportions",
+      "PBR base-color, metallic, roughness, normal and emission outputs are present"
+    ],
+    "reasons": [
+      "the dominant olive-green finish violates the neutral graphite and gunmetal material contract",
+      "small label-like texture noise appears despite the no-text requirement"
+    ],
+    "disposition": "retain as texture negative control; do not restore scale or promote",
+    "successor_generation": "helix_carbine_upper_receiver_pbr_v2"
+  },
+  "consumed_credits": 10
+}

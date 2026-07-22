@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T17:12:09.857697+00:00",
+  "request_hash": "7f1d016217a4c84de24b7074efdc93540e0b50bbeb67ebe2791818d506f7dc73",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "e21eb61f73aa51daddb2015ab07941a658b97dce97e19c2a160b2fe5b3c60989",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8ac8-9315-755f-9ee4-61e2d44c098d",
+    "input_images": [],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_upper_receiver",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit upper receiver: graphite anodized aluminum structural shell, dark phosphate steel breech and actuator, heat-darkened ceramic inserts, restrained amber witness latch and localized handling wear. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 180000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8aca-91e9-745e-8c88-5b5bc3d487cd",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784739961683,
+      "started_at": 1784739961744,
+      "finished_at": 1784740318988,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "10c7d8644a3adbbf85d0848d6c40e7b65f7605fd600c558a8883b5b65ff4be14",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "e02a2c756f9c38758ad16fd7bb7eab8b4e81a6a652a956a201fa597cf785c24d",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "fe3f440edc2b7be55b1c62e5afaf9bf36651e189e78ca64165e7f76179187b13",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "8e429b69890b2a62635afb3801fc1c8c4ee5e29b8bf6ea6313015b2fbac48e3e",
+      "metallic_0": "765a5d8baf341ca1340e62b51070be1950bed64c418ba0c63325ad1a0bc3bf33",
+      "roughness_0": "099ae579ec3ddf1f4ef24eb943e87763cdb674ef0fd6079a7d31742a6cb89d0d",
+      "normal_0": "b8c8930e90a19b5b35f6e8ade7bbd579ce6740122148e707f6aa309d159ebcae",
+      "emission_0": "b60a16b2ca1e96605af847e15789e0627cdcb25b4b6fc9c848e6e7961a4c25ed"
+    }
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "vertices": 193300,
+    "triangles": 181061,
+    "materials": 1,
+    "textures": 4,
+    "welded_components": 1,
+    "bounds_size": [1.685055, 1.899022, 1.580117],
+    "maximum_to_minimum_dimension_ratio": 1.201824
+  },
+  "art_review": {
+    "status": "rejected_view_scale_collapse",
+    "reviewed_at_utc": "2026-07-22T17:18:00Z",
+    "reasons": [
+      "multi-view reconstruction normalized the front and rear crops against the side crop and collapsed the 4.3-to-1 receiver into a compact block",
+      "raw maximum-to-minimum bounds ratio is only 1.20",
+      "the resulting object reads as a coupling or machinery node rather than a longitudinal upper receiver"
+    ],
+    "disposition": "retain as a negative control; do not promote or fit by nonuniform stretching",
+    "successor_generation": "helix_carbine_upper_receiver_module"
+  },
+  "consumed_credits": 30
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T16:52:17.603758+00:00",
+  "request_hash": "68f30914e25c79f452a778f4bad5622ffe66fd3be5770fe6268b24a1da6878a7",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated shallow rectangular orbital-station corridor wall panel, exactly 2.4 m wide, 2.6 m high and only 0.32 m deep. Solid flat rear mounting plane; front has two structural posts, replaceable service panels, one recessed utility chase, ventilation grille, equipment locker, handrail, task-light recesses, pressure seals and fasteners. Bas-relief wall slab only, depth less than 14 percent of width, visible face +Z. No doorway, room, floor, ceiling, side chamber, furniture, loose wires, text, logo, stand, ground or background.",
+    "texture_prompt": "De-lit civic-industrial station panel: zinc-gray structural alloy, off-white replaceable panels, dark kick plate, brushed steel rail, restrained amber wayfinding accents and plausible hand wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "corridor_wall_panel_v2",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8aba-3862-7519-9fba-1198ab7126ff",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784738889768,
+      "started_at": 1784738889780,
+      "finished_at": 1784739117241,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "7178315dc75a3522d22390c7a551e6c2081a342abf6da458c6db8daecfc7c85e",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "786824710ee785e6f19f0ace30cf8f30832f366dc599b4ea3ebdac105303fa40"
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "triangles": 117444,
+    "welded_components": 5,
+    "largest_triangle_fraction": 0.970011,
+    "bounds_size": [1.8996, 1.0593, 1.8995],
+    "minimum_to_maximum_dimension_ratio": 0.5576
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T17:00:00Z",
+    "reasons": [
+      "generated a nearly square room-scale box instead of a shallow corridor wall slab",
+      "minimum-to-maximum dimension ratio is 0.558 rather than at most 0.14",
+      "five connected components and full-depth enclosure geometry violate the modular wall contract"
+    ],
+    "disposition": "retain as a negative-control shape study; do not refine or promote"
+  },
+  "consumed_credits": 20
+}

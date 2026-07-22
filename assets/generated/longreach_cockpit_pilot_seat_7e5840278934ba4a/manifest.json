@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:31:18.614290+00:00",
+  "generated_at_utc": "2026-07-22T16:08:15.285774+00:00",
   "request_hash": "7e5840278934ba4add96e551f1acc5f150dc6a153f306e120df804f3baa4c8c3",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One photorealistic spacecraft pilot seat for a suited adult, 0.74 m wide, 1.35 m high, 0.92 m deep. Rigid shock-isolated base, articulated back shell, headrest, segmented pressure cushions, five-point restraint anchors, folding arm supports, visible adjustment rails and rear service access. Human ergonomic proportions and believable construction, neutral upright pose, isolated single object, forward faces +Z. No person, cockpit, controls, screens, text, logo, stand, ground, or background.",
     "texture_prompt": "De-lit realistic cockpit seat: dark woven pressure fabric, charcoal composite shell, brushed titanium frame and rails, restrained amber release hardware, localized hand-contact wear, no baked lighting, pseudo-text, logos, broad grime, or emissive glow.",
@@ -35,21 +35,39 @@
       "started_at": 1784734152011,
       "finished_at": 1784734269639,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8a92-ca4f-7c6a-b348-91e02d41ee0d",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784736305712,
+      "started_at": 1784736305741,
+      "finished_at": 1784736477956,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "2eb0ac86d0bf49a2245bf268b9314717044646170c8f942a1a79d66532ad8c18",
     "preview": "preview.glb",
     "preview_sha256": "3088977536a9e0b62887d705aa095745ab459aba77d7785d0cee74c07502154f",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "d48195945f9ebe56252b36c2a2e456ea8abbb51b283eb80770d3a95b6947b337"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 82932,
-    "triangles": 101234,
-    "geometric_components": 1,
-    "largest_component_triangle_fraction": 1.0,
-    "source_bounds_size": [0.845929, 0.958792, 1.899406]
+    "thumbnail_sha256": "d48195945f9ebe56252b36c2a2e456ea8abbb51b283eb80770d3a95b6947b337",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "cead6eb90a450472ea0920aa8ca48e21811c9b460f899686541689880922afb0",
+      "metallic_0": "96a45bb1d50e9efc7beccd8356360b68bcb2230d28de6bbf5e96ed5f967143b2",
+      "roughness_0": "d32e1067a8e987a823ed7d1f3073a9117c0c87671625ef2e7dbe451eb742bf86",
+      "normal_0": "85bd78e8f0aa7a6a5e3f15c3d1a11f89322315a3fda5d4732e3d78d70101efcf",
+      "emission_0": "8d8e83b166e5721d2c0d0c3aba5c5669b14097dc79635d3fe6b65b29a63db53d"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -63,5 +81,5 @@
       "verify suited occupant, eye point, ingress and emergency release clearance"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }

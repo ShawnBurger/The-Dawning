@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: generation started under WS-034
+Status: broad exploration closed; modular component production active under WS-034
 
 ## Goal
 
@@ -30,20 +30,22 @@ props remain separate. Blender and The Dawning's assembly metadata retain
 authority over dimensions, axes, openings, pivots, collisions, walkability,
 navigation, pressure zones, sockets, interaction anchors, LODs, and continuity.
 
-The first paid batch is deliberately broad enough to establish all four visual
-families while preserving review gates:
+The first paid batch was deliberately broad enough to establish all four visual
+families while preserving review gates. Its actual spend was:
 
-| Stage | Count | Cost each | Maximum |
+| Stage | Count | Cost each | Actual |
 | --- | ---: | ---: | ---: |
 | GPT Image 2 multi-view concept | 5 | 9 | 45 |
 | Meshy 6 text geometry preview | 11 | 20 | 220 |
-| Conditional Meshy 6 textured multi-view | 5 | 30 | 150 |
-| Conditional accepted-preview refinement | 11 | 10 | 110 |
-| Corrective contingency | - | - | 75 |
-| **Wave ceiling** | | | **600** |
+| Meshy 6 textured multi-view reconstruction | 5 | 30 | 150 |
+| Accepted-preview refinement | 8 | 10 | 80 |
+| Corrective text preview | 5 | 20 | 100 |
+| **Broad-wave spend** | | | **595** |
 
-The verified starting account balance is 9,927 credits. The ceiling is a guard,
-not a target. Rejected geometry is not refined merely because credits remain.
+The verified starting account balance was 9,927 credits. The broad-wave hard
+ceiling was raised to 700 when corrective review was approved, but the campaign
+closed at 595. The ceiling is a guard, not a target. Rejected geometry is not
+refined merely because credits remain.
 
 Official API pricing currently charges 20 credits for a Meshy 6 text preview,
 10 for its refine stage, 30 for a textured Meshy 6 multi-image generation, and
@@ -140,5 +142,50 @@ ergonomics are authored later and cannot be inferred from the render mesh.
   reference library. Its SHA-256 is retained in the design plan without copying
   the PDF into the public repository.
 
-Generation task IDs, credits, hashes, review decisions, and promoted-source
-inventory will be appended here after the batch completes.
+## Broad-Wave Decisions
+
+The broad wave established useful source candidates for the Longreach pilot
+seat, Longreach forebody surface, Longreach drive pod, Meridian station core,
+Meridian airlock, Meridian operations console, Argent EVA suit, Helix sidearm,
+and a corrected Meridian deck panel. These remain reviewed source candidates,
+not a fused production assembly. Flight-console and wall-panel attempts that
+became room chunks or deep boxes were rejected. The original Longreach whole-
+ship reconstruction was rejected for its short, wide silhouette. Both carbine
+whole-weapon attempts were demoted to proportion or component-language reference
+because a production weapon must not be a monolithic generated mesh.
+
+The broad campaign is closed rather than extended. Its exact requests, tasks,
+hashes, bounds, and art decisions remain in generated manifests and
+`assets/design/production_wave1/wave1_plan.json`.
+
+## Modular Transition
+
+Production now follows
+`docs/research/MODULAR_ASSET_PRODUCTION_STANDARD_2026-07-22.md`: one family and
+one component at a time. The Helix Induction Carbine Mk1 is first, decomposed
+into upper receiver, lower receiver, accelerator barrel, thermal handguard,
+muzzle device, stock, magazine, and optic with reciprocal authored interfaces.
+
+Meshy twice demonstrated why this boundary matters. Multi-view reconstruction
+collapsed a 4.3:1 upper receiver into a compact machinery block, while a text
+request for only an upper receiver generated nearly a complete firearm despite
+explicit exclusions. The accepted path therefore authors exact component
+geometry in Blender and uses Meshy for bounded PBR retexturing.
+
+The first accepted production source is the Helix upper receiver:
+
+- 300 mm authored length inside a 78 x 70 x 300 mm component envelope;
+- 32 hard-surface subparts and 8,664 imported triangles;
+- rear stock, forward handguard, lower-receiver, optic, and barrel interfaces;
+- neutral graphite/gunmetal 4K PBR finish with no readable pseudo-text;
+- exact provider source, authored source, editable Blender files, hashes, task
+  provenance, and deterministic acceptance report retained under Git LFS; and
+- successful engine import with one material and four embedded texture images.
+
+Upper-receiver exploration and texture iteration spent 79 credits: one concept
+(9), one rejected multi-view reconstruction (30), one rejected text preview
+(20), one rejected olive retexture (10), and one accepted neutral retexture
+(10). Combined WS-034 spend is 674 credits and the verified remaining balance is
+9,253. The next active production component is the lower receiver; no other
+asset family becomes active until the Helix component sequence reaches its next
+explicit checkpoint.

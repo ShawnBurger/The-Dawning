@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T16:54:05.599435+00:00",
+  "request_hash": "f65d1b088ec56db37789a2e5f8e8b9b6f6b953a7c217a46324ed17dec4ab2f44",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated shallow rectangular orbital-station floor panel, exactly 2.4 m wide, 3.0 m long and only 0.22 m thick. Flat load-bearing underside; top has a framed non-slip walking surface, flush cargo tie-down sockets, two narrow utility channels, sealed access covers, threshold-compatible edges, panel gaps and fasteners. Slab only, thickness less than 8 percent of length, clear uninterrupted 1.5 m central walking strip, top faces +Y. No wall, ceiling, room, furniture, raised obstacle, loose cable, text, logo, stand, ground or background.",
+    "texture_prompt": "De-lit station deck: dark graphite non-slip panels, zinc-gray frame, brushed steel tie-downs, restrained amber edge inlays without symbols and localized foot wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 110000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "deck_service_panel_v2",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8abe-054d-7691-8fdc-a2f36e2e952e",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784739138913,
+      "started_at": 1784739139439,
+      "finished_at": 1784739227825,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "cb3f18b94d6914948ad12a63c89e1fa851ac053c87cdef3fffbbda138895ea12",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "bfa5664fe264b1dc8701689b1bc3a8332b19bdd140920f7d3c31da2e099817e0"
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "triangles": 108761,
+    "welded_components": 1,
+    "bounds_size": [1.8893, 1.6135, 0.0806],
+    "minimum_to_maximum_dimension_ratio": 0.0427
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T17:00:00Z",
+    "strengths": [
+      "single connected shallow slab with a 0.043 thickness-to-length ratio",
+      "clear uninterrupted center region and bounded edge/service detail",
+      "silhouette can normalize to the authored 2.4 x 3.0 x 0.22 m deck envelope"
+    ],
+    "required_cleanup": [
+      "verify the top face and walking strip after axis normalization",
+      "author walkability, collision and tie-down sockets independently of render geometry"
+    ]
+  },
+  "consumed_credits": 20
+}

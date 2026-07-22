@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:48:04.517097+00:00",
+  "generated_at_utc": "2026-07-22T16:21:41.032980+00:00",
   "request_hash": "3576e00b5cabb93d40da8a706891c6897c2da67f71c59e2f21d0adfd08a7c02b",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One photorealistic two-person orbital-station operations console, 3.0 m wide, 1.25 m high and 1.05 m deep. Structural pedestal, angled work surface, replaceable physical display bezels, guarded switches, rotary controls, communication handset cradles, handholds, ventilation, cable access and rear service panels. Civil traffic-control and docking hardware with ergonomic reach and layered depth, isolated single object, operator side faces -Z. No chairs, room, floating screens, holograms, fake text, logos, stand, ground, or background.",
     "texture_prompt": "De-lit realistic station control hardware: low-glare graphite composite, off-white alloy shell, anodized metal bezels, physical black display glass, brushed controls, restrained amber and cyan lenses, subtle hand wear, no baked highlights, pseudo-text, logos, random grime, or active emissive content.",
@@ -35,21 +35,39 @@
       "started_at": 1784735137739,
       "finished_at": 1784735281192,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8a9e-c71f-7153-946c-9623a8aea869",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784737091525,
+      "started_at": 1784737091559,
+      "finished_at": 1784737285567,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "235f1d7f04ac6be6fb37d354c05fba69458d8b2ad148f9b4ed71fd54619a5856",
     "preview": "preview.glb",
     "preview_sha256": "11551be8852c3aa736499d3141b192898578db20ee8cef0ebd20a9e3a12737e7",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "1b8124f715073c749e4f421017089f130dc188641bb21526fe24be12f10ceb5e"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 149451,
-    "triangles": 137252,
-    "geometric_components": 2,
-    "largest_component_triangle_fraction": 0.99796,
-    "source_bounds_size": [1.899674, 1.149515, 1.627114]
+    "thumbnail_sha256": "1b8124f715073c749e4f421017089f130dc188641bb21526fe24be12f10ceb5e",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "d4a2efc578152585f566c7097a31bffe1ba682dbb2c7de77e3904078048ff7d3",
+      "metallic_0": "faf7aec41a14cdcf75c1c499bd662471d5cc1ebb1bd6b63deaf77ddfb93844c8",
+      "roughness_0": "d8eef9a7e8e9ed6184edb4850a7428656d5a5473c961bc8f773e1c35459acdd0",
+      "normal_0": "eadbf24fec93d1a0c28ca972986fe5b3946bd7772558f7d0d034d8234c01f078",
+      "emission_0": "016a6ed3d929e5ec06c323480d8dfeff991aeffe83757cd62206e6c9e4b36d42"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -64,5 +82,5 @@
       "verify two standing or seated reach envelopes and corridor circulation"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }

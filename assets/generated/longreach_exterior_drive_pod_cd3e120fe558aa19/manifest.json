@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:53:09.972005+00:00",
+  "generated_at_utc": "2026-07-22T16:27:22.987104+00:00",
   "request_hash": "cd3e120fe558aa19634e33a482a4b06c4ce55a291a6ec7b453b24e004b04ccce",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One isolated photorealistic longitudinal spacecraft drive pod, 13 m long, 3.2 m wide and 3.0 m high. Armored forward mount, serviceable reactor and power casing, thermal-break structure, radiator channels, RCS cluster, gimbal housing and one large aft plasma nozzle. Clear structural mounting rail along the inboard side, layered aerospace construction and realistic bevels, forward faces +Z. One connected object only. No ship hull, second pod, wings, weapon, landing gear, loose pipes, text, logo, stand, ground, or background.",
     "texture_prompt": "De-lit photorealistic spacecraft drive hardware: dark carbon-composite casing, brushed titanium mounts, charcoal ceramic thermal panels, heat-stained nozzle alloy, restrained amber service latches, localized thermal and maintenance wear. No baked lighting, pseudo-text, logos, glowing seams, broad grime, or battle damage.",
@@ -35,21 +35,39 @@
       "started_at": 1784735503430,
       "finished_at": 1784735584775,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8aa4-9bd8-73a0-bd39-8dbe2c3c3dd3",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784737473376,
+      "started_at": 1784737473653,
+      "finished_at": 1784737624797,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "460c87de093ea166fb21d637c531f0f159eaf42994a650d70c6680fdc815c3c6",
     "preview": "preview.glb",
     "preview_sha256": "f755e8498e53e176b9b1462d5cfc2f19c07228b4934a780cc0f262f580a59553",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "553f55678469afb37920bc113380844f5a72f9fa9ddae98671e27f8924ad3106"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 97330,
-    "triangles": 122144,
-    "geometric_components": 1,
-    "largest_component_triangle_fraction": 1.0,
-    "source_bounds_size": [1.899536, 0.499894, 0.509382]
+    "thumbnail_sha256": "553f55678469afb37920bc113380844f5a72f9fa9ddae98671e27f8924ad3106",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "9e91e687e449a52bca19346ba4804641882776c383d3712067ce4de68737762f",
+      "metallic_0": "0c791c940c1d16aecb47541b71ef479a812480c63cf6a536aa6c44a9877b9a05",
+      "roughness_0": "9508577a9e76a570dc1cbb1877504a7a4c474ebe01e8e945f3e77ac6a31ef9fb",
+      "normal_0": "1d318f0c4319bc746730a40087234b9127c27bf264c3fbcdd610174e2327e9d5",
+      "emission_0": "ebffa95149b2347fd61f639e806707e22f4668f0f7cbfa5a731551200efb64d7"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -64,5 +82,5 @@
       "mirror only through the authored ship assembly rather than duplicating source identity"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }

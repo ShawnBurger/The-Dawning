@@ -1,0 +1,85 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/retexture",
+  "generated_at_utc": "2026-07-22T17:35:35.371820+00:00",
+  "request_hash": "36c29e5f3113fa62a0df571ecced96cb8a04c19fd241689fbba1caf46c64e91f",
+  "stage": "retexture",
+  "parameters": {
+    "input_model": {
+      "name": "helix_carbine_upper_receiver_authored.glb",
+      "mime_type": "application/octet-stream",
+      "byte_count": 523544,
+      "sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb"
+    },
+    "text_style_prompt": "Neutral graphite-black receiver only: near-black anodized aluminum shell, neutral dark gray phosphate steel couplings and fasteners, charcoal ceramic inserts, one small muted amber mechanical witness. RGB-neutral metals; absolutely no green, olive, teal, blue, brown, camouflage, lettering, symbols, numbers, pseudo-text, logos, glow, baked highlights, broad grime or damage. Fine directional machining and restrained edge wear only.",
+    "ai_model": "meshy-6",
+    "enable_original_uv": false,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_upper_receiver",
+    "pipeline_version": 1
+  },
+  "tasks": {
+    "retexture": {
+      "id": "019f8ae3-fa42-7302-b943-860cf683bceb",
+      "type": "retexture",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784741626242,
+      "started_at": 1784741626303,
+      "finished_at": 1784741722241,
+      "consumed_credits": 10
+    }
+  },
+  "files": {
+    "input_model": "input.glb",
+    "input_model_sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb",
+    "model": "model.glb",
+    "model_sha256": "710b39c9f2795e2a1797a4a5fd693b14a8676559464ab629ed4481b13e1aa7cd",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "1356ceecc791f5435e8fed66bbf1e3a8164f562b8efe7a3e617b5c4031e24651",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "845d7fd583bc23abd4025b24888f73daab53693c3dcc608cf077386508732a8d",
+      "metallic_0": "8e062d94beb3297c4cf8fc3ec82f4f147d5bb0430fa244d025e75ea2229ed168",
+      "roughness_0": "f9c3bc9b3349a5eada1cace049ffc098ed2ec6ef2cfc6b138be18940fd7dbb98",
+      "normal_0": "e811656066cf1c768a31bea44262795b89f871c910d59935675fc20664e61819",
+      "emission_0": "36cda91911db2c3e8e5add10f80c45326bcadeaa07684bd8da18993f4747211c"
+    }
+  },
+  "art_review": {
+    "status": "accepted_for_source_promotion",
+    "reviewed_at_utc": "2026-07-22T17:44:14Z",
+    "strengths": [
+      "neutral graphite and gunmetal palette satisfies the Helix material contract",
+      "no readable text, logo, decorative glow or dominant hue drift is visible in four review angles",
+      "all 8664 authored triangles and 32 geometric subparts are preserved",
+      "4K base-color and normal maps plus packed metallic-roughness survive exact-scale finalization"
+    ],
+    "acceptance": {
+      "production_source": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.glb",
+      "production_report": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.report.json",
+      "uniform_restore_scale": 0.14999999555954233,
+      "authored_bounds_engine_xyz_m": [0.0768999, 0.0680001, 0.3],
+      "engine_import_triangles": 8664,
+      "engine_import_textures": 4
+    },
+    "required_runtime_work": [
+      "bind authored interfaces from the component plan rather than deriving sockets from render geometry",
+      "author collision, interaction states and moving-part pivots separately"
+    ]
+  },
+  "consumed_credits": 10
+}

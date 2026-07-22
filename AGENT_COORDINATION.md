@@ -2428,7 +2428,7 @@ are now integrated as well. The current order is:
 
 ### WS-034: Production asset generation wave 1
 
-- Status: ACTIVE
+- Status: ACTIVE - MODULAR PRODUCTION
 - Outcome: generate, inspect, and retain the first high-detail source-art wave
   for a longitudinal production ship and modular cockpit, a boardable station
   and modular interior, a modular hard-surface suit, and a modular weapon
@@ -2440,11 +2440,14 @@ are now integrated as well. The current order is:
 - Worktree:
   `D:\The Dawning (new)\.agents\worktrees\codex-production-assets-wave1`
 - Base commit: `0085f96`
-- Owned paths: `assets/design/production_wave1/**`; new WS-034-only directories
+- Owned paths: `assets/design/production_wave1/**`,
+  `assets/design/helix_carbine_mk1/**`; new WS-034-only directories
   under `assets/generated/**`; accepted WS-034 source masters under
-  `assets/source/production_wave1/**`; targeted Meshy review-gate hardening;
+  `assets/source/production_wave1/**` and `assets/source/helix_carbine_mk1/**`;
+  targeted Meshy review-gate hardening;
   additive `tools/blender/**` review and normalization scripts; focused Python asset-review tests; and
-  `docs/research/PRODUCTION_ASSET_WAVE1_2026-07-22.md`
+  `docs/research/PRODUCTION_ASSET_WAVE1_2026-07-22.md` plus
+  `docs/research/MODULAR_ASSET_PRODUCTION_STANDARD_2026-07-22.md`
 - Excluded paths: `CMakeLists.txt`, `src/app.*`, `src/render/**`, `src/scene/**`,
   `shaders/**`, `src/sim/**`, existing Frontier Courier source/runtime files,
   runtime catalog registration, collision/navigation cooking, atmosphere,
@@ -2454,16 +2457,18 @@ are now integrated as well. The current order is:
   Frontier Courier testing fixture. Runtime integration begins in a later
   claimed lane after source acceptance.
 - Generation contract: use Meshy 6, GLB-only output, PBR maps, lighting removal,
-  and 4K base color only for accepted close-view hero candidates. Use reviewed
-  multi-view references for primary silhouettes; use bounded text-to-3D modules
-  for architecture and props. Exterior, interior shell, fixtures, and moving
-  parts are separate assets. The design authority declares dimensions, sockets,
-  clearances, pivots, material intent, and source-to-runtime disposition before
-  promotion.
-- Credit budget: up to 600 credits for wave 1 from the verified 9,927-credit
-  balance. Every invocation is dry-run first and content addressed. Geometry
-  previews or concepts are reviewed before texture/refine spend; failed and
-  rejected candidates retain manifests and reasons but do not enter Git LFS.
+  and 4K base color only for accepted close-view hero candidates. Production is
+  now strictly one asset family and one component at a time. Precision modules
+  receive authored Blender geometry before Meshy retexturing; generated scale,
+  sockets, collision, behavior, and interface placement remain non-authoritative.
+  Exterior, interior shell, fixtures, and moving parts are separate assets. The
+  design authority declares dimensions, reciprocal interfaces, clearances,
+  pivots, material intent, and source-to-runtime disposition before promotion.
+- Credit budget: the broad wave closed at 595 credits under its 700-credit hard
+  ceiling. The successor Helix modular campaign has a separate 200-credit hard
+  ceiling from the verified 9,332-credit campaign-start balance. Every invocation
+  is dry-run first and content addressed. Rejected candidates retain manifests
+  and reasons but do not become production source.
 - Initial families: a 52 x 18 x 11 m long-range expedition ship exterior and
   cockpit architecture kit; a modular orbital station hub/docking exterior and
   2.4 m-clear station corridor/airlock/operations kit; a human-scale modular EVA
@@ -2482,11 +2487,18 @@ are now integrated as well. The current order is:
   collisions, walkability, pressure topology, pivots, or sockets cannot override
   authored values; visually attractive but dimensionally or functionally
   incoherent candidates are rejected without refinement.
-- Current checkpoint (2026-07-22): lane claimed from clean `origin/main`; live
-  Meshy balance verified at 9,927 credits; official API pricing and current
-  Meshy 6/PBR/de-lighting behavior rechecked before spend.
-- Next action: author the wave design authority and prompt manifest, dry-run the
-  exact requests, then launch and review the first geometry/concept batch.
+- Current checkpoint (2026-07-22): the broad exploration campaign is closed
+  after 595 credits of concepts, previews, reconstructions, refinements, and
+  corrective controls. The Helix upper receiver is the first accepted modular
+  production component: 32 authored geometric subparts, 8,664 triangles, a
+  reviewed 4K PBR retexture, exact 300 mm restored length, five authored
+  interfaces, untouched vendor source, editable Blender sources, deterministic
+  acceptance report, and successful engine import. Component exploration and
+  texture iteration consumed 79 additional credits; verified balance after
+  acceptance is 9,253 credits. Twenty-nine focused tests pass.
+- Next action: checkpoint and publish component 1, then activate only the Helix
+  lower receiver. Continue the same authored-geometry, bounded-retexture,
+  four-angle-review, exact-scale-acceptance sequence before any third component.
 
 ## 20. Helper Commands
 

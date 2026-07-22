@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:36:35.970681+00:00",
+  "generated_at_utc": "2026-07-22T16:14:58.817463+00:00",
   "request_hash": "2c78c8b21fc6401c3b8876920e7745b9c12889846dc06cebb5aa44044b14f9b0",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One photorealistic modular spacecraft cockpit service-wall bay, exactly 2.4 m wide, 2.5 m high and 0.28 m deep. Structural edge rails, removable pressure liner panels, flush equipment access doors, recessed cable and ventilation channel, two handholds, integrated task-light recesses, believable fasteners, seals and physical thickness. Flat rectangular rear mounting plane, isolated single object, visible face +Z. No floor, ceiling, window, room, pipes outside the bay, text, logo, stand, ground, or background.",
     "texture_prompt": "De-lit spacecraft interior architecture: warm gray painted alloy panels, dark graphite rails and seals, brushed titanium fasteners, restrained amber maintenance latches, subtle edge and hand wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow.",
@@ -35,21 +35,39 @@
       "started_at": 1784734469327,
       "finished_at": 1784734589019,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8a99-3d60-7ea7-86a7-e5b050b2d8e1",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784736728997,
+      "started_at": 1784736729425,
+      "finished_at": 1784736875886,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "c82b4cf6f262ce65b28e109b6f42bcce0078da8bd52e2841e8ac8e45072bbed0",
     "preview": "preview.glb",
     "preview_sha256": "753f8f0f130e6d1a1b4c378b25009b8f0395ac975942bd23430ab0978d45cf8c",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "6e34572bf12ca09d8f36aa84213e21e4ca780525130c4ce0263fe35a5abc8d6d"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 100895,
-    "triangles": 110032,
-    "geometric_components": 3,
-    "largest_component_triangle_fraction": 0.98684,
-    "source_bounds_size": [1.015106, 1.061274, 1.910166]
+    "thumbnail_sha256": "6e34572bf12ca09d8f36aa84213e21e4ca780525130c4ce0263fe35a5abc8d6d",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "bbdf318dfae49084bb642141583bdfb44cf0ad3d319b3b5c0c2a73d2bae0b303",
+      "metallic_0": "cad94f0275264f806c88e8f2235f449393b59ca2d7a363ac8f49d0c97d42563d",
+      "roughness_0": "437961586d0e267ddf11c59d4b24e4cdd210bf6b1011c48bcbc8fdb3393890ef",
+      "normal_0": "db965692ddf6055f10787161127051762bfdb26c5c920ef649370416d077c13a",
+      "emission_0": "0b53057027e3d08b63ebf61e45921559e5ff1dfcfaf11c970ab99818418ff477"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -65,5 +83,5 @@
       "preserve the authored 0.28 m maximum wall depth and corridor clearance"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }

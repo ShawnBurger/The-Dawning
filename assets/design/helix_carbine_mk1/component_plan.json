@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "campaign_id": "helix_carbine_mk1_modular_2026_07_22",
+  "status": "component_1_accepted_component_2_pending",
+  "asset_id": "weapon.helix_carbine_mk1",
+  "display_name": "Helix Induction Carbine Mk1",
+  "units": "meters",
+  "generation_policy": {
+    "asset_families_in_parallel": 1,
+    "active_components_at_once": 1,
+    "strict_serial_generation": true,
+    "concept_review_required_before_reconstruction": true,
+    "concept_generation_optional": true,
+    "authored_geometry_required_before_retexture": true,
+    "text_generated_component_geometry_allowed": false,
+    "reject_inconsistent_multiview_scale": true,
+    "reconstruction_review_required_before_source_promotion": true,
+    "whole_asset_generation_allowed": false,
+    "generated_collision_allowed": false,
+    "generated_ballistics_allowed": false,
+    "generated_socket_positions_are_authoritative": false
+  },
+  "credit_policy": {
+    "verified_balance_at_campaign_start": 9332,
+    "campaign_ceiling": 200,
+    "component_count": 8,
+    "retexture_credits_each": 10,
+    "planned_component_generation_credits": 80,
+    "accepted_component_credits": 10,
+    "remaining_planned_component_credits": 70,
+    "spent_exploration_credits": 69,
+    "contingency_credits": 51,
+    "verified_balance_after_component_1": 9253
+  },
+  "coordinate_system": {
+    "handedness": "left",
+    "width_axis": "+X",
+    "up_axis": "+Y",
+    "muzzle_axis": "+Z",
+    "assembly_origin": "upper receiver center"
+  },
+  "assembly_envelope": {
+    "width_x": 0.085,
+    "height_y": 0.27,
+    "length_z": 0.86,
+    "bounds_min": [-0.0425, -0.19, -0.39],
+    "bounds_max": [0.0425, 0.08, 0.47]
+  },
+  "design_language": {
+    "construction": "sealed vacuum-rated induction weapon with a tapered hexagonal structural spine and field-replaceable rigid modules",
+    "materials": [
+      "graphite anodized aluminum",
+      "dark phosphate steel",
+      "heat-darkened ceramic",
+      "charcoal fiber-reinforced polymer",
+      "restrained amber witness hardware"
+    ],
+    "reject": [
+      "AR-15 or M4 silhouette",
+      "AK silhouette",
+      "Picatinny rail carpet",
+      "glowing strip decoration",
+      "pseudo-text or logos",
+      "fused moving parts",
+      "detached floating detail"
+    ]
+  },
+  "reference_study": {
+    "manifest": "assets/generated/helix_induction_carbine_v2_04e00a02622abf5c/manifest.json",
+    "request_hash": "04e00a02622abf5c92856ba77997e57bdc365188ca971188cd7525bd2d2e65c5",
+    "use": "proportion and family-language reference only",
+    "promotion_allowed": false
+  },
+  "components": [
+    {
+      "order": 1,
+      "component_id": "upper_receiver",
+      "module_id": "carbine_upper_receiver",
+      "display_name": "Upper Receiver and Accelerator Spine",
+      "status": "source_promoted",
+      "evidence": {
+        "approved_concept_manifest": "assets/generated/helix_carbine_upper_receiver_concept_e21eb61f73aa51da/manifest.json",
+        "rejected_multiview_manifest": "assets/generated/helix_carbine_upper_receiver_7f1d016217a4c84d/manifest.json",
+        "rejected_text_preview_manifest": "assets/generated/helix_carbine_upper_receiver_module_e7f8ad6468e16c1a/manifest.json",
+        "rejected_retexture_manifest": "assets/generated/helix_carbine_upper_receiver_pbr_4080ed86e1555803/manifest.json",
+        "accepted_retexture_manifest": "assets/generated/helix_carbine_upper_receiver_pbr_v2_36c29e5f3113fa62/manifest.json",
+        "authored_source": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb",
+        "authored_report": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.report.json",
+        "authored_blend": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.blend",
+        "accepted_vendor_source": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_retexture_source.glb",
+        "production_source": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.glb",
+        "production_report": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.report.json",
+        "production_blend": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.blend"
+      },
+      "assembly_position": [0.0, 0.0, -0.02],
+      "envelope": [0.078, 0.07, 0.30],
+      "interfaces": [
+        {"id": "stock_mount", "mates_to": "stock.receiver_mount", "local_position": [0.0, 0.0, -0.15], "normal": [0.0, 0.0, -1.0]},
+        {"id": "handguard_mount", "mates_to": "thermal_handguard.receiver_mount", "local_position": [0.0, 0.0, 0.145], "normal": [0.0, 0.0, 1.0]},
+        {"id": "lower_mount", "mates_to": "lower_receiver.upper_mount", "local_position": [0.0, -0.035, -0.015], "normal": [0.0, -1.0, 0.0]},
+        {"id": "optic_mount", "mates_to": "optic.receiver_mount", "local_position": [0.0, 0.035, 0.02], "normal": [0.0, 1.0, 0.0]},
+        {"id": "barrel_socket", "mates_to": "accelerator_barrel.receiver_socket", "local_position": [0.0, 0.0, 0.045], "normal": [0.0, 0.0, 1.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_upper_receiver_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated upper receiver and accelerator spine for a fictional vacuum-rated induction carbine, exactly 0.30 m long, 0.078 m wide and 0.07 m high. Tapered hexagonal structural shell, sealed breech volume, lower-receiver lug, rear stock socket, forward handguard flange, internal barrel socket, low optic datum, charging actuator and service covers. Distinct non-AR hard-surface design. No barrel, handguard, lower receiver, grip, trigger, magazine, stock, optic, muzzle, ammunition, text, logo, stand, ground or background."
+      },
+      "generation": {
+        "method": "blender_authored_meshy_retexture",
+        "name": "helix_carbine_upper_receiver_pbr_v2",
+        "builder": "tools/blender/build_helix_carbine_component.py",
+        "input_model": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb",
+        "expected_retexture_credits": 10,
+        "ai_model": "meshy-6",
+        "enable_original_uv": false,
+        "enable_pbr": true,
+        "hd_texture": true,
+        "remove_lighting": true,
+        "accepted_request_hash": "36c29e5f3113fa62a0df571ecced96cb8a04c19fd241689fbba1caf46c64e91f",
+        "accepted_task_id": "019f8ae3-fa42-7302-b943-860cf683bceb",
+        "texture_prompt": "Neutral graphite-black receiver only: near-black anodized aluminum shell, neutral dark gray phosphate steel couplings and fasteners, charcoal ceramic inserts, one small muted amber mechanical witness. RGB-neutral metals; absolutely no green, olive, teal, blue, brown, camouflage, lettering, symbols, numbers, pseudo-text, logos, glow, baked highlights, broad grime or damage. Fine directional machining and restrained edge wear only."
+      },
+      "reconstruction": {
+        "polycount": 180000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit upper receiver: graphite anodized aluminum structural shell, dark phosphate steel breech and actuator, heat-darkened ceramic inserts, restrained amber witness latch and localized handling wear. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage."
+      }
+    },
+    {
+      "order": 2,
+      "component_id": "lower_receiver",
+      "module_id": "carbine_lower_receiver",
+      "display_name": "Lower Receiver and Grip Module",
+      "status": "pending",
+      "assembly_position": [0.0, -0.08, -0.035],
+      "envelope": [0.076, 0.09, 0.20],
+      "interfaces": [
+        {"id": "upper_mount", "mates_to": "upper_receiver.lower_mount", "local_position": [0.0, 0.045, 0.0], "normal": [0.0, 1.0, 0.0]},
+        {"id": "magazine_well", "mates_to": "magazine.magazine_well", "local_position": [0.0, -0.0325, 0.05], "normal": [0.0, -1.0, 0.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_lower_receiver_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated lower receiver and grip module for the same fictional Helix induction carbine, exactly 0.20 m long, 0.076 m wide and 0.09 m high. Sealed upper mounting bed, ergonomic gloved-hand pistol grip, protected trigger and guard, ambidextrous selector, removable magazine well, service pins and rounded pressure-safe edges. Distinct non-AR geometry. No upper receiver, barrel, handguard, magazine, stock, optic, muzzle, ammunition, hand, person, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 150000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit lower receiver: graphite anodized frame, charcoal fiber-reinforced grip with fine molded texture, phosphate steel controls and pins, restrained amber selector witness and localized hand wear. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage."
+      }
+    },
+    {
+      "order": 3,
+      "component_id": "accelerator_barrel",
+      "module_id": "carbine_accelerator_barrel",
+      "display_name": "Accelerator Barrel Group",
+      "status": "pending",
+      "assembly_position": [0.0, 0.0, 0.22],
+      "envelope": [0.036, 0.036, 0.39],
+      "interfaces": [
+        {"id": "receiver_socket", "mates_to": "upper_receiver.barrel_socket", "local_position": [0.0, 0.0, -0.195], "normal": [0.0, 0.0, -1.0]},
+        {"id": "muzzle_thread", "mates_to": "muzzle_device.barrel_thread", "local_position": [0.0, 0.0, 0.185], "normal": [0.0, 0.0, 1.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_accelerator_barrel_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated fictional induction-carbine accelerator barrel group, 0.39 m long and 0.036 m in maximum diameter. Straight precision bore tube inside segmented electromagnetic collar rings, reinforced breech coupling at the rear, threaded field-collimator interface at the muzzle, ceramic thermal breaks and two service flats. Functional restrained science-fiction hardware. No receiver, handguard, muzzle device, optic, stock, grip, magazine, ammunition, wires, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 100000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit accelerator barrel: dark phosphate steel bore tube, heat-darkened alloy collar rings, matte ceramic thermal breaks, brushed coupling surfaces and subtle axial heat discoloration. No baked lighting, pseudo-text, logos, glowing coils, broad grime or damage."
+      }
+    },
+    {
+      "order": 4,
+      "component_id": "thermal_handguard",
+      "module_id": "carbine_thermal_handguard",
+      "display_name": "Thermal Handguard",
+      "status": "pending",
+      "assembly_position": [0.0, 0.0, 0.24],
+      "envelope": [0.085, 0.08, 0.24],
+      "interfaces": [
+        {"id": "receiver_mount", "mates_to": "upper_receiver.handguard_mount", "local_position": [0.0, 0.0, -0.115], "normal": [0.0, 0.0, -1.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_thermal_handguard_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated thermal handguard for the same fictional Helix induction carbine, 0.24 m long, 0.085 m wide and 0.08 m high. Tapered hexagonal ceramic-composite shell around a clear central barrel passage, vented thermal ribs, gloved-hand gripping flats, forward sling socket, rear receiver flange and two removable service panels. No Picatinny rails. No barrel, receiver, grip, magazine, stock, optic, muzzle, ammunition, hand, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 150000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit handguard: charcoal heat-resistant ceramic-composite shell, graphite alloy flange, dark recessed vents, brushed steel sling socket and restrained amber inspection latch. No baked lighting, pseudo-text, logos, glowing strips, camouflage, broad grime or damage."
+      }
+    },
+    {
+      "order": 5,
+      "component_id": "muzzle_device",
+      "module_id": "carbine_muzzle_device",
+      "display_name": "Field Collimator Muzzle Device",
+      "status": "pending",
+      "assembly_position": [0.0, 0.0, 0.4325],
+      "envelope": [0.052, 0.052, 0.075],
+      "interfaces": [
+        {"id": "barrel_thread", "mates_to": "accelerator_barrel.muzzle_thread", "local_position": [0.0, 0.0, -0.0275], "normal": [0.0, 0.0, -1.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_muzzle_device_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated fictional induction-carbine field-collimator muzzle device, 0.075 m long and 0.052 m in maximum diameter. Short armored cylindrical body, rear threaded barrel coupling, faceted expansion crown, four symmetric pressure vents, replaceable ceramic lip and tool flats. Compact functional restrained science-fiction hardware. No barrel, receiver, handguard, stock, optic, grip, magazine, ammunition, projectile, flame, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 100000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit muzzle device: heat-darkened nickel alloy, matte ceramic crown insert, brushed tool flats, subtle symmetric thermal discoloration and one restrained amber alignment witness. No baked lighting, pseudo-text, logos, glow, carbon blanket, broad grime or damage."
+      }
+    },
+    {
+      "order": 6,
+      "component_id": "stock",
+      "module_id": "carbine_stock",
+      "display_name": "Shock-Isolated Shoulder Stock",
+      "status": "pending",
+      "assembly_position": [0.0, 0.0, -0.28],
+      "envelope": [0.074, 0.13, 0.22],
+      "interfaces": [
+        {"id": "receiver_mount", "mates_to": "upper_receiver.stock_mount", "local_position": [0.0, 0.0, 0.11], "normal": [0.0, 0.0, 1.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_stock_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated shock-isolated shoulder stock for the same fictional Helix induction carbine, 0.22 m long, 0.074 m wide and 0.13 m high. Rigid tapered composite spine, sealed receiver coupling, adjustable cheek surface, compact recoil damper, curved pressure-suit shoulder pad, sling socket and locking lever. Distinct non-AR design with no buffer tube. No receiver, grip, barrel, handguard, magazine, optic, muzzle, person, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 130000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit stock: charcoal fiber-reinforced polymer spine, dark elastomer shoulder pad, graphite alloy coupling, brushed damper hardware and restrained amber locking witness. No baked lighting, pseudo-text, logos, glow, camouflage, broad grime or damage."
+      }
+    },
+    {
+      "order": 7,
+      "component_id": "magazine",
+      "module_id": "carbine_magazine",
+      "display_name": "Power and Flechette Magazine",
+      "status": "pending",
+      "assembly_position": [0.0, -0.145, 0.015],
+      "envelope": [0.066, 0.09, 0.10],
+      "interfaces": [
+        {"id": "magazine_well", "mates_to": "lower_receiver.magazine_well", "local_position": [0.0, 0.0325, 0.0], "normal": [0.0, 1.0, 0.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_magazine_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated removable magazine for the same fictional Helix induction carbine, 0.10 m long, 0.066 m wide and 0.09 m high. Compact sealed rectangular power-and-flechette cassette, reinforced feed neck, positive latch recess, gloved extraction ribs, shielded base plate and one mechanical charge witness window. Functional fictional hardware. No receiver, grip, barrel, stock, optic, loose ammunition, projectile, cable, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 100000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit magazine: charcoal impact polymer shell, graphite alloy feed neck and base plate, dark elastomer seals, brushed latch surface and restrained amber mechanical witness window. No baked lighting, pseudo-text, logos, glow, camouflage, broad grime or damage."
+      }
+    },
+    {
+      "order": 8,
+      "component_id": "optic",
+      "module_id": "carbine_optic",
+      "display_name": "Vacuum-Sealed Reflex Optic",
+      "status": "pending",
+      "assembly_position": [0.0, 0.055, 0.0],
+      "envelope": [0.048, 0.04, 0.13],
+      "interfaces": [
+        {"id": "receiver_mount", "mates_to": "upper_receiver.optic_mount", "local_position": [0.0, -0.02, 0.0], "normal": [0.0, -1.0, 0.0]}
+      ],
+      "concept": {
+        "name": "helix_carbine_optic_concept",
+        "image_model": "gpt-image-2",
+        "pose_mode": null,
+        "expected_credits": 9,
+        "prompt": "Original photorealistic multiview concept of one isolated vacuum-sealed reflex optic for the same fictional Helix induction carbine, 0.13 m long, 0.048 m wide and 0.04 m high. Low armored graphite housing, clear protected optical window, compact rear eyepiece, positive receiver clamp, two tactile adjustment drums, backup sight notch and service-cell cover. No weapon, receiver, mount rail, person, reticle graphic, text, logo, stand, ground or background."
+      },
+      "reconstruction": {
+        "polycount": 120000,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit optic: graphite anodized housing, low-glare neutral optical glass, phosphate steel clamp and adjustment drums, dark elastomer seals and one restrained amber power witness. No baked lighting, pseudo-text, logos, visible reticle, glow, broad grime or damage."
+      }
+    }
+  ]
+}

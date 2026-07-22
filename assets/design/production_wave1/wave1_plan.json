@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "wave_id": "production_assets_wave1_2026_07_22",
-  "status": "generation_ready",
+  "status": "closed_after_review_for_modular_transition",
+  "successor_plan": "assets/design/helix_carbine_mk1/component_plan.json",
   "units": "meters",
   "coordinate_system": {
     "handedness": "left",
@@ -11,12 +12,17 @@
   },
   "credit_policy": {
     "verified_balance_at_claim": 9927,
-    "wave_ceiling": 600,
+    "wave_ceiling": 700,
     "planned_concept_credits": 45,
-    "planned_preview_credits": 220,
+    "planned_preview_credits": 320,
     "conditional_multiview_credits": 150,
-    "conditional_refine_credits": 110,
-    "contingency_credits": 75,
+    "conditional_refine_credits": 160,
+    "contingency_credits": 25,
+    "primary_batch_spent_credits": 495,
+    "balance_after_primary_batch": 9432,
+    "corrective_preview_spent_credits": 100,
+    "broad_wave_spent_credits": 595,
+    "balance_after_broad_wave": 9332,
     "refine_only_after_geometry_acceptance": true
   },
   "source_references": [
@@ -324,6 +330,61 @@
       "expected_credits": 20,
       "prompt": "One isolated photorealistic full-length shoulder-fired service carbine, 0.86 m long and at most 0.27 m high; length is at least 3.2 times height. Long barrel and receiver, shoulder stock well behind the pistol grip, removable box magazine ahead of the trigger, low-profile optic, charging handle, selector, trigger guard, heat shield, sling points and service latches. Restrained near-future engineering, long axis +Z. No person, hands, ammunition, bipod, floating parts, text, logo, stand, ground, or background. Reject a pistol, sidearm, stockless gun, compact SMG or PDW silhouette."
       ,"texture_prompt": "De-lit photorealistic service carbine: dark phosphate steel barrel and controls, graphite anodized aluminum receiver, charcoal fiber-reinforced polymer grip and stock, heat-stained barrel shroud, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked lighting, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage."
+    },
+    {
+      "request_id": "preview.ship.longreach.flight_console_v2",
+      "phase": "preview",
+      "name": "longreach_cockpit_flight_console_v2",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_flight_console_v2",
+      "polycount": 150000,
+      "expected_credits": 20,
+      "prompt": "One isolated freestanding two-crew spacecraft flight-control desk, exactly 4.8 m wide, 1.15 m high and 1.25 m deep. Low central sightline, two angled instrument wings, two structural pedestals, black physical display bezels, guarded switches, rotary controls, handholds, ventilation and rear cable access. Furniture only with a complete readable outer silhouette and flat mounting feet, operator side faces -Z. No room shell, roof, wall, floor, window, seat, person, hologram, floating screen, text, logo, stand, ground or background.",
+      "texture_prompt": "De-lit realistic flight hardware: dark low-glare composite, graphite anodized aluminum bezels, physical black glass, brushed titanium controls, restrained amber and cyan indicator lenses, subtle hand-contact wear. No baked highlights, pseudo-text, logos, broad dirt, random labels or active emissive content."
+    },
+    {
+      "request_id": "preview.ship.longreach.service_wall_v2",
+      "phase": "preview",
+      "name": "longreach_cockpit_service_wall_panel_v2",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_service_wall_panel_v2",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One isolated shallow rectangular spacecraft interior wall panel, exactly 2.4 m wide, 2.5 m high and only 0.28 m deep. Solid flat rear mounting plane; front has structural edge rails, removable pressure-liner panels, flush equipment doors, one recessed utility chase, two handholds, task-light recesses, seals and fasteners. Bas-relief wall slab only, depth less than 12 percent of width, visible face +Z. No doorway, room, floor, ceiling, side chamber, furniture, loose cable, text, logo, stand, ground or background.",
+      "texture_prompt": "De-lit spacecraft interior panel: warm gray painted alloy, dark graphite rails and seals, brushed titanium fasteners, restrained amber maintenance latches and subtle edge wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow."
+    },
+    {
+      "request_id": "preview.station.meridian.corridor_wall_v2",
+      "phase": "preview",
+      "name": "meridian_station_corridor_wall_panel_v2",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "corridor_wall_panel_v2",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One isolated shallow rectangular orbital-station corridor wall panel, exactly 2.4 m wide, 2.6 m high and only 0.32 m deep. Solid flat rear mounting plane; front has two structural posts, replaceable service panels, one recessed utility chase, ventilation grille, equipment locker, handrail, task-light recesses, pressure seals and fasteners. Bas-relief wall slab only, depth less than 14 percent of width, visible face +Z. No doorway, room, floor, ceiling, side chamber, furniture, loose wires, text, logo, stand, ground or background.",
+      "texture_prompt": "De-lit civic-industrial station panel: zinc-gray structural alloy, off-white replaceable panels, dark kick plate, brushed steel rail, restrained amber wayfinding accents and plausible hand wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow."
+    },
+    {
+      "request_id": "preview.station.meridian.deck_v2",
+      "phase": "preview",
+      "name": "meridian_station_deck_panel_v2",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "deck_service_panel_v2",
+      "polycount": 110000,
+      "expected_credits": 20,
+      "prompt": "One isolated shallow rectangular orbital-station floor panel, exactly 2.4 m wide, 3.0 m long and only 0.22 m thick. Flat load-bearing underside; top has a framed non-slip walking surface, flush cargo tie-down sockets, two narrow utility channels, sealed access covers, threshold-compatible edges, panel gaps and fasteners. Slab only, thickness less than 8 percent of length, clear uninterrupted 1.5 m central walking strip, top faces +Y. No wall, ceiling, room, furniture, raised obstacle, loose cable, text, logo, stand, ground or background.",
+      "texture_prompt": "De-lit station deck: dark graphite non-slip panels, zinc-gray frame, brushed steel tie-downs, restrained amber edge inlays without symbols and localized foot wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow."
+    },
+    {
+      "request_id": "preview.weapon.helix.induction_carbine_v2",
+      "phase": "preview",
+      "name": "helix_induction_carbine_v2",
+      "asset_id": "weapon.helix_carbine_mk1",
+      "module_id": "induction_carbine_full_assembly_source_v2",
+      "polycount": 190000,
+      "expected_credits": 20,
+      "prompt": "One original isolated photorealistic vacuum-capable induction carbine, 0.86 m long and at most 0.27 m high. Full shoulder stock, sealed monolithic receiver spine, long enclosed accelerator shroud, removable rectangular power-and-flechette magazine ahead of the grip, compact optic, ambidextrous controls, protected trigger, thermal fins, sling sockets and service seams. Functional hard-surface science fiction with a distinct non-AR silhouette, long axis +Z. No Picatinny rails, M4 or AK shapes, person, hands, ammunition, floating parts, text, logo, stand, ground or background.",
+      "texture_prompt": "De-lit original induction carbine: dark phosphate steel accelerator core and controls, graphite anodized receiver, charcoal fiber-reinforced stock and grip, heat-darkened ceramic shroud, low-glare optic, restrained amber witness ports and localized handling wear. No baked highlights, pseudo-text, logos, glowing strips, camouflage, broad grime or damage."
     }
   ]
 }

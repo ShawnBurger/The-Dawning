@@ -1,0 +1,66 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T16:48:08.531305+00:00",
+  "request_hash": "0435967110cc69e92e6ab2c8612d1491b2e1452dbb1e9884df5fd25bbcda09cf",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated shallow rectangular spacecraft interior wall panel, exactly 2.4 m wide, 2.5 m high and only 0.28 m deep. Solid flat rear mounting plane; front has structural edge rails, removable pressure-liner panels, flush equipment doors, one recessed utility chase, two handholds, task-light recesses, seals and fasteners. Bas-relief wall slab only, depth less than 12 percent of width, visible face +Z. No doorway, room, floor, ceiling, side chamber, furniture, loose cable, text, logo, stand, ground or background.",
+    "texture_prompt": "De-lit spacecraft interior panel: warm gray painted alloy, dark graphite rails and seals, brushed titanium fasteners, restrained amber maintenance latches and subtle edge wear. No baked lighting, pseudo-text, logos, broad dirt, labels or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_service_wall_panel_v2",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8ab7-f338-7faa-aa50-41d7656a4b1f",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784738741387,
+      "started_at": 1784738741509,
+      "finished_at": 1784738869302,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "e781d6a749027ba7e32ba192e5099ba567b99d80dcf97985e123e354549b6955",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "9fbfa19ca56024f69d82e70281d7f0439f7d8602c1be2c2d13482e0d12513977"
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "triangles": 113198,
+    "welded_components": 3,
+    "largest_triangle_fraction": 0.993215,
+    "bounds_size": [0.9919, 1.0014, 1.8997],
+    "minimum_to_maximum_dimension_ratio": 0.5221
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T17:00:00Z",
+    "reasons": [
+      "generated a deep equipment crate instead of a 0.28 m shallow wall slab",
+      "minimum-to-maximum dimension ratio is 0.522 rather than at most 0.12",
+      "three connected components and full side/top skins prevent direct modular wall use"
+    ],
+    "disposition": "retain as a negative-control shape study; do not refine or promote"
+  },
+  "consumed_credits": 20
+}

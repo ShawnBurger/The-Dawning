@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T16:55:13.692699+00:00",
+  "request_hash": "04e00a02622abf5c92856ba77997e57bdc365188ca971188cd7525bd2d2e65c5",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One original isolated photorealistic vacuum-capable induction carbine, 0.86 m long and at most 0.27 m high. Full shoulder stock, sealed monolithic receiver spine, long enclosed accelerator shroud, removable rectangular power-and-flechette magazine ahead of the grip, compact optic, ambidextrous controls, protected trigger, thermal fins, sling sockets and service seams. Functional hard-surface science fiction with a distinct non-AR silhouette, long axis +Z. No Picatinny rails, M4 or AK shapes, person, hands, ammunition, floating parts, text, logo, stand, ground or background.",
+    "texture_prompt": "De-lit original induction carbine: dark phosphate steel accelerator core and controls, graphite anodized receiver, charcoal fiber-reinforced stock and grip, heat-darkened ceramic shroud, low-glare optic, restrained amber witness ports and localized handling wear. No baked highlights, pseudo-text, logos, glowing strips, camouflage, broad grime or damage.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 190000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "induction_carbine_full_assembly_source_v2",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8abf-ab19-70d6-8d46-44b1ec70c3bf",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784739247152,
+      "started_at": 1784739247212,
+      "finished_at": 1784739299330,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "ed980fba54d2ae43ddae3f00161f2abc2d93b865b44e5214ee4a56364ace23ab",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "6fcb9147fedc928eac5f1f41f5e250b58e4755c4782f95fb5df3a4ab2d17e4ca"
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "triangles": 185916,
+    "welded_components": 1,
+    "bounds_size": [1.8996, 0.2263, 0.6748],
+    "length_to_height_ratio": 2.815
+  },
+  "art_review": {
+    "status": "accepted_as_component_breakdown_reference",
+    "reviewed_at_utc": "2026-07-22T17:00:00Z",
+    "strengths": [
+      "single connected full-stock weapon with a distinct enclosed receiver and accelerator shroud",
+      "avoids the rejected M4 silhouette while preserving readable grip, trigger, magazine and shoulder interface",
+      "survives principal-axis and three-quarter geometry review without detached parts"
+    ],
+    "required_cleanup": [
+      "replace this monolithic study with separately generated and authored components",
+      "verify first-person grip, shoulder, sightline and suited-glove clearances on the assembled component asset",
+      "keep ballistics, collision, sockets, pivots and moving-part state authored"
+    ],
+    "successor_plan": "assets/design/helix_carbine_mk1/component_plan.json",
+    "disposition": "do not refine or promote the monolithic preview"
+  },
+  "consumed_credits": 20
+}

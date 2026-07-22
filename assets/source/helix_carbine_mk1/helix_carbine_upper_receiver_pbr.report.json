@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "tool": "tools/blender/accept_retextured_component.py",
+  "blender_version": "4.5.0",
+  "asset_id": "weapon.helix_carbine_mk1",
+  "component_id": "upper_receiver",
+  "module_id": "carbine_upper_receiver",
+  "plan": {
+    "path": "assets/design/helix_carbine_mk1/component_plan.json",
+    "sha256": "e088d5a1e9c6dff3c1db5bd0fa94f43ed4aaee40c24464e5a8c57cab01d04e97"
+  },
+  "interfaces": [
+    {
+      "id": "stock_mount",
+      "mates_to": "stock.receiver_mount",
+      "local_position": [
+        0.0,
+        0.0,
+        -0.15
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ]
+    },
+    {
+      "id": "handguard_mount",
+      "mates_to": "thermal_handguard.receiver_mount",
+      "local_position": [
+        0.0,
+        0.0,
+        0.145
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": "lower_mount",
+      "mates_to": "lower_receiver.upper_mount",
+      "local_position": [
+        0.0,
+        -0.035,
+        -0.015
+      ],
+      "normal": [
+        0.0,
+        -1.0,
+        0.0
+      ]
+    },
+    {
+      "id": "optic_mount",
+      "mates_to": "optic.receiver_mount",
+      "local_position": [
+        0.0,
+        0.035,
+        0.02
+      ],
+      "normal": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    {
+      "id": "barrel_socket",
+      "mates_to": "accelerator_barrel.receiver_socket",
+      "local_position": [
+        0.0,
+        0.0,
+        0.045
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "authored_input": {
+    "path": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb",
+    "sha256": "c18887a78e865b38ccb3d326c150464c519ec8e0b9c1f57e6a680858d1c23dbb",
+    "geometry": {
+      "object_count": 32,
+      "vertices": 16648,
+      "edges": 21320,
+      "triangles": 8664,
+      "connected_islands": 32,
+      "bounds_blender_xyz_m": {
+        "minimum": [
+          -0.03849999979138374,
+          -0.14999999105930328,
+          -0.03500000014901161
+        ],
+        "maximum": [
+          0.03840000182390213,
+          0.14999999105930328,
+          0.032999999821186066
+        ],
+        "size": [
+          0.07690000534057617,
+          0.29999998211860657,
+          0.06800000369548798
+        ],
+        "center": [
+          -4.999898374080658e-05,
+          0.0,
+          -0.0010000001639127731
+        ]
+      },
+      "materials": {
+        "material_count": 4,
+        "materials": [
+          "TD_Amber_Witness",
+          "TD_Graphite_Receiver",
+          "TD_Phosphate_Steel",
+          "TD_Thermal_Ceramic"
+        ],
+        "uv_layer_count": 25,
+        "image_count": 0,
+        "images": []
+      }
+    }
+  },
+  "meshy_input": {
+    "path": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_retexture_source.glb",
+    "sha256": "710b39c9f2795e2a1797a4a5fd693b14a8676559464ab629ed4481b13e1aa7cd",
+    "manifest": "assets/generated/helix_carbine_upper_receiver_pbr_v2_36c29e5f3113fa62/manifest.json",
+    "request_hash": "36c29e5f3113fa62a0df571ecced96cb8a04c19fd241689fbba1caf46c64e91f",
+    "task_id": "019f8ae3-fa42-7302-b943-860cf683bceb",
+    "geometry_before_restore": {
+      "object_count": 1,
+      "vertices": 17443,
+      "edges": 21698,
+      "triangles": 8664,
+      "connected_islands": 32,
+      "bounds_blender_xyz_m": {
+        "minimum": [
+          -0.25633299350738525,
+          -1.0,
+          -0.22666700184345245
+        ],
+        "maximum": [
+          0.25633299350738525,
+          1.0,
+          0.22666700184345245
+        ],
+        "size": [
+          0.5126659870147705,
+          2.0,
+          0.4533340036869049
+        ],
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "materials": {
+        "material_count": 1,
+        "materials": [
+          "material"
+        ],
+        "uv_layer_count": 1,
+        "image_count": 4,
+        "images": [
+          [
+            "base_color",
+            4096,
+            4096,
+            "sRGB"
+          ],
+          [
+            "emissive",
+            2048,
+            2048,
+            "sRGB"
+          ],
+          [
+            "metallic_roughness",
+            2048,
+            2048,
+            "Non-Color"
+          ],
+          [
+            "normal",
+            4096,
+            4096,
+            "Non-Color"
+          ]
+        ]
+      }
+    }
+  },
+  "acceptance": {
+    "uniform_restore_scale": 0.14999999555954233,
+    "triangle_count_preserved": true,
+    "connected_islands_preserved": true,
+    "authored_bounds_restored": true,
+    "pbr_material_verified": true
+  },
+  "output_geometry": {
+    "object_count": 1,
+    "vertices": 17443,
+    "edges": 21698,
+    "triangles": 8664,
+    "connected_islands": 32,
+    "bounds_blender_xyz_m": {
+      "minimum": [
+        -0.038499943912029266,
+        -0.14999999105930328,
+        -0.03500004857778549
+      ],
+      "maximum": [
+        0.03839994966983795,
+        0.14999999105930328,
+        0.03300004452466965
+      ],
+      "size": [
+        0.07689989358186722,
+        0.29999998211860657,
+        0.06800009310245514
+      ],
+      "center": [
+        -4.999712109565735e-05,
+        0.0,
+        -0.0010000020265579224
+      ]
+    },
+    "materials": {
+      "material_count": 1,
+      "materials": [
+        "material"
+      ],
+      "uv_layer_count": 1,
+      "image_count": 4,
+      "images": [
+        [
+          "base_color",
+          4096,
+          4096,
+          "sRGB"
+        ],
+        [
+          "emissive",
+          2048,
+          2048,
+          "sRGB"
+        ],
+        [
+          "metallic_roughness",
+          2048,
+          2048,
+          "Non-Color"
+        ],
+        [
+          "normal",
+          4096,
+          4096,
+          "Non-Color"
+        ]
+      ]
+    }
+  },
+  "output": {
+    "path": "assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.glb",
+    "sha256": "3dcc772d888aad411c131ae3f9533ec36890f6676cc9ba0957da97b8bd93972d",
+    "byte_count": 21698080
+  },
+  "elapsed_seconds": 0.994
+}

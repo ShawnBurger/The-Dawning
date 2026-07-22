@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T17:04:56.768718+00:00",
+  "request_hash": "e21eb61f73aa51daddb2015ab07941a658b97dce97e19c2a160b2fe5b3c60989",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Original photorealistic multiview concept of one isolated upper receiver and accelerator spine for a fictional vacuum-rated induction carbine, exactly 0.30 m long, 0.078 m wide and 0.07 m high. Tapered hexagonal structural shell, sealed breech volume, lower-receiver lug, rear stock socket, forward handguard flange, internal barrel socket, low optic datum, charging actuator and service covers. Distinct non-AR hard-surface design. No barrel, handguard, lower receiver, grip, trigger, magazine, stock, optic, muzzle, ammunition, text, logo, stand, ground or background.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_upper_receiver",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8ac8-9315-755f-9ee4-61e2d44c098d",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784739830957,
+      "started_at": 1784739831010,
+      "finished_at": 1784739878307,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "078622c0ae856de98c7635fd4f3cd50e00cafab554b088476ee187da518f1512",
+      "view_1.png": "e6cfb842bb153a94caf72c1059e5bd001b4de020ebc1aad36816e764dc3f201a",
+      "view_2.png": "dab42c43e5d418da5e3e311340873edc142d10660dbcfb6b86db829161ef5b5c"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T17:07:00Z",
+    "strengths": [
+      "three views agree on a tapered hexagonal receiver shell and circular accelerator socket",
+      "rear coupling, lower mounting lug and forward interface remain readable",
+      "the silhouette is distinct from the rejected monolithic current-day rifle study"
+    ],
+    "required_cleanup": [
+      "remove the small generated pseudo-marking on the side service plate",
+      "replace the rail-like top teeth with the authored low-profile optic datum",
+      "fit all final interfaces to component-plan sockets rather than generated openings"
+    ]
+  },
+  "consumed_credits": 9
+}

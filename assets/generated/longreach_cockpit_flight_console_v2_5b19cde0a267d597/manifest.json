@@ -1,0 +1,64 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T16:45:39.749142+00:00",
+  "request_hash": "5b19cde0a267d5971f3fffabbc7e11521f544f7c61a15648c4eb137dc9eeab88",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated freestanding two-crew spacecraft flight-control desk, exactly 4.8 m wide, 1.15 m high and 1.25 m deep. Low central sightline, two angled instrument wings, two structural pedestals, black physical display bezels, guarded switches, rotary controls, handholds, ventilation and rear cable access. Furniture only with a complete readable outer silhouette and flat mounting feet, operator side faces -Z. No room shell, roof, wall, floor, window, seat, person, hologram, floating screen, text, logo, stand, ground or background.",
+    "texture_prompt": "De-lit realistic flight hardware: dark low-glare composite, graphite anodized aluminum bezels, physical black glass, brushed titanium controls, restrained amber and cyan indicator lenses, subtle hand-contact wear. No baked highlights, pseudo-text, logos, broad dirt, random labels or active emissive content.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 150000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_flight_console_v2",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8ab5-fc9c-7cff-b6bd-38950e253e7c",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784738612806,
+      "started_at": 1784738612842,
+      "finished_at": 1784738728686,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "f2cc78bfd69c6df95b2d7cf517a930bfa947780a6df6032bd21164f232823312",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "0c4966f01dbc8255717a46e3b94e96868f240dcaf0d87e8ed316e8a46470a09d"
+  },
+  "validation": {
+    "inspector": "TheDawningAssetInspector",
+    "primitives": 1,
+    "triangles": 150061,
+    "welded_components": 1,
+    "bounds_size": [1.8996, 1.4813, 0.8473]
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T17:00:00Z",
+    "reasons": [
+      "generated a deep equipment enclosure with two tall actuator-like towers instead of a low freestanding flight desk",
+      "operator sightline, display wings, control reach and mounting feet are not readable",
+      "cannot be isolated into the requested two-crew console without replacing most visible geometry"
+    ],
+    "disposition": "retain as a negative-control shape study; do not refine or promote"
+  },
+  "consumed_credits": 20
+}

@@ -4,6 +4,64 @@ These scripts turn reviewed source art into deterministic production inputs.
 They run inside Blender and treat The Dawning's asset manifest as the authority
 for dimensions, axes, topology, sockets, collision, and interaction boundaries.
 
+## Generic material review
+
+`render_asset_review.py` imports any GLB into a factory-clean Blender scene and
+renders its actual materials from three principal axes and a three-quarter
+view. It also records bounds, mesh counts, material nodes, image bindings, the
+source hash, and the Blender version. The tool never repairs or exports the
+source, so its report is review evidence rather than a production transform.
+
+```powershell
+blender --background --factory-startup --python `
+  tools/blender/render_asset_review.py -- `
+  --model assets/generated/<candidate>/model.glb `
+  --output-dir tmp/asset_reviews/<candidate> `
+  --label <candidate>
+```
+
+## Helix modular carbine components
+
+`build_helix_carbine_component.py` builds one component at a time from
+`assets/design/helix_carbine_mk1/component_plan.json`. The authored component
+owns its exact envelope and interfaces before any generated surface treatment.
+The current implementation builds the upper receiver as separate structural,
+socket, panel, control, seam, and fastener subparts and emits a provenance
+report suitable for a Meshy retexture request.
+
+```powershell
+blender --background --factory-startup --python `
+  tools/blender/build_helix_carbine_component.py -- `
+  --plan assets/design/helix_carbine_mk1/component_plan.json `
+  --component upper_receiver `
+  --output assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb `
+  --report assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.report.json `
+  --blend assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.blend
+```
+
+Generated texture output remains a source candidate until its model hash,
+material bindings, multi-angle renders, and socket-compatible bounds pass the
+same review gates.
+
+After an accepted retexture, retain the exact provider GLB under
+`assets/source/` and run `accept_retextured_component.py`. The tool rejects
+non-uniform normalization and any change to authored triangle or connected-
+island counts, verifies the packed PBR material, restores exact authored scale,
+and embeds the component interfaces as non-authoritative render metadata.
+
+```powershell
+blender --background --factory-startup --python `
+  tools/blender/accept_retextured_component.py -- `
+  --plan assets/design/helix_carbine_mk1/component_plan.json `
+  --component upper_receiver `
+  --authored assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_authored.glb `
+  --textured assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_retexture_source.glb `
+  --meshy-manifest assets/generated/<accepted-retexture>/manifest.json `
+  --output assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.glb `
+  --report assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.report.json `
+  --blend assets/source/helix_carbine_mk1/helix_carbine_upper_receiver_pbr.blend
+```
+
 ## Frontier courier hull LOD0
 
 Run from a shell with Blender 4.5 available:

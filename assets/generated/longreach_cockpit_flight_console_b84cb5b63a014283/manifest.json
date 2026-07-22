@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:34:27.599680+00:00",
+  "generated_at_utc": "2026-07-22T16:12:06.904994+00:00",
   "request_hash": "b84cb5b63a0142834a6a5795b0cec7d334eddef78c32a424573d35e372d67142",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One photorealistic wraparound two-crew spacecraft flight console, 4.8 m wide, 1.15 m high, 1.25 m deep. Low central sightline, angled instrument wings, structural pedestal, replaceable display bezels, guarded switches, rotary controls, handholds, ventilation, cable access and service panels. Functional near-future avionics with layered depth and realistic bevels, isolated single object, pilot side faces -Z. No seats, room, floating screens, holograms, fake text, logos, stand, ground, or background.",
     "texture_prompt": "De-lit realistic flight hardware: dark low-glare composite, anodized aluminum bezels, physical black display glass, brushed metal controls, restrained amber and cyan indicator lenses, subtle hand-contact wear, no baked highlights, pseudo-text, logos, random grime, or active emissive content.",
@@ -35,21 +35,39 @@
       "started_at": 1784734280401,
       "finished_at": 1784734464117,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8a95-b49d-7a02-ba33-39ff90eb1e52",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784736496914,
+      "started_at": 1784736496947,
+      "finished_at": 1784736718545,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "acaa5693be27455d565fdc66f85b84433b86c66a9327d6579921d121ac8e5d3a",
     "preview": "preview.glb",
     "preview_sha256": "7e94b4be27e308208218e430d5ddb57f24ff5f96916531eba59ab91857ebe885",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "19a23f2d38b41c8427afb312f92c9122912eb3f60082d2f548b00bba226f4206"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 157136,
-    "triangles": 136360,
-    "geometric_components": 3,
-    "largest_component_triangle_fraction": 0.992952,
-    "source_bounds_size": [1.899829, 1.901243, 1.130477]
+    "thumbnail_sha256": "19a23f2d38b41c8427afb312f92c9122912eb3f60082d2f548b00bba226f4206",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "59d643bfa0a9a84d03558e43e886ef3ea097c28f7e8710d32a99c701a8e0f558",
+      "metallic_0": "15e91069a99e49d466d4b113300ccf7f4dcc2b249c3ef2cdc462351eded1033d",
+      "roughness_0": "f3683ec93c599262e95c638eb0c21bf199045a391485a2838f978a1b070a74fc",
+      "normal_0": "5743acf9ad19bf3422702dcd8d10feb3ede43177b3c51cd55158176cfe0b25b3",
+      "emission_0": "f368d69ff186f93f5bf58e91e55eaf6f991acdd622ff59dc6b3649f2b818f77d"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -64,5 +82,5 @@
       "verify seated and standing reach envelopes before promotion"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }

@@ -2,9 +2,9 @@
   "schema_version": 2,
   "provider": "Meshy",
   "endpoint": "/openapi/v2/text-to-3d",
-  "generated_at_utc": "2026-07-22T15:51:41.379813+00:00",
+  "generated_at_utc": "2026-07-22T16:24:32.006717+00:00",
   "request_hash": "57ea2aa9ef5e408bbc2398e54ae31c1131fdab248a5a85605e492fd3141a0011",
-  "stage": "preview",
+  "stage": "refined",
   "parameters": {
     "prompt": "One isolated photorealistic centerline pressure hull for an expedition spacecraft, exactly 44 m long, 10 m wide and 8 m high; length is 4.4 times width. Long faceted cockpit nose, two-deck armored pressure body, dorsal docking-collar mount, port airlock recess, ventral cargo-ramp cut plane, axial keel, radiators, RCS bays and aft engine bulkhead. Uninterrupted longitudinal silhouette with clear panel hierarchy, forward faces +Z. No wings, drive pods, engines, weapons, landing gear, detached parts, text, logo, stand, ground, or background. Reject a short, wide, fighter, disk, or saucer shape.",
     "texture_prompt": "De-lit photorealistic expedition hull: cool white painted aluminum, exposed brushed titanium keel and service edges, dark carbon-composite access covers, charcoal ceramic heat shielding, restrained amber safety accents, subtle directional maintenance wear. No baked lighting, pseudo-text, logos, broad grime, glowing seams, or battle damage.",
@@ -35,21 +35,39 @@
       "started_at": 1784735414888,
       "finished_at": 1784735496574,
       "consumed_credits": 20
+    },
+    "refine": {
+      "id": "019f8aa1-fffc-71dd-ac57-dac13e40723d",
+      "type": "text-to-3d-refine",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784737302376,
+      "started_at": 1784737302477,
+      "finished_at": 1784737464798,
+      "consumed_credits": 10
     }
   },
   "files": {
+    "model": "model.glb",
+    "model_sha256": "fbe96a22a691c25a136d507fffd076f2a00ba03dc56a730fa83515ce938457c0",
     "preview": "preview.glb",
     "preview_sha256": "b651156c3fd1b19ca4c4b01a76456219c1c328b60889e5ad168c344d15a3bf70",
     "thumbnail": "thumbnail.png",
-    "thumbnail_sha256": "4ccc8e728fbc49f9be9cf851ed0b642ed6d9bd47ffde5aa8c4c25e21b6c6cb25"
-  },
-  "validation": {
-    "tool": "tools/meshy/review_glb.py",
-    "vertices": 128106,
-    "triangles": 179088,
-    "geometric_components": 1,
-    "largest_component_triangle_fraction": 1.0,
-    "source_bounds_size": [1.899625, 0.807116, 0.695979]
+    "thumbnail_sha256": "4ccc8e728fbc49f9be9cf851ed0b642ed6d9bd47ffde5aa8c4c25e21b6c6cb25",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "64a98d48d042a06a55161de82e6b084ee8b2622cf1ac382f59be0c13528c4137",
+      "metallic_0": "ead08bd98e97652e8a49ee5f0f440086963712655662b04ff4bb3722cb08c6b6",
+      "roughness_0": "1facea1b03d4f26ee6f391b79cdcef02da539cb3dabf04350d23b8ec0e7f1f44",
+      "normal_0": "c719bc6560725abfdb6501e7290720211bfa7d367327f1cfe3db95b2dd6f6539",
+      "emission_0": "c0eaf31c1393135e6d1ef92be4eb89e20363bfe29b28750273f7e92a40e4d268"
+    }
   },
   "art_review": {
     "status": "approved_for_refine",
@@ -65,5 +83,5 @@
       "replace generated aft circles with explicit drive-pod sockets and author all openings"
     ]
   },
-  "consumed_credits": 20
+  "consumed_credits": 30
 }
