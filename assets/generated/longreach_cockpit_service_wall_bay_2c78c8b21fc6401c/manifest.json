@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:36:35.970681+00:00",
+  "request_hash": "2c78c8b21fc6401c3b8876920e7745b9c12889846dc06cebb5aa44044b14f9b0",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic modular spacecraft cockpit service-wall bay, exactly 2.4 m wide, 2.5 m high and 0.28 m deep. Structural edge rails, removable pressure liner panels, flush equipment access doors, recessed cable and ventilation channel, two handholds, integrated task-light recesses, believable fasteners, seals and physical thickness. Flat rectangular rear mounting plane, isolated single object, visible face +Z. No floor, ceiling, window, room, pipes outside the bay, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit spacecraft interior architecture: warm gray painted alloy panels, dark graphite rails and seals, brushed titanium fasteners, restrained amber maintenance latches, subtle edge and hand wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 110000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_service_wall_bay",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a76-c36f-72b7-b9b1-f9b00f5d5e64",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734469140,
+      "started_at": 1784734469327,
+      "finished_at": 1784734589019,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "753f8f0f130e6d1a1b4c378b25009b8f0395ac975942bd23430ab0978d45cf8c",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "6e34572bf12ca09d8f36aa84213e21e4ca780525130c4ce0263fe35a5abc8d6d"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 100895,
+    "triangles": 110032,
+    "geometric_components": 3,
+    "largest_component_triangle_fraction": 0.98684,
+    "source_bounds_size": [1.015106, 1.061274, 1.910166]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "disposition": "panel_detail_source_after_face_extraction",
+    "strengths": [
+      "player-facing surfaces contain coherent service panels, rails, handholds and utility relief",
+      "main geometry is connected and suitable for measured panel extraction"
+    ],
+    "required_cleanup": [
+      "extract one flat 2.4 x 2.5 m wall-facing panel and discard box-like side and rear closure",
+      "delete two minor disconnected fragments and replace pseudo-controls",
+      "preserve the authored 0.28 m maximum wall depth and corridor clearance"
+    ]
+  },
+  "consumed_credits": 20
+}

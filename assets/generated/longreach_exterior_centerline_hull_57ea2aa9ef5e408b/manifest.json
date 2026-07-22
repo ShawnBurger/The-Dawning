@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:51:41.379813+00:00",
+  "request_hash": "57ea2aa9ef5e408bbc2398e54ae31c1131fdab248a5a85605e492fd3141a0011",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated photorealistic centerline pressure hull for an expedition spacecraft, exactly 44 m long, 10 m wide and 8 m high; length is 4.4 times width. Long faceted cockpit nose, two-deck armored pressure body, dorsal docking-collar mount, port airlock recess, ventral cargo-ramp cut plane, axial keel, radiators, RCS bays and aft engine bulkhead. Uninterrupted longitudinal silhouette with clear panel hierarchy, forward faces +Z. No wings, drive pods, engines, weapons, landing gear, detached parts, text, logo, stand, ground, or background. Reject a short, wide, fighter, disk, or saucer shape.",
+    "texture_prompt": "De-lit photorealistic expedition hull: cool white painted aluminum, exposed brushed titanium keel and service edges, dark carbon-composite access covers, charcoal ceramic heat shielding, restrained amber safety accents, subtle directional maintenance wear. No baked lighting, pseudo-text, logos, broad grime, glowing seams, or battle damage.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 180000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "exterior_centerline_hull",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a85-30e5-7a26-8f98-97162a39696b",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784735414867,
+      "started_at": 1784735414888,
+      "finished_at": 1784735496574,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "b651156c3fd1b19ca4c4b01a76456219c1c328b60889e5ad168c344d15a3bf70",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "4ccc8e728fbc49f9be9cf851ed0b642ed6d9bd47ffde5aa8c4c25e21b6c6cb25"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 128106,
+    "triangles": 179088,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.899625, 0.807116, 0.695979]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "disposition": "longreach_forward_and_midbody_source",
+    "strengths": [
+      "single connected longitudinal pressure body with cockpit nose, service hierarchy and aft hard points",
+      "silhouette is materially longer than the rejected monolithic reconstruction"
+    ],
+    "required_cleanup": [
+      "use as a forward and midbody source rather than claiming the requested 44 m centerline envelope",
+      "reach the final 52 x 18 x 11 m ship through authored axial modules, not nonuniform stretching",
+      "replace generated aft circles with explicit drive-pod sockets and author all openings"
+    ]
+  },
+  "consumed_credits": 20
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:42:46.458626+00:00",
+  "request_hash": "11acbf8bc2948972d7c3fc4835b6c7b89c01a3e96fb703ba5865f21e54901bcc",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic modular orbital-station corridor wall bay, exactly 2.4 m wide, 2.6 m high and 0.32 m deep. Heavy structural side posts, replaceable white service panels, recessed utility chase, ventilation grille, equipment locker, handrail, task-light recesses, pressure seals, service fasteners and realistic bevels. Flat rear mounting plane and clear floor edge, isolated single object, visible face +Z. No doorway, floor, ceiling, room, exposed loose wires, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit civic-industrial station materials: zinc-gray structural alloy, off-white replaceable panels, dark non-slip lower kick plate, brushed steel rail, restrained amber wayfinding accents, plausible maintenance wear, no baked lighting, pseudo-text, logos, random grime, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "corridor_wall_bay",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a78-b8ec-733f-8bd1-9bc69c67f309",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734597736,
+      "started_at": 1784734597768,
+      "finished_at": 1784734944637,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "e9c9ed4fc9f3cdc2af738f680fe4e6a0243d7fc67c6147fdcf071e315c8cfb53",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "f11b9f08c2eb04aee35c0a9bc6024e7eb0f2275595e58f31c487d2c853e5cd48"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 119636,
+    "triangles": 116657,
+    "geometric_components": 2,
+    "largest_component_triangle_fraction": 0.995662,
+    "source_bounds_size": [1.866673, 1.89909, 1.86594]
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "reasons": [
+      "geometry is a nearly cubic equipment block rather than a shallow corridor wall bay",
+      "depth is comparable to width and height and would consume the protected walking envelope"
+    ],
+    "possible_reuse": "untextured station equipment or cargo-block geometry study",
+    "refine_decision": "do_not_refine"
+  },
+  "consumed_credits": 20
+}

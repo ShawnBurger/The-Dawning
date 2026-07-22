@@ -1,0 +1,67 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:31:18.614290+00:00",
+  "request_hash": "7e5840278934ba4add96e551f1acc5f150dc6a153f306e120df804f3baa4c8c3",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic spacecraft pilot seat for a suited adult, 0.74 m wide, 1.35 m high, 0.92 m deep. Rigid shock-isolated base, articulated back shell, headrest, segmented pressure cushions, five-point restraint anchors, folding arm supports, visible adjustment rails and rear service access. Human ergonomic proportions and believable construction, neutral upright pose, isolated single object, forward faces +Z. No person, cockpit, controls, screens, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit realistic cockpit seat: dark woven pressure fabric, charcoal composite shell, brushed titanium frame and rails, restrained amber release hardware, localized hand-contact wear, no baked lighting, pseudo-text, logos, broad grime, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 100000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_pilot_seat",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a71-eb5e-7129-8e2e-3fc7a52c9f7e",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734151798,
+      "started_at": 1784734152011,
+      "finished_at": 1784734269639,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "3088977536a9e0b62887d705aa095745ab459aba77d7785d0cee74c07502154f",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "d48195945f9ebe56252b36c2a2e456ea8abbb51b283eb80770d3a95b6947b337"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 82932,
+    "triangles": 101234,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [0.845929, 0.958792, 1.899406]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "strengths": [
+      "single connected upright seat with coherent base, cushions, back, headrest and side supports",
+      "raw proportions map cleanly to the authored 0.74 x 1.35 x 0.92 m envelope"
+    ],
+    "required_cleanup": [
+      "separate restraint, arm support and adjustment parts around authored pivots",
+      "verify suited occupant, eye point, ingress and emergency release clearance"
+    ]
+  },
+  "consumed_credits": 20
+}

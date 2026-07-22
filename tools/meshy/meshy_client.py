@@ -47,6 +47,7 @@ MAX_PROMPT_CHARS = 600
 # Refuse to start work that would leave the account effectively empty. Generation
 # is two-stage and a preview with no credits left to refine it is wasted spend.
 CREDIT_FLOOR = 50
+REFINE_APPROVAL_STATUS = "approved_for_refine"
 
 AI_MODELS = ("latest", "meshy-6", "meshy-5")
 IMAGE_MODELS = ("nano-banana", "nano-banana-2", "nano-banana-pro", "gpt-image-2")
@@ -202,6 +203,21 @@ def task_record(manifest: dict, label: str) -> dict:
 def completed_task(manifest: dict, label: str) -> bool:
     task = task_record(manifest, label)
     return bool(task.get("id") and task.get("status") == "SUCCEEDED")
+
+
+def require_preview_refine_approval(manifest: dict, preview_cached: bool) -> dict:
+    if not preview_cached:
+        raise MeshyError(
+            "refine requires a cached preview; run with --preview-only, review the "
+            "geometry, then record art_review.status=approved_for_refine"
+        )
+    review = manifest.get("art_review")
+    if not isinstance(review, dict) or review.get("status") != REFINE_APPROVAL_STATUS:
+        raise MeshyError(
+            "refine requires art_review.status=approved_for_refine in the cached "
+            "preview manifest"
+        )
+    return review
 
 
 def cached_file_matches(
@@ -1332,6 +1348,11 @@ def generate(key: str | None, out_root: Path, prompt: str, *, name: str,
         }, indent=2))
         return asset_dir
 
+    refine_review = None
+    if not preview_only and not final_cached:
+        refine_review = require_preview_refine_approval(
+            existing_manifest, preview_cached)
+
     if final_cached:
         print(f"cached: {asset_dir} (no credits spent)")
         return asset_dir
@@ -1459,6 +1480,7 @@ def generate(key: str | None, out_root: Path, prompt: str, *, name: str,
                 for name, path in textures.items()
             },
         },
+        "art_review": dict(refine_review or {}),
         "consumed_credits": spent,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

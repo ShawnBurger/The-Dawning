@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:54:18.431388+00:00",
+  "request_hash": "5b28073edc5a43016a2d69685fb49f39fd2d300f2a60bc4c853cb10788e83234",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One isolated photorealistic full-length shoulder-fired service carbine, 0.86 m long and at most 0.27 m high; length is at least 3.2 times height. Long barrel and receiver, shoulder stock well behind the pistol grip, removable box magazine ahead of the trigger, low-profile optic, charging handle, selector, trigger guard, heat shield, sling points and service latches. Restrained near-future engineering, long axis +Z. No person, hands, ammunition, bipod, floating parts, text, logo, stand, ground, or background. Reject a pistol, sidearm, stockless gun, compact SMG or PDW silhouette.",
+    "texture_prompt": "De-lit photorealistic service carbine: dark phosphate steel barrel and controls, graphite anodized aluminum receiver, charcoal fiber-reinforced polymer grip and stock, heat-stained barrel shroud, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked lighting, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 180000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_full_assembly_source",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a87-e3c2-75a7-9e32-29fda1bf2575",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784735591897,
+      "started_at": 1784735591903,
+      "finished_at": 1784735642940,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "6e03cd96ff4d8c0f4ef8cd41624ccf7cd9689fa8f3140024cd35d0c12d5ece79",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "559314ca869e0ceb4d227e0732fcaab53529bf2fc4a4707f3b722e7058f7125b"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 118508,
+    "triangles": 175803,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.899061, 0.209569, 0.696148]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "strengths": [
+      "single connected result now reads unmistakably as a full-length shoulder-fired rifle",
+      "long barrel, receiver, stock, grip, optic and magazine regions survive all views"
+    ],
+    "required_cleanup": [
+      "normalize to the authored 0.86 m envelope and verify the final 3.2:1 side silhouette",
+      "separate receiver, barrel group, stock, magazine, optic, charging handle and controls",
+      "replace ambiguous generated mechanisms and prove first-person grip and sight-line ergonomics"
+    ]
+  },
+  "consumed_credits": 20
+}

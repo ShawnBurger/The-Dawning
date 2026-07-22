@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:50:13.124446+00:00",
+  "request_hash": "19ce99057588bf962738ff72332cdea69a56c89622f91d4189e4ad7df8abc305",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic modular orbital-station deck bay, exactly 2.4 m wide, 3.0 m long and 0.22 m thick. Flat load-bearing underside, framed removable non-slip walking panels, flush cargo tie-down sockets, narrow utility channels, sealed access covers, threshold-compatible edges, realistic panel gaps, fasteners and bevels. Clear uninterrupted 1.5 m central walking strip, isolated single object, top faces +Y. No walls, ceiling, furniture, loose cables, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit station deck materials: dark graphite non-slip panels, zinc-gray structural frame, brushed steel tie-downs, restrained amber edge markings without symbols, localized foot and cargo wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 100000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "deck_service_bay",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a83-3a75-74cc-9155-e865919beba3",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784735286355,
+      "started_at": 1784735286501,
+      "finished_at": 1784735408048,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "df72f33d1afdc93e9efa988a7971c61d1fe06c9bff1338e1a568c19f85689a19",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "44f6ce9d9f1e5e46fdc89b3cd912d637c8eed79deeece7cbe9e46c318eb27d2e"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 123991,
+    "triangles": 98862,
+    "geometric_components": 2,
+    "largest_component_triangle_fraction": 0.999636,
+    "source_bounds_size": [1.899324, 1.463559, 1.193018]
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "reasons": [
+      "geometry is an L-shaped wall-and-floor chunk rather than a thin rectangular deck bay",
+      "thickness is too large and the central walking strip is interrupted by vertical structure"
+    ],
+    "possible_reuse": "untextured corridor-corner composition study",
+    "refine_decision": "do_not_refine"
+  },
+  "consumed_credits": 20
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:29:10.117940+00:00",
+  "request_hash": "a1dd38f7ce71b39ed93086b677625b994986dad7cb43316e929f78dfd595bea7",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic hard-surface cockpit pressure-frame segment for a large expedition spacecraft, 6.4 m outer width, 3.2 m outer height, 0.55 m deep, with a 5.7 m by 2.55 m clear faceted opening. Layered load-bearing titanium ring, pressure seals, bolted splice plates, cable and ventilation channels, light recesses, inspection covers and realistic bevels. Symmetric, watertight solid architecture, isolated single object, front faces +Z. No wall fill, window, door, floor, console, seat, loose cables, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit realistic spacecraft pressure structure: brushed titanium load members, dark elastomer seals, graphite composite cable covers, subtle machining and maintenance wear, restrained amber service accents, no baked highlights, pseudo-text, logos, dirt wash, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_pressure_frame",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a70-42f8-7958-97ab-34d86990ac4b",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734043443,
+      "started_at": 1784734043536,
+      "finished_at": 1784734140274,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "5e8be884526da40cdcbdb9c8f267b6d191f01f707c804833178beab1e96788fc",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "c1a452a3ac2b707d65a8b58cab40c10ccfc56d186cfde590d1a0f7f1996650f6"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 117334,
+    "triangles": 122807,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.898645, 1.180758, 1.44408]
+  },
+  "art_review": {
+    "status": "rejected_for_requested_role",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "reasons": [
+      "geometry is a circular pressure collar rather than the required wide faceted cockpit frame",
+      "clear aperture and outer aspect do not match the 6.4 x 3.2 m cockpit envelope"
+    ],
+    "possible_reuse": "untextured docking-collar geometry study",
+    "refine_decision": "do_not_refine"
+  },
+  "consumed_credits": 20
+}

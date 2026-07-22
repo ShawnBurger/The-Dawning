@@ -571,6 +571,64 @@ class MeshyClientContractTests(unittest.TestCase):
             self.assertEqual(plan["cache_state"], "miss")
             self.assertEqual(plan["projected_credits"], 30)
 
+    def test_refine_requires_recorded_preview_approval_before_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary)
+            params = parameters()
+            asset_dir = output_root / f"pressure_door_{MESHY.cache_key(params)}"
+            asset_dir.mkdir()
+            preview = asset_dir / "preview.glb"
+            preview.write_bytes(b"reviewed-preview")
+            manifest_path = asset_dir / "manifest.json"
+            manifest = {
+                "request_hash": MESHY.request_hash(params),
+                "parameters": params,
+                "tasks": {
+                    "preview": {
+                        "id": "preview-task",
+                        "status": "SUCCEEDED",
+                        "consumed_credits": 20,
+                    }
+                },
+                "files": {
+                    "preview": preview.name,
+                    "preview_sha256": MESHY.file_sha256(preview),
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            kwargs = dict(
+                name="pressure_door",
+                polycount=50000,
+                enable_pbr=True,
+                texture_prompt="de-lit aerospace alloy",
+                ai_model="latest",
+                should_remesh=False,
+                decimation_mode=None,
+                hd_texture=False,
+                remove_lighting=True,
+                auto_size=False,
+                origin_at="bottom",
+                asset_id="ship.reference.fighter",
+                module_id="airlock_module",
+                preview_only=False,
+                dry_run=False,
+                max_credits=40,
+                force=False,
+            )
+            with self.assertRaisesRegex(MESHY.MeshyError, "approved_for_refine"):
+                MESHY.generate(
+                    None, output_root, params["prompt"], **kwargs)
+
+            manifest["art_review"] = {
+                "status": MESHY.REFINE_APPROVAL_STATUS,
+                "reviewed_by": "unit-test",
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(MESHY.MeshyError, "MESHY_API_KEY not set"):
+                MESHY.generate(
+                    None, output_root, params["prompt"], **kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

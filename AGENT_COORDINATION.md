@@ -2442,8 +2442,8 @@ are now integrated as well. The current order is:
 - Base commit: `0085f96`
 - Owned paths: `assets/design/production_wave1/**`; new WS-034-only directories
   under `assets/generated/**`; accepted WS-034 source masters under
-  `assets/source/production_wave1/**`; additive `tools/blender/**` review and
-  normalization scripts; focused Python asset-review tests; and
+  `assets/source/production_wave1/**`; targeted Meshy review-gate hardening;
+  additive `tools/blender/**` review and normalization scripts; focused Python asset-review tests; and
   `docs/research/PRODUCTION_ASSET_WAVE1_2026-07-22.md`
 - Excluded paths: `CMakeLists.txt`, `src/app.*`, `src/render/**`, `src/scene/**`,
   `shaders/**`, `src/sim/**`, existing Frontier Courier source/runtime files,

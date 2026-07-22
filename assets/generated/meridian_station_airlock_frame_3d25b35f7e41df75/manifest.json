@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:45:35.366409+00:00",
+  "request_hash": "3d25b35f7e41df75a5bfd38b6495e78ffe97ab04420fd2cd0cdc2146bb8b7a68",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic orbital-station airlock pressure frame, 2.7 m outer width, 2.9 m outer height, 0.55 m deep, surrounding a clean 1.55 m wide by 2.3 m high opening. Reinforced alloy ribs, double pressure seals, latch receivers, hinge and actuator mounting pads, threshold drainage, emergency handwheel socket, inspection covers and realistic bevels. Watertight solid frame, isolated single object, front faces +Z. No door leaf, wall fill, room, people, text, logo, stand, ground, or background.",
+    "texture_prompt": "De-lit station pressure hardware: zinc-gray alloy frame, brushed steel latch surfaces, dark elastomer seals, off-white inspection covers, restrained amber emergency accents, localized service wear, no baked lighting, pseudo-text, logos, broad grime, or emissive glow.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 120000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "airlock_pressure_frame",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a7e-602c-7cf1-a6ef-8516ee816abd",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734968355,
+      "started_at": 1784734968528,
+      "finished_at": 1784735131668,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "4ad94fde53195b5ef1de7d18ae4258d642271a7e5746a9e901589359f1f9b87e",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "e0a0e16a6551d962be3b6dcbba8c3ea8daf7c506dedc02cdb21310ce1bfc7c54"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 106641,
+    "triangles": 119560,
+    "geometric_components": 7,
+    "largest_component_triangle_fraction": 0.987621,
+    "source_bounds_size": [1.111323, 1.116228, 1.89949]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "strengths": [
+      "reinforced pressure surround preserves a rectangular clear opening and layered seal/latch structure",
+      "main component contains usable threshold, jamb and service detail"
+    ],
+    "required_cleanup": [
+      "delete six minor disconnected fragments and remove generated pseudo-lettering",
+      "normalize the opening to exactly 1.55 x 2.3 m and author the door leaf separately",
+      "place hinge, actuator, latch, interaction and pressure-seal sockets from authored data"
+    ]
+  },
+  "consumed_credits": 20
+}

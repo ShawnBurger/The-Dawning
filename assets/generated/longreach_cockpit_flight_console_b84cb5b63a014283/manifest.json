@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v2/text-to-3d",
+  "generated_at_utc": "2026-07-22T15:34:27.599680+00:00",
+  "request_hash": "b84cb5b63a0142834a6a5795b0cec7d334eddef78c32a424573d35e372d67142",
+  "stage": "preview",
+  "parameters": {
+    "prompt": "One photorealistic wraparound two-crew spacecraft flight console, 4.8 m wide, 1.15 m high, 1.25 m deep. Low central sightline, angled instrument wings, structural pedestal, replaceable display bezels, guarded switches, rotary controls, handholds, ventilation, cable access and service panels. Functional near-future avionics with layered depth and realistic bevels, isolated single object, pilot side faces -Z. No seats, room, floating screens, holograms, fake text, logos, stand, ground, or background.",
+    "texture_prompt": "De-lit realistic flight hardware: dark low-glare composite, anodized aluminum bezels, physical black display glass, brushed metal controls, restrained amber and cyan indicator lenses, subtle hand-contact wear, no baked highlights, pseudo-text, logos, random grime, or active emissive content.",
+    "ai_model": "meshy-6",
+    "model_type": "standard",
+    "should_remesh": true,
+    "target_polycount": 140000,
+    "decimation_mode": null,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "cockpit_flight_console",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "preview": {
+      "id": "019f8a73-e145-74ea-83e1-356773f4f7e5",
+      "type": "text-to-3d-preview",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784734280381,
+      "started_at": 1784734280401,
+      "finished_at": 1784734464117,
+      "consumed_credits": 20
+    }
+  },
+  "files": {
+    "preview": "preview.glb",
+    "preview_sha256": "7e94b4be27e308208218e430d5ddb57f24ff5f96916531eba59ab91857ebe885",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "19a23f2d38b41c8427afb312f92c9122912eb3f60082d2f548b00bba226f4206"
+  },
+  "validation": {
+    "tool": "tools/meshy/review_glb.py",
+    "vertices": 157136,
+    "triangles": 136360,
+    "geometric_components": 3,
+    "largest_component_triangle_fraction": 0.992952,
+    "source_bounds_size": [1.899829, 1.901243, 1.130477]
+  },
+  "art_review": {
+    "status": "approved_for_refine",
+    "reviewed_at_utc": "2026-07-22T15:30:00Z",
+    "strengths": [
+      "wraparound two-crew console has a clear operator cavity and layered physical controls",
+      "large display bezels, work surfaces and service panels are readable from all views"
+    ],
+    "required_cleanup": [
+      "delete two minor disconnected fragments and protect the central pilot sightline",
+      "replace generated controls and screens with stable interaction and display surfaces",
+      "verify seated and standing reach envelopes before promotion"
+    ]
+  },
+  "consumed_credits": 20
+}
