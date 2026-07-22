@@ -160,6 +160,30 @@ TEST_CASE(RuntimeContentManifest_FileLoadSetsConfinedContentRoot)
              asset::RuntimeContentManifestStatus::FileNotFound);
 }
 
+TEST_CASE(RuntimeContentManifest_ContentSelectionBuildsOnlyConfinedNames)
+{
+    const asset::RuntimeContentSelectionResult courier =
+        asset::BuildRuntimeContentManifestPath("frontier_courier_mk1");
+    CHECK(courier.accepted);
+    CHECK_EQ(courier.contentId, std::string("frontier_courier_mk1"));
+    CHECK_EQ(courier.manifestPath.generic_string(),
+             std::string("assets/runtime/frontier_courier_mk1.tdcontent"));
+    CHECK(asset::BuildRuntimeContentManifestPath(
+        std::string(asset::kRuntimeContentSelectorMaxBytes, 'a')).accepted);
+
+    CHECK(!asset::BuildRuntimeContentManifestPath("").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("../reference_ship").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("reference_ship.tdcontent").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("C:reference_ship").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("ship/reference").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("ship\\reference").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath("reference ship").accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath(
+        std::string(asset::kRuntimeContentSelectorMaxBytes + 1u, 'a')).accepted);
+    CHECK(!asset::BuildRuntimeContentManifestPath(
+        "reference_ship", std::filesystem::path{}).accepted);
+}
+
 TEST_CASE(RuntimeContentManifest_CoverageRequiresEveryAndOnlyAuthoredLocator)
 {
     const asset::RuntimeContentManifestResult parsed =

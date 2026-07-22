@@ -200,7 +200,7 @@
     {"id": "cargo_entry", "module": "cargo_module", "type": "portal", "position_m": [2.75, 0.0, 0.0], "forward": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
     {"id": "corridor_crew", "module": "main_corridor", "type": "portal", "position_m": [0.7, 0.0, 3.1], "forward": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
     {"id": "crew_entry", "module": "crew_module", "type": "portal", "position_m": [-1.9, 0.0, 0.0], "forward": [-1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
-    {"id": "pilot_exit_spawn", "module": "cockpit_module", "type": "spawn", "position_m": [0.0, -0.85, -1.8], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
+    {"id": "pilot_exit_spawn", "module": "cockpit_module", "type": "spawn", "position_m": [0.0, -0.85, 0.5], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]},
     {"id": "pilot_seat_anchor", "module": "cockpit_module", "type": "interaction", "position_m": [0.0, -0.45, 2.1], "forward": [0.0, 0.0, 1.0], "up": [0.0, 1.0, 0.0]}
   ],
   "zones": [

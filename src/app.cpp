@@ -49,6 +49,29 @@ double ReadDoubleOption(const std::string& args, const char* option, double fall
     return end != args.c_str() + pos ? value : fallback;
 }
 
+std::string ReadTokenOption(
+    const std::string& args,
+    const char* option,
+    std::string fallback)
+{
+    size_t searchFrom = 0;
+    while (searchFrom < args.size())
+    {
+        const size_t optionPos = args.find(option, searchFrom);
+        if (optionPos == std::string::npos)
+            return fallback;
+        if (optionPos == 0 || args.find_first_of(" \t\r\n", optionPos - 1) ==
+                                  optionPos - 1)
+        {
+            const size_t valuePos = optionPos + std::strlen(option);
+            const size_t valueEnd = args.find_first_of(" \t\r\n", valuePos);
+            return args.substr(valuePos, valueEnd - valuePos);
+        }
+        searchFrom = optionPos + 1;
+    }
+    return fallback;
+}
+
 dawning::AppOptions ParseOptions(const char* commandLine)
 {
     dawning::AppOptions options;
@@ -64,6 +87,8 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.smokeForceGrow = HasOption(args, "--smoke-force-grow");
     options.gpuValidation = HasOption(args, "--gpu-validation");
     options.showOverlay = !HasOption(args, "--no-overlay");
+    options.runtimeContentId = ReadTokenOption(
+        args, "--content=", std::move(options.runtimeContentId));
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
     options.starSystem = HasOption(args, "--star-system");
@@ -456,10 +481,23 @@ bool App::InitializeScene()
     // One generic data manifest now owns the cooked assembly and all typed
     // resource bindings. It records model uploads onto this same open command
     // list but publishes no ECS entities until the upload batch retires below.
+    const asset::RuntimeContentSelectionResult contentSelection =
+        asset::BuildRuntimeContentManifestPath(m_options.runtimeContentId);
+    if (!contentSelection.accepted)
+    {
+        core::Log::Errorf(
+            "Runtime content selection rejected: %s",
+            contentSelection.error.c_str());
+        return false;
+    }
+    core::Log::Infof(
+        "[SMOKE] runtime_content_selection=ok content=%s",
+        contentSelection.contentId.c_str());
+
     const scene::AssemblyRuntimeHostResult runtimePrepared =
         m_runtimeAssembly.BeginLoad(
             m_scene, m_device, m_renderer,
-            "assets/runtime/reference_ship.tdcontent");
+            contentSelection.manifestPath);
     if (!runtimePrepared.Succeeded())
     {
         core::Log::Errorf("Required runtime content failed to prepare [%s]: %s",
@@ -490,127 +528,8 @@ bool App::InitializeScene()
                           runtimeCommitted.error.c_str());
         return false;
     }
-    if (m_options.smoke)
-    {
-        const auto closedCollision =
-            m_runtimeAssembly.InteractiveCollisionSnapshot();
-        if (!closedCollision || !closedCollision->collisionWorld)
-        {
-            core::Log::Error("On-foot smoke has no closed collision snapshot");
-            return false;
-        }
-        gameplay::OnFootState closedWalk;
-        closedWalk.capsule.center = { 0.0, 0.32, -2.0 };
-        gameplay::OnFootCommand walkForward;
-        walkForward.moveForward = 1.0;
-        bool closedBlocked = false;
-        for (uint32_t step = 0; step < 120; ++step)
-        {
-            const gameplay::OnFootStepResult walked =
-                gameplay::StepOnFootController(
-                    *closedCollision,
-                    closedWalk,
-                    walkForward,
-                    kSmokeFixedDeltaSeconds);
-            if (!walked.Succeeded())
-            {
-                core::Log::Errorf(
-                    "Closed on-foot smoke step failed [%s/%s]",
-                    gameplay::OnFootControllerStatusName(walked.status),
-                    scene::InteriorCollisionStatusName(
-                        walked.collisionStatus));
-                return false;
-            }
-            closedBlocked = closedBlocked || walked.blocked;
-            closedWalk = walked.state;
-        }
-        if (!closedBlocked || closedWalk.capsule.center.z >= -1.35)
-        {
-            core::Log::Errorf(
-                "Closed inner door did not block controller (z=%.6f)",
-                closedWalk.capsule.center.z);
-            return false;
-        }
-
-        const scene::AssemblyInteriorResult activated =
-            m_runtimeAssembly.ActivateInteraction(m_scene, "outer_hatch");
-        const scene::AssemblyInteriorResult advanced = activated.Succeeded()
-            ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
-            : activated;
-        const scene::AssemblyInteriorRuntime& interior =
-            m_runtimeAssembly.Interior();
-        const uint32_t portalIndex = interior.InteractionPortalIndex(
-            activated.stableIndex);
-        if (!activated.Succeeded() || !advanced.Succeeded() ||
-            interior.InteractionStateName(activated.stableIndex) != "open" ||
-            portalIndex == asset::kAssemblyNoIndex ||
-            !interior.IsPortalTraversable(portalIndex))
-        {
-            core::Log::Errorf(
-                "Interior smoke interaction failed [%s]: %s",
-                scene::AssemblyInteriorStatusName(advanced.status),
-                advanced.error.c_str());
-            return false;
-        }
-        core::Log::Info(
-            "[SMOKE] interior_interaction=ok interaction=outer_hatch state=open portal=outer_entry traversable=yes");
-
-        const scene::AssemblyInteriorResult innerActivated =
-            m_runtimeAssembly.ActivateInteraction(m_scene, "inner_door");
-        const scene::AssemblyInteriorResult innerAdvanced =
-            innerActivated.Succeeded()
-                ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
-                : innerActivated;
-        const uint32_t innerPortal = interior.InteractionPortalIndex(
-            innerActivated.stableIndex);
-        const auto openCollision =
-            m_runtimeAssembly.InteractiveCollisionSnapshot();
-        if (!innerActivated.Succeeded() || !innerAdvanced.Succeeded() ||
-            interior.InteractionStateName(innerActivated.stableIndex) != "open" ||
-            innerPortal == asset::kAssemblyNoIndex ||
-            !interior.IsPortalTraversable(innerPortal) || !openCollision ||
-            !openCollision->collisionWorld)
-        {
-            core::Log::Errorf(
-                "Open on-foot smoke setup failed [%s]: %s",
-                scene::AssemblyInteriorStatusName(innerAdvanced.status),
-                innerAdvanced.error.c_str());
-            return false;
-        }
-
-        gameplay::OnFootState openWalk;
-        openWalk.capsule.center = { 0.0, 0.32, -2.0 };
-        for (uint32_t step = 0; step < 120; ++step)
-        {
-            const gameplay::OnFootStepResult walked =
-                gameplay::StepOnFootController(
-                    *openCollision,
-                    openWalk,
-                    walkForward,
-                    kSmokeFixedDeltaSeconds);
-            if (!walked.Succeeded())
-            {
-                core::Log::Errorf(
-                    "Open on-foot smoke step failed [%s/%s]",
-                    gameplay::OnFootControllerStatusName(walked.status),
-                    scene::InteriorCollisionStatusName(
-                        walked.collisionStatus));
-                return false;
-            }
-            openWalk = walked.state;
-        }
-        if (openWalk.capsule.center.z <= -0.5 ||
-            openCollision->dynamicBoxes.size() != 2)
-        {
-            core::Log::Errorf(
-                "Open inner door did not admit controller (z=%.6f blockers=%zu)",
-                openWalk.capsule.center.z,
-                openCollision->dynamicBoxes.size());
-            return false;
-        }
-        core::Log::Info(
-            "[SMOKE] on_foot_controller=ok closed=blocked open=traversable blockers=2");
-    }
+    if (m_options.smoke && !ValidateSmokeInteriorRuntime())
+        return false;
 
     auto& resources = m_scene.GetResources();
     const auto cube = resources.AddMesh(std::move(cubeMesh), "Cube");
@@ -714,7 +633,9 @@ bool App::InitializeScene()
             });
         if (m_smokeTextureEntity.IsNull())
             return false;
-        m_smokeCameraTarget = m_smokeTextureEntity;
+        m_smokeCameraTarget = IsReferenceRuntimeContent()
+            ? m_smokeTextureEntity
+            : m_playerShip;
         core::Log::Info(
             "[SMOKE] smoke_camera_probe=isolated gameplay_identity=assembly_root");
     }
@@ -895,6 +816,238 @@ bool App::InitializeScene()
     return true;
 }
 
+bool App::IsReferenceRuntimeContent() const
+{
+    return m_runtimeAssembly.Manifest().sceneId == "ship.reference.runtime";
+}
+
+bool App::ValidateSmokeInteriorRuntime()
+{
+    const std::string& sceneId = m_runtimeAssembly.Manifest().sceneId;
+    if (sceneId == "ship.reference.runtime")
+        return ValidateReferenceSmokeInteriorRuntime();
+    if (sceneId == "ship.frontier.courier_mk1.runtime")
+        return ValidateProductionSmokeInteriorRuntime();
+
+    core::Log::Errorf(
+        "No smoke interior profile is registered for scene: %s",
+        sceneId.c_str());
+    return false;
+}
+
+bool App::ValidateReferenceSmokeInteriorRuntime()
+{
+    const auto closedCollision =
+        m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!closedCollision || !closedCollision->collisionWorld)
+    {
+        core::Log::Error("On-foot smoke has no closed collision snapshot");
+        return false;
+    }
+    gameplay::OnFootState closedWalk;
+    closedWalk.capsule.center = { 0.0, 0.32, -2.0 };
+    gameplay::OnFootCommand walkForward;
+    walkForward.moveForward = 1.0;
+    bool closedBlocked = false;
+    for (uint32_t step = 0; step < 120; ++step)
+    {
+        const gameplay::OnFootStepResult walked =
+            gameplay::StepOnFootController(
+                *closedCollision,
+                closedWalk,
+                walkForward,
+                kSmokeFixedDeltaSeconds);
+        if (!walked.Succeeded())
+        {
+            core::Log::Errorf(
+                "Closed on-foot smoke step failed [%s/%s]",
+                gameplay::OnFootControllerStatusName(walked.status),
+                scene::InteriorCollisionStatusName(walked.collisionStatus));
+            return false;
+        }
+        closedBlocked = closedBlocked || walked.blocked;
+        closedWalk = walked.state;
+    }
+    if (!closedBlocked || closedWalk.capsule.center.z >= -1.35)
+    {
+        core::Log::Errorf(
+            "Closed inner door did not block controller (z=%.6f)",
+            closedWalk.capsule.center.z);
+        return false;
+    }
+
+    const scene::AssemblyInteriorResult activated =
+        m_runtimeAssembly.ActivateInteraction(m_scene, "outer_hatch");
+    const scene::AssemblyInteriorResult advanced = activated.Succeeded()
+        ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
+        : activated;
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    const uint32_t portalIndex = interior.InteractionPortalIndex(
+        activated.stableIndex);
+    if (!activated.Succeeded() || !advanced.Succeeded() ||
+        interior.InteractionStateName(activated.stableIndex) != "open" ||
+        portalIndex == asset::kAssemblyNoIndex ||
+        !interior.IsPortalTraversable(portalIndex))
+    {
+        core::Log::Errorf(
+            "Interior smoke interaction failed [%s]: %s",
+            scene::AssemblyInteriorStatusName(advanced.status),
+            advanced.error.c_str());
+        return false;
+    }
+    core::Log::Info(
+        "[SMOKE] interior_interaction=ok interaction=outer_hatch state=open portal=outer_entry traversable=yes");
+
+    const scene::AssemblyInteriorResult innerActivated =
+        m_runtimeAssembly.ActivateInteraction(m_scene, "inner_door");
+    const scene::AssemblyInteriorResult innerAdvanced =
+        innerActivated.Succeeded()
+            ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
+            : innerActivated;
+    const uint32_t innerPortal = interior.InteractionPortalIndex(
+        innerActivated.stableIndex);
+    const auto openCollision =
+        m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!innerActivated.Succeeded() || !innerAdvanced.Succeeded() ||
+        interior.InteractionStateName(innerActivated.stableIndex) != "open" ||
+        innerPortal == asset::kAssemblyNoIndex ||
+        !interior.IsPortalTraversable(innerPortal) || !openCollision ||
+        !openCollision->collisionWorld)
+    {
+        core::Log::Errorf(
+            "Open on-foot smoke setup failed [%s]: %s",
+            scene::AssemblyInteriorStatusName(innerAdvanced.status),
+            innerAdvanced.error.c_str());
+        return false;
+    }
+
+    gameplay::OnFootState openWalk;
+    openWalk.capsule.center = { 0.0, 0.32, -2.0 };
+    for (uint32_t step = 0; step < 120; ++step)
+    {
+        const gameplay::OnFootStepResult walked =
+            gameplay::StepOnFootController(
+                *openCollision,
+                openWalk,
+                walkForward,
+                kSmokeFixedDeltaSeconds);
+        if (!walked.Succeeded())
+        {
+            core::Log::Errorf(
+                "Open on-foot smoke step failed [%s/%s]",
+                gameplay::OnFootControllerStatusName(walked.status),
+                scene::InteriorCollisionStatusName(walked.collisionStatus));
+            return false;
+        }
+        openWalk = walked.state;
+    }
+    if (openWalk.capsule.center.z <= -0.5 ||
+        openCollision->dynamicBoxes.size() != 2)
+    {
+        core::Log::Errorf(
+            "Open inner door did not admit controller (z=%.6f blockers=%zu)",
+            openWalk.capsule.center.z,
+            openCollision->dynamicBoxes.size());
+        return false;
+    }
+    core::Log::Info(
+        "[SMOKE] on_foot_controller=ok closed=blocked open=traversable blockers=2");
+    return true;
+}
+
+bool App::ValidateProductionSmokeInteriorRuntime()
+{
+    const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
+    if (!instance || !instance->IsAlive() || !instance->Plan() ||
+        !instance->Plan()->Resources() ||
+        !instance->Plan()->Resources()->assembly)
+    {
+        core::Log::Error("Production interior smoke has no live assembly");
+        return false;
+    }
+    const asset::CookedAssembly& assembly =
+        *instance->Plan()->Resources()->assembly;
+    const auto initialCollision =
+        m_runtimeAssembly.InteractiveCollisionSnapshot();
+    if (!initialCollision || !initialCollision->collisionWorld ||
+        initialCollision->dynamicBoxes.empty())
+    {
+        core::Log::Error(
+            "Production interior smoke has no closed dynamic blockers");
+        return false;
+    }
+
+    const scene::AssemblyInteriorRuntime& interior =
+        m_runtimeAssembly.Interior();
+    size_t closureCount = 0;
+    for (uint32_t interactionIndex = 0;
+         interactionIndex < assembly.interactions.size();
+         ++interactionIndex)
+    {
+        const asset::AssemblyInteraction& interaction =
+            assembly.interactions[interactionIndex];
+        if (interaction.portalIndex == asset::kAssemblyNoIndex)
+            continue;
+        if (interaction.portalIndex >= assembly.portals.size() ||
+            interaction.movingPartIndex == asset::kAssemblyNoIndex ||
+            interior.InteractionPortalIndex(interactionIndex) !=
+                interaction.portalIndex ||
+            interior.InteractionStateName(interactionIndex) != "closed" ||
+            interior.IsPortalTraversable(interaction.portalIndex))
+        {
+            core::Log::Errorf(
+                "Production closure precondition failed: %s",
+                interaction.id.c_str());
+            return false;
+        }
+
+        const scene::AssemblyInteriorResult activated =
+            m_runtimeAssembly.ActivateInteraction(m_scene, interactionIndex);
+        const scene::AssemblyInteriorResult advanced = activated.Succeeded()
+            ? m_runtimeAssembly.AdvanceInterior(m_scene, 2.0)
+            : activated;
+        if (!activated.Succeeded() || activated.stableIndex != interactionIndex ||
+            !advanced.Succeeded() ||
+            interior.InteractionStateName(interactionIndex) != "open" ||
+            !interior.IsPortalTraversable(interaction.portalIndex))
+        {
+            core::Log::Errorf(
+                "Production closure activation failed [%s]: %s",
+                scene::AssemblyInteriorStatusName(advanced.status),
+                interaction.id.c_str());
+            return false;
+        }
+        ++closureCount;
+    }
+
+    const auto openCollision =
+        m_runtimeAssembly.InteractiveCollisionSnapshot();
+    const size_t expectedClosedBoxes = closureCount * 2u;
+    const size_t expectedOpenBoxes = closureCount;
+    if (closureCount != assembly.portals.size() || !openCollision ||
+        !openCollision->collisionWorld ||
+        initialCollision->dynamicBoxes.size() != expectedClosedBoxes ||
+        openCollision->dynamicBoxes.size() != expectedOpenBoxes ||
+        openCollision->revision <= initialCollision->revision)
+    {
+        core::Log::Errorf(
+            "Production interior did not open every portal (closures=%zu portals=%zu blockers=%zu)",
+            closureCount,
+            assembly.portals.size(),
+            openCollision ? openCollision->dynamicBoxes.size() : 0u);
+        return false;
+    }
+
+    core::Log::Infof(
+        "[SMOKE] production_interior=ok closures=%zu portals=%zu initial_blockers=%zu final_blockers=%zu",
+        closureCount,
+        assembly.portals.size(),
+        initialCollision->dynamicBoxes.size(),
+        openCollision->dynamicBoxes.size());
+    return true;
+}
+
 bool App::InitializePlayerPossession()
 {
     const scene::AssemblyInstance* instance = m_runtimeAssembly.Instance();
@@ -985,11 +1138,18 @@ bool App::ValidateSmokePossessionRoundTrip()
         m_playerPossession.onFoot.capsule.center;
     m_onFootCommand = {};
     m_onFootCommand.moveForward = 1.0;
-    if (!UpdateOnFootSimulation(kSmokeFixedDeltaSeconds) ||
-        m_playerPossession.onFoot.capsule.center.z <=
-            localBeforeStep.z + 1.0e-8)
+    if (!UpdateOnFootSimulation(kSmokeFixedDeltaSeconds))
     {
         core::Log::Error("Smoke on-foot possession did not advance a fixed step");
+        return false;
+    }
+    const core::Vec3d localStep =
+        m_playerPossession.onFoot.capsule.center - localBeforeStep;
+    if (localStep.Dot(core::Vec3d::FromFloat(m_pilotSeat.spawn.forward)) <=
+        1.0e-8)
+    {
+        core::Log::Error(
+            "Smoke on-foot possession did not advance along the spawn heading");
         return false;
     }
     m_onFootCommand = {};
@@ -2335,7 +2495,23 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
         registry.TryGet<ecs::Transform>(chaseTarget))
     {
         const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget);
-        const gameplay::ChaseCameraPose target = gameplay::BuildChaseCameraPose(*ship);
+        if (m_options.smoke && !m_options.starSystem &&
+            !IsReferenceRuntimeContent())
+        {
+            const core::Vec3f localOffset{ 20.0f, 9.0f, -25.0f };
+            const core::Vec3f worldOffset = ship->rotation.Rotate(localOffset);
+            const core::Vec3f up =
+                ship->rotation.Rotate({ 0.0f, 1.0f, 0.0f }).Normalized();
+            const core::Vec3f forward = (-worldOffset).Normalized();
+            m_chaseCameraInitialized = false;
+            return m_camera.InitBasis(
+                ship->position + core::Vec3d::FromFloat(worldOffset),
+                forward,
+                up);
+        }
+
+        const gameplay::ChaseCameraPose target =
+            gameplay::BuildChaseCameraPose(*ship);
         gameplay::ChaseCameraPose pose = target;
         if (m_chaseCameraInitialized)
         {

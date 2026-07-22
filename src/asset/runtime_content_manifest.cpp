@@ -456,6 +456,46 @@ RuntimeContentManifestResult LoadRuntimeContentManifestFile(
     }
 }
 
+RuntimeContentSelectionResult BuildRuntimeContentManifestPath(
+    std::string_view contentId,
+    const std::filesystem::path& runtimeContentRoot)
+{
+    RuntimeContentSelectionResult result;
+    if (contentId.empty())
+    {
+        result.error = "runtime content id is empty";
+        return result;
+    }
+    if (contentId.size() > kRuntimeContentSelectorMaxBytes)
+    {
+        result.error = "runtime content id exceeds the byte limit";
+        return result;
+    }
+    if (runtimeContentRoot.empty())
+    {
+        result.error = "runtime content root is empty";
+        return result;
+    }
+    const bool valid = std::all_of(
+        contentId.begin(), contentId.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') ||
+                   (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == '_' || c == '-';
+        });
+    if (!valid)
+    {
+        result.error =
+            "runtime content id may contain only letters, digits, '_' and '-'";
+        return result;
+    }
+
+    result.accepted = true;
+    result.contentId.assign(contentId);
+    result.manifestPath = runtimeContentRoot /
+        std::filesystem::path(result.contentId + ".tdcontent");
+    return result;
+}
+
 RuntimeContentCoverageResult ValidateRuntimeContentCoverage(
     const RuntimeContentManifest& manifest,
     const CookedAssembly& assembly)

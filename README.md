@@ -18,6 +18,9 @@ Do not merge old snapshots directly into this source tree.
 - Versioned `.tdcontent` deployment manifests that bind exact cooked assembly
   locators to immutable model/contract owners and publish the complete ECS graph
   transactionally after GPU upload retirement.
+- Strict runtime content selection through `--content=<id>`. The default remains
+  `reference_ship`; `frontier_courier_mk1` loads the first production-intent
+  28 m boardable courier without accepting paths or extensions from the CLI.
 - One meshless committed assembly root is the playable ship identity. Flight,
   gravity, possession, chase camera, and thruster feedback use that root while
   immutable local module/moving-part poses are transactionally composed into
@@ -77,6 +80,13 @@ After building, run a short automated render test:
 .\tools\smoke_test.cmd
 ```
 
+Run the production courier profile explicitly with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\smoke_test.ps1 `
+  -Config Release -Content frontier_courier_mk1 -Flight
+```
+
 The smoke test launches `build\Debug\TheDawningV3.exe --smoke --smoke-rt`,
 waits for the engine to enter path tracing, and exits cleanly. It fails if:
 
@@ -105,9 +115,11 @@ For a deterministic playable-ship motion test, run
 `tools\smoke_test.ps1 -Flight`. The opt-in profile switches to decoupled flight
 and holds forward thrust over the final twelve fixed steps. It requires the
 assembly root and a real module to move together, then checks physical nozzle
-throttle and exhaust feedback. The smoke-only camera remains on its isolated
-center probe so the renderer's cascade negative control keeps a stable signal;
-ordinary interactive chase-camera ownership remains on the assembly root.
+throttle and exhaust feedback. The reference profile keeps its smoke-only
+camera on the isolated center probe so the renderer's calibrated negative
+controls retain a stable signal. The production courier profile uses a fixed
+elevated three-quarter camera attached to the same assembly root so its
+longitudinal silhouette remains inspectable while the ship moves.
 
 In raster mode the harness additionally probes the shadow map itself, reading
 back a 256x256 window from its centre and asserting that the depth pass

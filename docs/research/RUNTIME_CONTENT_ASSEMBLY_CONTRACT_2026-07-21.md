@@ -1,7 +1,8 @@
 # Runtime Content Assembly Contract
 
 Date: 2026-07-21
-Status: implemented by WS-026; collision binding extended by WS-028
+Status: implemented by WS-026; collision binding extended by WS-028; runtime
+selection and production smoke profiles extended by WS-032
 Manifest extension: `.tdcontent`
 
 ## Purpose
@@ -30,9 +31,12 @@ collision JSON        -> deterministic .tdcollision
                        live all-or-nothing ECS graph
 ```
 
-The application names only `assets/runtime/reference_ship.tdcontent`. Moving a
-binding to another cooked model or primitive is a data change, not an `App`
-change.
+The application accepts a strict content ID through `--content=<id>` and maps it
+to `assets/runtime/<id>.tdcontent`. The default remains `reference_ship`. IDs are
+limited to 64 ASCII bytes and contain only letters, digits, `_`, or `-`; paths,
+extensions, separators, whitespace, drive syntax, and traversal tokens are
+rejected before manifest access. Moving a binding to another cooked model or
+primitive remains a data change, not an `App` change.
 
 ## Manifest Grammar
 
@@ -112,10 +116,21 @@ roll back resources in reverse registration order.
 all visuals and commits six entities: one assembly root, three modules, and two
 moving parts. This is a lifecycle and ownership witness, not final ship art.
 
-The three collision bindings publish twelve authored boxes into one immutable
-assembly-local interior collision world. Navigation and walkable bindings still
-prove typed catalog preflight only. They do not create navmesh instances or
-pressure volumes. Runtime LOD selection is also a later stage.
+`assets/runtime/frontier_courier_mk1.tdcontent` is the first production witness.
+It resolves 61 typed bindings across two cooked models and eight collision
+packages, then commits one authoritative root, eight modules, and seven moving
+parts. Its collision world contains 88 immutable assembly-local boxes. Seven
+closed portal closures add one physical panel and one conservative traversal
+guard each; opening every closure removes the seven guards while retaining the
+seven translated physical panels. The production smoke profile proves all seven
+portals become traversable, then exits the pilot seat, advances an on-foot step,
+re-enters the ship, and advances the composed root/child flight hierarchy.
+
+For the reference witness, the three collision bindings publish twelve authored
+boxes into one immutable assembly-local interior collision world. Navigation
+and walkable bindings still prove typed catalog preflight only. They do not
+create navmesh instances or pressure volumes. Runtime LOD selection is also a
+later stage.
 
 ## Verification
 
@@ -129,6 +144,12 @@ runtime_assembly_committed=ok asset=ship.reference.fighter modules=3 moving_part
 interior_collision_ready=ok packages=3 boxes=12 frame=assembly_local
 ```
 
-Raster, stable DXR, and full-quality DXR must all pass. A GPU-validation run
-checks the same startup, rendering, and teardown path under the D3D12 validation
-layer.
+The reference profile remains the calibrated renderer oracle for exact
+fixture-specific material and shadow maxima. Production profiles retain every
+live/control/reachability/identity/occlusion/Toksvig assertion that is independent
+of that fixture and add exact topology, blocker, possession, and hierarchy
+assertions for their own scene.
+
+Raster, stable DXR, and full-quality DXR must all pass for both profiles. A
+GPU-validation run checks the same startup, rendering, and teardown path under
+the D3D12 validation layer.

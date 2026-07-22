@@ -60,6 +60,25 @@ class FrontierCourierPipelineTests(unittest.TestCase):
         self.assertEqual(zones["airlock"]["pressure"], "airlock")
         self.assertEqual(manifest["navigation"]["entry_zone"], "boarding_vestibule")
 
+    def test_pilot_exit_spawn_is_clear_and_within_reentry_range(self):
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        sockets = {socket["id"]: socket for socket in manifest["sockets"]}
+        spawn = sockets["pilot_exit_spawn"]
+        seat = sockets["pilot_seat_anchor"]
+        self.assertEqual(spawn["module"], seat["module"])
+        self.assertEqual(spawn["forward"], [0.0, 0.0, 1.0])
+
+        # StagePilotEntry measures from the on-foot eye to the seat anchor.
+        # These values mirror the shipped default possession configuration.
+        capsule_center_y = spawn["position_m"][1] + 0.35 + 0.45 + 0.02
+        eye = [spawn["position_m"][0], capsule_center_y + 0.65,
+               spawn["position_m"][2]]
+        offset = [seat["position_m"][axis] - eye[axis] for axis in range(3)]
+        distance = sum(value * value for value in offset) ** 0.5
+        self.assertLessEqual(distance, 2.5)
+        facing = offset[2] / distance
+        self.assertGreaterEqual(facing, 0.25)
+
     def test_collision_sources_regenerate_deterministically(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)

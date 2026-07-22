@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace dawning
@@ -39,6 +40,7 @@ struct AppOptions
     // mode (e.g. --smoke --smoke-capture --star-system --camera-mode=nearbody).
     bool starSystem = false;
     int  startCameraMode = 0; // matches App::CameraMode ordinal; 0 = ShipChase
+    std::string runtimeContentId = "reference_ship";
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
 };
@@ -52,6 +54,9 @@ private:
     bool Initialize();
     bool InitializeScene();
     bool InitializePlayerPossession();
+    bool ValidateSmokeInteriorRuntime();
+    bool ValidateReferenceSmokeInteriorRuntime();
+    bool ValidateProductionSmokeInteriorRuntime();
     bool ValidateSmokePossessionRoundTrip();
     void InitializePathTracingState();
     int RunMainLoop();
@@ -78,6 +83,7 @@ private:
         scene::AssemblyInteractionQuery& query);
     bool UpdateOnFootSimulation(double dt);
     bool ValidateSmokeAssemblyMotion();
+    bool IsReferenceRuntimeContent() const;
     void UpdatePlayerShipVisuals();
     bool UpdateCamera(const core::TimeStep& timeStep);
     // Set the per-mode render scale K (Scene::SetRenderScale) and camera near

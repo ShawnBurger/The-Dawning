@@ -61,6 +61,11 @@ PBR source subsequently normalized, welded, and cut by the authored Blender
 pipeline. Every manifest remains retained so paid generations and rejection
 decisions are auditable without treating vendor output as design authority.
 
+The pilot exit spawn is authored 1.6 m behind the seat along its forward axis.
+With the shipped capsule and eye offsets it remains within the 2.5 m seat-use
+range, faces the seat, and passes the live collision-backed exit/re-entry smoke
+round trip.
+
 ## Acceptance
 
 No source is promoted merely because it looks attractive in a thumbnail. It
@@ -68,3 +73,9 @@ must pass importer inspection, measured bounds/orientation, topology and
 material budgets, exterior/interior socket alignment, deterministic cooking,
 collision clearance, complete outside-to-interior reachability, reversible
 closure state, cockpit possession, raster/DXR parity, and close-range captures.
+
+The runtime profile is selected with `--content=frontier_courier_mk1`. Its
+production smoke contract opens and verifies all seven portal closures, retains
+one physical moved-panel collision box per open closure, performs pilot
+exit/movement/re-entry, flies the meshless assembly root, and captures the same
+ship in raster, stable DXR, and full DXR.

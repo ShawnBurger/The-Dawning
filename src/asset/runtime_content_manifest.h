@@ -12,6 +12,15 @@ namespace asset
 {
 
 constexpr uint32_t kRuntimeContentManifestVersion = 2u;
+constexpr uint32_t kRuntimeContentSelectorMaxBytes = 64u;
+
+struct RuntimeContentSelectionResult
+{
+    bool accepted = false;
+    std::string contentId;
+    std::filesystem::path manifestPath;
+    std::string error;
+};
 
 struct RuntimeContentBinding
 {
@@ -88,6 +97,14 @@ RuntimeContentManifestResult ParseRuntimeContentManifest(
 RuntimeContentManifestResult LoadRuntimeContentManifestFile(
     const std::filesystem::path& path,
     const RuntimeContentManifestLimits& limits = {});
+
+// Converts a command-line content ID into one manifest path beneath the fixed
+// runtime content root. IDs deliberately cannot contain path separators,
+// extensions, drive prefixes, or dot components.
+RuntimeContentSelectionResult BuildRuntimeContentManifestPath(
+    std::string_view contentId,
+    const std::filesystem::path& runtimeContentRoot =
+        std::filesystem::path("assets/runtime"));
 
 RuntimeContentCoverageResult ValidateRuntimeContentCoverage(
     const RuntimeContentManifest& manifest,

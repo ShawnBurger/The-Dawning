@@ -10,6 +10,8 @@ param(
     [switch]$Flight,
     [int]$TimeoutSeconds = 15,
     [string]$Config = "Debug",
+    [ValidateSet("reference_ship", "frontier_courier_mk1")]
+    [string]$Content = "reference_ship",
     [switch]$NoCapture
 )
 
@@ -59,7 +61,7 @@ foreach ($name in $smokeTextureNames) {
 if (Test-Path -LiteralPath $log)     { Remove-Item -LiteralPath $log -Force }
 if (Test-Path -LiteralPath $capture) { Remove-Item -LiteralPath $capture -Force }
 
-$arguments = @("--smoke", "--smoke-seconds=$Seconds")
+$arguments = @("--smoke", "--smoke-seconds=$Seconds", "--content=$Content")
 if (!$RasterOnly)  {
     $arguments += "--smoke-rt"
     $arguments += "--smoke-rt-delay=$RTDelaySeconds"
@@ -155,46 +157,68 @@ Assert-Marker "shadow_map_slot" "1"
 # model_source=cooked fails if app.cpp silently falls back to source glTF.
 Assert-Marker "model_loaded" "ok"
 Assert-Marker "model_source" "cooked"
-Assert-Marker "model_primitives" "1"
-Assert-Marker "model_vertices" "15562"
-Assert-Marker "model_indices" "57579"
-Assert-Marker "model_images" "3"
+Assert-Marker "runtime_content_selection" "ok"
+Assert-Marker "content" $Content
 
 # The shipped scene must be assembled from its runtime-content manifest, not
-# from App-owned entity construction. The prepare marker proves that all 21
-# typed assembly locators resolved through one immutable cooked-model owner;
-# the commit marker proves the WS-025 transaction reached the live registry
-# only after startup upload retirement. Exact topology counts keep a partial
-# or placeholder assembly from satisfying the lifecycle check.
+# from App-owned entity construction. Exact topology counts keep a partial or
+# placeholder assembly from satisfying the lifecycle check. The reference ship
+# remains the renderer regression fixture; the courier profile independently
+# proves the production two-model, eight-module interior graph.
 Assert-Marker "runtime_content_prepared" "ok"
-Assert-Marker "scene" "ship.reference.runtime"
-Assert-Marker "bindings" "21"
-Assert-Marker "models" "1"
 Assert-Marker "runtime_assembly_committed" "ok"
-Assert-Marker "asset" "ship.reference.fighter"
-Assert-Marker "modules" "3"
-Assert-Marker "moving_parts" "2"
-Assert-Marker "entities" "6"
 Assert-Marker "interior_runtime_ready" "ok"
-Assert-Marker "interactions" "3"
-Assert-Marker "portals" "2"
-Assert-Marker "interior_interaction" "ok"
-Assert-Marker "interaction" "outer_hatch"
-Assert-Marker "state" "open"
-Assert-Marker "portal" "outer_entry"
-Assert-Marker "traversable" "yes"
 Assert-Marker "interior_collision_ready" "ok"
-Assert-Marker "packages" "3"
-Assert-Marker "boxes" "12"
 Assert-Marker "frame" "assembly_local"
 Assert-Marker "interior_dynamic_collision_ready" "ok"
-Assert-Marker "revision" "1"
-Assert-Marker "initial_blockers" "4"
-Assert-Marker "initial_combined_boxes" "16"
-Assert-Marker "on_foot_controller" "ok"
-Assert-Marker "closed" "blocked"
-Assert-Marker "open" "traversable"
-Assert-Marker "blockers" "2"
+
+if ($Content -eq "reference_ship") {
+    Assert-Marker "model_primitives" "1"
+    Assert-Marker "model_vertices" "15562"
+    Assert-Marker "model_indices" "57579"
+    Assert-Marker "model_images" "3"
+    Assert-Marker "scene" "ship.reference.runtime"
+    Assert-Marker "bindings" "21"
+    Assert-Marker "models" "1"
+    Assert-Marker "asset" "ship.reference.fighter"
+    Assert-Marker "modules" "3"
+    Assert-Marker "moving_parts" "2"
+    Assert-Marker "entities" "6"
+    Assert-Marker "interactions" "3"
+    Assert-Marker "portals" "2"
+    Assert-Marker "interior_interaction" "ok"
+    Assert-Marker "interaction" "outer_hatch"
+    Assert-Marker "state" "open"
+    Assert-Marker "portal" "outer_entry"
+    Assert-Marker "traversable" "yes"
+    Assert-Marker "packages" "3"
+    Assert-Marker "boxes" "12"
+    Assert-Marker "revision" "1"
+    Assert-Marker "initial_blockers" "4"
+    Assert-Marker "initial_combined_boxes" "16"
+    Assert-Marker "on_foot_controller" "ok"
+    Assert-Marker "closed" "blocked"
+    Assert-Marker "open" "traversable"
+    Assert-Marker "blockers" "2"
+}
+else {
+    Assert-Marker "scene" "ship.frontier.courier_mk1.runtime"
+    Assert-Marker "bindings" "61"
+    Assert-Marker "models" "2"
+    Assert-Marker "asset" "ship.frontier.courier_mk1"
+    Assert-Marker "modules" "8"
+    Assert-Marker "moving_parts" "7"
+    Assert-Marker "entities" "16"
+    Assert-Marker "interactions" "8"
+    Assert-Marker "portals" "7"
+    Assert-Marker "packages" "8"
+    Assert-Marker "boxes" "88"
+    Assert-Marker "initial_blockers" "14"
+    Assert-Marker "initial_combined_boxes" "102"
+    Assert-Marker "production_interior" "ok"
+    Assert-Marker "closures" "7"
+    Assert-Marker "final_blockers" "7"
+}
 Assert-Marker "assembly_root_presentation" "ok"
 Assert-Marker "player_ship" "same"
 Assert-Marker "root_mesh" "absent"
@@ -685,9 +709,14 @@ if ($RasterOnly -or $FullQuality) {
     $diffuseDelta  = [math]::Abs($rasterDiffuse - $rtDiffuse)
     Write-Host ("IBL raster/DXR SH diffuse agreement: raster=$rasterDiffuse " +
                 "dxr=$rtDiffuse delta=$([math]::Round($diffuseDelta,6))")
-    # 1/65536 is the probe's quantisation step. Two paths evaluating the same
-    # nine coefficients through the same header cannot differ by more than one.
-    if ($diffuseDelta -gt 0.0001) {
+    # 1/65536 is the probe's quantisation step. The equality is intentionally a
+    # REFERENCE-FIXTURE assertion: these values are maxima over visible primary
+    # hits, not paired evaluations of one normal. Arbitrary production geometry
+    # gives raster and DXR different hit populations, so equal constants can
+    # legitimately produce different maxima. The courier still has each path's
+    # live/control, reachability, consumption, identity, and occlusion gates
+    # above; only this cross-population maximum comparison remains fixture-only.
+    if ($Content -eq "reference_ship" -and $diffuseDelta -gt 0.0001) {
         throw ("The raster and DXR paths disagree about SH diffuse irradiance: " +
                "raster=$rasterDiffuse dxr=$rtDiffuse. They evaluate the same " +
                "DawningIrradianceSH against coefficients from the same EnvironmentIBL, " +
@@ -1024,17 +1053,13 @@ Write-Host "First in-flight structured-buffer replacement: frame $firstInFlight"
 # stops happening in any useful quantity - is covered by the reallocsInFlight
 # floor above, which is the assertion with teeth.
 #
-# NOT UNDER -ForceGrow, and this is a limitation of the bound rather than of the
-# switch. `3` is a PROXY for "this was not a start-up grow with nothing behind
-# it"; it works because the default ramp needs a few frames to cross the first
-# capacity boundary. -ForceGrow front-loads growth deliberately and reaches its
-# first in-flight replacement on frame 2 - MEASURED - where one frame is
-# genuinely outstanding and the deferred-release fence is genuinely exercised.
-# The proxy calls that a failure; the hazard says otherwise, and the hazard is
-# right. Under -ForceGrow the count assertion above is the one that carries the
-# claim. Narrowing the bound here rather than loosening it for every run keeps
-# the default path's guarantee intact.
-if (-not $ForceGrow -and $firstInFlight -le 3) {
+# NOT UNDER -ForceGrow OR THE PRODUCTION COURIER. This timing bound is a proxy
+# calibrated to the smaller reference fixture. The courier begins with many
+# more live render records and, like -ForceGrow, reaches a real in-flight
+# replacement on frame 2. In both heavier profiles the in-flight replacement
+# count above carries the fence-lifetime claim; keeping this bound on the
+# reference profile preserves the original steady-state regression witness.
+if (-not $ForceGrow -and $Content -eq "reference_ship" -and $firstInFlight -le 3) {
     throw ("The first in-flight structured-buffer replacement happened on frame " +
            "$firstInFlight; it must happen after all three frame slots can be in " +
            "flight (kFrameCount = 3), or the deferred-release fence is being " +
