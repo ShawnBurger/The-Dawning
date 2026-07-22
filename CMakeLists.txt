@@ -174,6 +174,7 @@ set(SIM_SOURCES
     src/sim/lambert.cpp
     src/sim/maneuver.cpp
     src/sim/relative_motion.cpp
+    src/sim/transfer_planner.cpp
     src/sim/star_system.cpp
     src/sim/system_instantiate.cpp
     src/sim/soi_transition.cpp
@@ -202,6 +203,7 @@ set(SIM_HEADERS
     src/sim/lambert.h
     src/sim/maneuver.h
     src/sim/relative_motion.h
+    src/sim/transfer_planner.h
     src/sim/star_system.h
     src/sim/system_instantiate.h
     src/sim/soi_transition.h
@@ -285,6 +287,7 @@ set(TEST_SOURCES
     tests/test_lambert.cpp
     tests/test_maneuver.cpp
     tests/test_relative_motion.cpp
+    tests/test_transfer_planner.cpp
     tests/test_star_system.cpp
     tests/test_system_instantiate.cpp
     tests/test_soi_transition.cpp
@@ -700,6 +703,10 @@ add_executable(TheDawningTests
     # station-keeping regime, exact closed-form STM. Pure math.
     src/sim/relative_motion.cpp
     src/sim/relative_motion.h
+    # Launch-window search: sweep (departure time, time of flight) over the
+    # Lambert/PlanIntercept per-cell transfer and return the least-Δv one. Pure math.
+    src/sim/transfer_planner.cpp
+    src/sim/transfer_planner.h
     # Deterministic star-system builder: bodies, circular orbits, SOI radii,
     # parent-before-child topology. Pure data + physics.
     src/sim/star_system.cpp
