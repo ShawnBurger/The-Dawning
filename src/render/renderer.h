@@ -27,6 +27,7 @@
 #include "gpu_draw_records.h"   // ObjectData / MaterialData / CBPerPass layouts
 #include "descriptor_allocator.h"
 #include "environment_ibl.h"
+#include "terrain_height_probe.h"
 #include "ibl_consume_probe.h"  // the IBL CONSUMPTION probe's layout and reduction
 #include "mesh.h"
 #include "camera.h"
@@ -990,6 +991,14 @@ private:
     // own environment; see environment_ibl.h.
     static constexpr uint32_t kEnvCubeDescriptorIndex = 2;
     EnvironmentIBL m_environmentIBL;
+
+    // Startup GPU value-agreement probe for the terrain height twin: proves the
+    // shipped GPU PlanetHeight (planet_noise.hlsli) matches core::PlanetHeight to a
+    // measured tolerance, so a one-sided edit to either cannot silently ship the
+    // near-mesh-vs-far-sphere pop the terrain design exists to prevent. Runs once at
+    // Init, in every mode, gated on nothing; a disagreement is fatal. See
+    // terrain_height_probe.h.
+    TerrainHeightProbe m_terrainHeightProbe;
 
     // ---- Depth prepass + SSAO ----------------------------------------------
     // The SSAO AO texture's SRV lives at a RESERVED slot at the very TOP of the

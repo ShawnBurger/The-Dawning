@@ -4,9 +4,10 @@
 // CPU self-consistency for the terrain height twin: determinism, [0,1] range,
 // finiteness (no NaN/Inf from the pow/exp/division in CraterField), and that the
 // field actually varies with direction, type, and seed. The GPU-vs-CPU value
-// agreement (that this twin matches the shader bit-for-close) is a separate
-// startup probe that is PLANNED, not yet implemented — see the terrain plan. These
-// tests do NOT check the twin against the shader; they check it against itself.
+// agreement (that this twin matches the shader) is a SEPARATE startup probe,
+// render::TerrainHeightProbe, asserted by [SMOKE] terrain_height_agreement — these
+// tests do NOT check the twin against the shader, they check it against itself, so
+// a one-sided edit passes here and fails only there (watched-failing, proven).
 // =============================================================================
 
 #include "test_framework.h"

@@ -7,9 +7,11 @@
 // diverged by a single hash constant the near terrain would visibly pop/shear as
 // it faded in over the smooth sphere. A value-agreement probe (GPU vs the C++
 // twin) — NOT a hash tripwire (a re-pinned hash pins agreement in TIME, not VALUE;
-// see sky_radiance.h's own header for the trap) — is PLANNED as the next terrain
-// increment to guard this numerically at startup; it does NOT exist yet. Until it
-// lands the match is held by the visual crater alignment and by hand.
+// see sky_radiance.h's own header for the trap) — guards this numerically at
+// startup in every mode: render::TerrainHeightProbe (src/render/terrain_height_probe.
+// {h,cpp}), asserted by the [SMOKE] terrain_height_agreement marker. It is a
+// gross-drift guard (this fBm's CPU/GPU floor is ~0.03), so a one-sided edit here
+// that forgets core/planet_height.{h,cpp} — or vice versa — trips it.
 //
 // Keep this byte-for-byte in step with core/planet_height.{h,cpp}: same hash
 // constants, octave counts, kNoiseRot, lacunarity 2.02, gain 0.5, seed derivation.

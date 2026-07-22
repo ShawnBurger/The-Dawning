@@ -96,6 +96,21 @@ bool Renderer::Init(D3D12Device& device)
     // traced-but-not-run; it is run now, and it composes.
     if (!EnsureEnvironmentIBL(device)) return false;
 
+    // Terrain height twin agreement. Its own command list, so it comes after the
+    // IBL bake (which closed and flushed its list) and before App opens one. Init
+    // builds resources/PSO; RunAndValidate records + executes + reads back +
+    // compares vs core::PlanetHeight. A disagreement is FATAL for the same reason
+    // the IBL verdicts are: booting past it ships terrain whose near mesh is
+    // guaranteed to mismatch the far sphere, and it would do so silently.
+    if (!m_terrainHeightProbe.Init(device.Device()))
+        core::Log::Error("Terrain height probe unavailable; twin agreement unchecked");
+    else if (!m_terrainHeightProbe.RunAndValidate(device))
+    {
+        core::Log::Error("Terrain height twin disagreement; refusing to render with a "
+                         "GPU height field the startup probe rejected");
+        return false;
+    }
+
     core::Log::Info("Renderer initialized");
     return true;
 }

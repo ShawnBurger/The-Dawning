@@ -8,13 +8,17 @@
 // (same hash constants, octave counts, kNoiseRot, lacunarity 2.02, gain 0.5, and
 // seed derivation), evaluated in float32 to match the shader's precision.
 //
-// The match is currently verified two ways: the CPU self-consistency tests in
-// tests/test_planet_height.cpp, and VISUALLY — the near mesh's displaced craters
-// line up with the far sphere's shaded craters, which they only can if the twin
-// tracks the shader. A numeric GPU-vs-CPU VALUE-agreement probe (not a hash
-// tripwire — see the terrain plan and [[verification-discipline]]) is PLANNED as
-// the next terrain increment and does NOT yet guard this; until it lands, anything
-// changed in planet_noise.hlsli MUST be mirrored here (and vice versa) by hand.
+// A numeric GPU-vs-CPU VALUE-agreement probe guards the match at startup, in every
+// mode, gated on nothing: render::TerrainHeightProbe evaluates the SHIPPED GPU
+// PlanetHeight (planet_noise.hlsli) for 64 (direction, body-type) queries and
+// compares against this twin fed identical inputs, emitting the
+// [SMOKE] terrain_height_agreement marker the smoke harness asserts. It is a
+// GROSS-DRIFT guard, not a bit-exactness one: this fBm's CPU/GPU reproducibility
+// floor is ~0.03 (the GPU dp3 reduction and frac() round differently from the CPU;
+// see terrain_height_probe.cpp), so the probe catches a one-sided edit to any hash
+// constant / octave / kNoiseRot / lacunarity / seed derivation (which move the field
+// by O(0.1..0.5)) but not a sub-3% drift. Anything changed in planet_noise.hlsli
+// MUST still be mirrored here (and vice versa) by hand. See [[verification-discipline]].
 // =============================================================================
 
 #ifndef DAWNING_CORE_PLANET_HEIGHT_H

@@ -88,6 +88,7 @@ set(RENDER_SOURCES
     src/render/camera.cpp
     src/render/renderer.cpp
     src/render/environment_ibl.cpp
+    src/render/terrain_height_probe.cpp
     src/render/gpu_draw_records.cpp
     src/render/ibl_consume_probe.cpp
     src/render/debug_overlay.cpp
@@ -114,6 +115,7 @@ set(RENDER_HEADERS
     src/render/rt_texture_lod.h
     src/render/path_tracer.h
     src/render/environment_ibl.h
+    src/render/terrain_height_probe.h
     src/render/render_constants.h
 )
 
@@ -150,6 +152,7 @@ set(SHADER_FILES
     shaders/ibl_environment.hlsli
     shaders/ibl_prefilter_ps.hlsl
     shaders/ibl_probe_ps.hlsl
+    shaders/planet_height_probe_ps.hlsl
     shaders/ibl_common.hlsli
     shaders/ibl_eval_probe_ps.hlsl
     shaders/ibl_consume_probe.hlsli
@@ -617,8 +620,8 @@ add_executable(TheDawningTests
     src/core/sh_irradiance.cpp
     # CPU twin of shaders/planet_noise.hlsli — the terrain mesh's height field.
     # GPU-free (types.h + <cmath>); tests/test_planet_height.cpp drives the SHIPPED
-    # twin. Its match to the HLSL is meant to be pinned by a startup GPU
-    # value-agreement probe — PLANNED as the next terrain increment, not yet built.
+    # twin. Its match to the HLSL is pinned by a startup GPU value-agreement probe,
+    # render::TerrainHeightProbe (src/render/terrain_height_probe.{h,cpp}).
     src/core/planet_height.h
     src/core/planet_height.cpp
     # Chunked-LOD terrain geometry: cube-sphere mapping + chunk mesh generation.

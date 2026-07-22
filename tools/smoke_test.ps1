@@ -347,6 +347,31 @@ Assert-Marker "ibl_sh_slots" "64"
 # the note at the top of shaders/ibl_eval_probe_ps.hlsl.
 Assert-Marker "ibl_enabled" "yes"
 
+# --- Terrain height twin agreement -----------------------------------------
+# The SAME kind of evidence as ibl_sky_agreement, for the terrain height field.
+# core::PlanetHeight (which the chunked-LOD terrain mesh displaces by, on the CPU)
+# and PlanetHeight in shaders/planet_noise.hlsli (which the far shaded sphere tints
+# by, on the GPU) are two hand-written copies of the same 5-octave domain-warped
+# fBm in two languages. A one-sided edit to either — a changed hash constant, an
+# octave count, kNoiseRot, lacunarity, gain, seed derivation — reshuffles the field
+# and makes the near terrain pop/shear against the far sphere, while leaving every
+# CPU test in TheDawningTests green (they check the twin against itself, not the
+# shader). This probe evaluates the SHIPPED GPU field for 64 (direction, body-type)
+# queries and the CPU compares against core::PlanetHeight fed the identical inputs.
+# WATCHED FAILING: change 0.1031 to 0.10311 in the GPU Hash13 only -> worst delta
+# 0.0294 -> 0.44, this fails, and all 559 CPU tests still pass.
+#
+# Listed by NAME so that if the probe stopped being called the run goes red here
+# rather than silently green — the same reason the ibl_* markers are listed.
+Assert-Marker "terrain_height_agreement" "pass"
+# Vacuity guards, NOT redundant with the verdict. Poison-cleared target (w=-1),
+# shaders write w=+1: slots==64 says the draw actually ran; buckets==6 says the 64
+# query directions cover all six cube-face axis buckets, so a direction set
+# collapsed onto one face (which would test one sixth of the field and agree
+# vacuously) cannot pass.
+Assert-Marker "terrain_height_slots" "64"
+Assert-Marker "terrain_height_buckets" "6"
+
 # --- Stage 3 ---------------------------------------------------------------
 # 3.3 - mirror agreement. At roughness 0 with N = V = d the split-sum reduces to
 # a mip-0 fetch times the env-BRDF scalar, and the shader writes that scalar in
