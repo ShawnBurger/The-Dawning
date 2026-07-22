@@ -30,6 +30,7 @@ set(CORE_SOURCES
     src/core/sky_radiance.cpp
     src/core/sh_irradiance.cpp
     src/core/job_system.cpp
+    src/core/planet_height.cpp
 )
 
 set(CORE_HEADERS
@@ -272,6 +273,7 @@ set(SCENE_HEADERS
 set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_math.cpp
+    tests/test_planet_height.cpp
     tests/test_job_system.cpp
     tests/test_log.cpp
     tests/test_ecs.cpp
@@ -596,6 +598,11 @@ add_executable(TheDawningTests
     # a GPU probe watches - no CPU test here can see that half.
     src/core/sh_irradiance.h
     src/core/sh_irradiance.cpp
+    # CPU twin of shaders/planet_noise.hlsli — the terrain mesh's height field.
+    # GPU-free (types.h + <cmath>); tests/test_planet_height.cpp drives the SHIPPED
+    # twin. Its match to the HLSL is a separate startup GPU value-agreement probe.
+    src/core/planet_height.h
+    src/core/planet_height.cpp
     ${ECS_HEADERS}
     ${SHIP_SOURCES}
     ${SHIP_HEADERS}
