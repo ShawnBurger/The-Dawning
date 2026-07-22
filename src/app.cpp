@@ -117,8 +117,13 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     else if (HasOption(args, "--camera-mode=ship"))     options.startCameraMode = 4; // ship-in-system
     else                                                options.startCameraMode = 0;
     // Near-body focus target as an un-offset local id (10 Earth / 11 Moon / 20 Mars).
-    options.focusLocalId = static_cast<uint64_t>(
-        ReadDoubleOption(args, "--focus-body=", static_cast<double>(options.focusLocalId)));
+    // Validate before narrowing: casting a negative / out-of-range / NaN double to
+    // uint64_t is undefined behaviour, and no body id lives outside [0, 1e6). A NaN
+    // fails the >= comparison, so it too keeps the default.
+    const double focusRequested =
+        ReadDoubleOption(args, "--focus-body=", static_cast<double>(options.focusLocalId));
+    if (focusRequested >= 0.0 && focusRequested < 1.0e6)
+        options.focusLocalId = static_cast<uint64_t>(focusRequested);
 
     if (options.smoke && !HasOption(args, "--show-overlay"))
         options.showOverlay = false;

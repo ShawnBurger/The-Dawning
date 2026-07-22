@@ -259,11 +259,12 @@ AtmosphereParams AtmosphereParamsFor(uint64_t localId)
 // localId — the twin of AtmosphereParamsFor/VisualFor. The surface is fully
 // procedural (no texture assets); these constants tune the analytic layer stack
 // in planet_ps.hlsl. type: 0 Earth-like, 1 Mars-like, 2 Moon-like, 3 generic.
-// valid=false leaves a body on the standard PBR DrawMesh path (e.g. the star).
+// Every seeded body routed here gets a procedural surface (unrecognised ids fall
+// through to the generic default). The central STAR never reaches this — it is
+// excluded upstream by the OrbitState predicate in RenderEntities, not here.
 // -----------------------------------------------------------------------------
 struct PlanetSurfaceParams
 {
-    bool  valid;
     int   type;
     float seaLevel;
     float deep[3];     float depthScale;
@@ -283,7 +284,7 @@ PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
     {
         // Earth: ~70% ocean, green/brown continents, polar ice, drifting clouds,
         // warm night-side city lights, Fresnel ocean glint.
-        case 10: return { true, 0, 0.52f,
+        case 10: return {0, 0.52f,
                           { 0.015f, 0.050f, 0.140f }, 0.25f,
                           { 0.050f, 0.220f, 0.320f }, 0.020f,
                           { 0.090f, 0.230f, 0.100f }, 0.05f,
@@ -295,7 +296,7 @@ PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
                           11.0f };
         // Moon: dark maria vs bright highlands, dense craters, no ocean/atmosphere/
         // clouds/lights, sharp terminator (type 2).
-        case 11: return { true, 2, 1.0f,
+        case 11: return {2, 1.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.045f, 0.045f, 0.050f }, 0.0f,
@@ -307,7 +308,7 @@ PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
                           33.0f };
         // Mars: rust/oxide dry land everywhere (no ocean), CO2 polar caps, craters,
         // no night lights.
-        case 20: return { true, 1, 1.0f,
+        case 20: return {1, 1.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.420f, 0.200f, 0.110f }, 0.0f,
@@ -319,7 +320,7 @@ PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
                           22.0f };
         // Generic rocky body — neutral, no ocean/clouds/lights. Safe fallback so a
         // larger seeded system still renders every body.
-        default: return { true, 3, 1.0f,
+        default: return {3, 1.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.0f, 0.0f, 0.0f }, 0.0f,
                           { 0.300f, 0.300f, 0.320f }, 0.0f,
@@ -976,15 +977,12 @@ void Scene::RenderEntities(render::D3D12Device& device,
             if (g.bodyId >= kStarSystemBodyIdBase)
             {
                 const PlanetSurfaceParams ps = PlanetParamsFor(g.bodyId - kStarSystemBodyIdBase);
-                if (ps.valid)
-                {
-                    const render::Renderer::PlanetConstants pc =
-                        BuildPlanetConstants(ps, transform, m_renderScale, m_coordinateTime);
-                    renderer.DrawPlanet(device, *gpuMesh, worldMatrix,
-                                        material.albedo, material.roughness,
-                                        material.metallic, pc);
-                    continue;
-                }
+                const render::Renderer::PlanetConstants pc =
+                    BuildPlanetConstants(ps, transform, m_renderScale, m_coordinateTime);
+                renderer.DrawPlanet(device, *gpuMesh, worldMatrix,
+                                    material.albedo, material.roughness,
+                                    material.metallic, pc);
+                continue;
             }
         }
 

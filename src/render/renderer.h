@@ -514,7 +514,7 @@ public:
     // body type in params0.x.
     struct PlanetConstants
     {
-        float sunDir[4];       // xyz world sun direction, w = time seconds
+        float sunDir[4];       // xyz world sun direction, w = cloud rotation angle (radians, pre-wrapped [0,2pi))
         float sunColor[4];     // rgb light colour,        w = sun intensity
         float params0[4];      // x type(0=Earth,1=Mars,2=Moon,3=generic) y seaLevel z seed w renderScale
         float deepColor[4];    // rgb deep ocean,    w = depthScale
@@ -526,6 +526,17 @@ public:
         float night[4];        // rgb city light,    w = night intensity
         float ambient[4];      // rgb ambient/earthshine floor, w = glint shininess
     };
+    // Byte-identity with cbuffer CBPlanet in planet_ps.hlsl is load-bearing and has
+    // no GPU probe (bodies are outside the demo-scene probe frame), so pin it at
+    // build time the way every other GPU-facing struct here is pinned. Any inserted,
+    // reordered, or non-float4 field fails these instead of silently shearing every
+    // subsequent per-body value.
+    static_assert(sizeof(PlanetConstants) == 176,
+                  "PlanetConstants must stay 11 float4 rows, byte-identical to CBPlanet");
+    static_assert(offsetof(PlanetConstants, params0) == 32,  "CBPlanet row drift");
+    static_assert(offsetof(PlanetConstants, landLow) == 80,  "CBPlanet row drift");
+    static_assert(offsetof(PlanetConstants, night)   == 144, "CBPlanet row drift");
+    static_assert(offsetof(PlanetConstants, ambient) == 160, "CBPlanet row drift");
 
     // Draw one seeded celestial body's SURFACE through the procedural planet
     // shader (planet_vs/planet_ps) instead of DrawMesh, so basic_ps.hlsl and its

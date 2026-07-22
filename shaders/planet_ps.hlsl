@@ -22,7 +22,7 @@
 // Renderer::PlanetConstants in renderer.h — 11 float4 rows, 176 bytes.
 cbuffer CBPlanet : register(b5)
 {
-    float4 sunDir;       // xyz world sun direction (camera-relative math), w = time seconds
+    float4 sunDir;       // xyz world sun direction (camera-relative math), w = cloud rotation angle (radians, pre-wrapped [0,2pi))
     float4 sunColor;     // rgb light color,                                w = sun intensity
     float4 params0;      // x type(0=Earth,1=Mars,2=Moon,3=generic) y seaLevel z seed w renderScale
     float4 deepColor;    // rgb deep ocean,      w = depthScale
@@ -164,6 +164,12 @@ float4 main(PSInput input) : SV_TARGET
     float3 L  = normalize(sunDir.xyz);
     float3 V  = normalize(-input.positionWS);  // camera at origin (camera-relative)
 
+    // Near the limb the surface foreshortens, so object-space direction N steps by a
+    // large angle per screen pixel and the highest-frequency noise terms undersample
+    // (sparkle/crawl under motion). There is no analytic AA here, so fade those terms
+    // out toward the grazing limb: 1 over most of the disc, 0 at the edge.
+    float limbFade = saturate(dot(Nw, V) * 1.7);
+
     const bool hasOcean = (type == 0);
 
     // --- Continent height field --------------------------------------------
@@ -225,7 +231,8 @@ float4 main(PSInput input) : SV_TARGET
         landColor = lerp(landColor, iceColor.rgb, cap);
     }
     // Break up flat albedo with a touch of fine noise so it never reads as paint.
-    landColor *= 0.9 + 0.2 * ValueNoise(N * 40.0 + seedO);
+    // Fade the high-frequency break-up toward the limb where it would alias.
+    landColor *= lerp(1.0, 0.9 + 0.2 * ValueNoise(N * 40.0 + seedO), limbFade);
 
     // --- Ocean colour (Earth) ----------------------------------------------
     float3 surfaceColor = landColor;
@@ -313,6 +320,7 @@ float4 main(PSInput input) : SV_TARGET
         cities *= 1.0 - smoothstep(iceColor.w - 0.08, iceColor.w, lat); // not polar
         cities *= 1.0 - dayGate;                                    // dark side only
         cities *= 1.0 - 0.7 * cloudDensity;                         // clouds occlude
+        cities *= limbFade;                                         // no sub-pixel grain at the limb
         col += night.rgb * night.w * cities;
     }
 
