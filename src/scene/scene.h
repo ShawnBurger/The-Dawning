@@ -100,6 +100,15 @@ public:
     std::vector<render::Renderer::LineVertex>
     BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const;
 
+    // Build camera-relative billboard vertices (render::Renderer::BillboardVertex,
+    // six per body) for every seeded celestial body, ready for
+    // Renderer::DrawBillboards. Each body becomes one constant-pixel marker at its
+    // camera-relative, K-scaled center (RULE 1), colored and sized by body. Empty
+    // if no star system is seeded. Used by the near-body / ship views so a distant
+    // planet or the star — sub-pixel at true scale — still reads as a legible dot.
+    std::vector<render::Renderer::BillboardVertex>
+    BuildBodyMarkerVertices(const core::Vec3d& cameraPosition) const;
+
     // Phase 2a-pre: depth-only pass from the light's point of view. Same
     // traversal and the same visibility rules as RenderEntities - a caster the
     // two passes disagree about is a shadow with no object or an object with no

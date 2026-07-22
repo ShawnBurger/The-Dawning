@@ -119,6 +119,8 @@ set(SHADER_FILES
     shaders/tonemap_ps.hlsl
     shaders/line_vs.hlsl
     shaders/line_ps.hlsl
+    shaders/billboard_vs.hlsl
+    shaders/billboard_ps.hlsl
     shaders/path_trace.hlsl
     shaders/gpu_draw_records.hlsli
     shaders/brdf_common.hlsli

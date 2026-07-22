@@ -3045,6 +3045,27 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             }
         }
 
+        // Body-marker overlay: in the true-scale views (near-body / ship / free) a
+        // distant planet or the star is sub-pixel, so draw each seeded body as a
+        // constant-pixel dot at its real depth. Reversed-Z tested, so the body the
+        // camera sits on hides its own center marker while far bodies stay visible.
+        // Raster-only for the same reason the orbit lines are (the pass writes the
+        // HDR raster target). The orrery already draws exaggerated body spheres, so
+        // it is excluded to avoid doubling a marker onto a marker.
+        if (m_cameraMode != CameraMode::Orrery && !m_usePathTracing)
+        {
+            const std::vector<render::Renderer::BillboardVertex> markerVerts =
+                m_scene.BuildBodyMarkerVertices(m_camera.Position());
+            if (!markerVerts.empty())
+            {
+                const float w = static_cast<float>(m_device.Width());
+                const float h = static_cast<float>(m_device.Height());
+                m_renderer.DrawBillboards(m_device, markerVerts.data(),
+                                          static_cast<uint32_t>(markerVerts.size()),
+                                          m_camera.ViewProjectionMatrix(w / h), w, h);
+            }
+        }
+
         // Tone-map the linear scene into the back buffer. Post-process passes
         // (bloom, exposure, TAA) belong between the line above and this one,
         // which is the whole reason the HDR intermediate exists.

@@ -191,6 +191,32 @@ OrbitColor OrbitColorFor(uint64_t localId)
         default: return { 0.80f, 0.85f, 0.90f, 0.65f };
     }
 }
+
+// Marker color and on-screen DIAMETER (pixels) keyed by the body's ORIGINAL
+// (un-offset) id. Roughly tracks each body's own material; the star reads warm and
+// largest, the moon smallest, so the map is legible at a glance. Alpha < 1 so a
+// marker over a body's own true-scale disc reads as an overlay rather than paint.
+struct MarkerStyle { float r, g, b, a; float sizePx; };
+MarkerStyle MarkerStyleFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 1:  return { 1.00f, 0.93f, 0.70f, 0.95f, 18.0f }; // Sun — warm, largest
+        case 10: return { 0.40f, 0.60f, 1.00f, 0.90f, 10.0f }; // Earth — blue
+        case 11: return { 0.75f, 0.75f, 0.80f, 0.85f,  6.0f }; // Moon — grey, smallest
+        case 20: return { 1.00f, 0.50f, 0.35f, 0.90f,  9.0f }; // Mars — orange
+        default: return { 0.85f, 0.90f, 0.95f, 0.85f,  8.0f };
+    }
+}
+
+// The four corners of a marker quad in [-1, 1], as two triangles (six vertices).
+// Culling is off, so winding is irrelevant; billboard_ps.hlsl reads |corner| as the
+// normalized radius, so the corners must stay within the unit square's circumscribed
+// disc reach for the circular falloff to cover the whole quad.
+constexpr float kBillboardCorners[6][2] = {
+    { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f },
+    { -1.0f, -1.0f }, { 1.0f,  1.0f }, { -1.0f, 1.0f },
+};
 } // namespace
 
 std::vector<render::Renderer::LineVertex>
@@ -251,6 +277,48 @@ Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition) const
             const core::Vec3f b = toRender(local[k + 1u]);
             verts.push_back({ { a.x, a.y, a.z }, { c.r, c.g, c.b, c.a } });
             verts.push_back({ { b.x, b.y, b.z }, { c.r, c.g, c.b, c.a } });
+        }
+    }
+    return verts;
+}
+
+std::vector<render::Renderer::BillboardVertex>
+Scene::BuildBodyMarkerVertices(const core::Vec3d& cameraPosition) const
+{
+    std::vector<render::Renderer::BillboardVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return verts;
+
+    const double K = m_renderScale;
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // seeded celestial bodies only (the star included: it has no
+                      // orbit but is the marker that matters most)
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t = m_registry.TryGet<ecs::Transform>(e);
+        if (!t)
+            continue;
+
+        // (worldPos - camera) in DOUBLE, then scaled by K, then narrowed (RULE 1),
+        // exactly as the orbit lines and entity matrices do. The star sits at the
+        // frame origin, so a body's frame-local position is its world position.
+        const core::Vec3f center =
+            ((t->position - cameraPosition) * K).ToFloat();
+
+        const MarkerStyle m = MarkerStyleFor(g.bodyId - kStarSystemBodyIdBase);
+        for (const auto& corner : kBillboardCorners)
+        {
+            verts.push_back({ { center.x, center.y, center.z },
+                              { m.r, m.g, m.b, m.a },
+                              m.sizePx,
+                              { corner[0], corner[1] } });
         }
     }
     return verts;

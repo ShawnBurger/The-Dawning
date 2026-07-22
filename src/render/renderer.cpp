@@ -27,6 +27,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreatePSO(device.Device()))           return false;
     if (!CreateSkyPSO(device.Device()))        return false;
     if (!CreateLinePipeline(device.Device()))  return false;
+    if (!CreateBillboardPipeline(device.Device())) return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     // The shaders always carry the smoke probe binding, even though normal
     // frames branch around every write. Keep a one-record UAV bound so the root
@@ -166,6 +167,12 @@ void Renderer::Shutdown()
             m_lineVBMapped[i] = nullptr;
         }
         m_lineVB[i].Reset();
+        if (m_billboardVB[i] && m_billboardVBMapped[i])
+        {
+            m_billboardVB[i]->Unmap(0, nullptr);
+            m_billboardVBMapped[i] = nullptr;
+        }
+        m_billboardVB[i].Reset();
     }
     // App::Shutdown does WaitForGpu() before calling this, so unmap-and-release
     // is safe here. Device loss drains rather than waits, and these buffers
@@ -1846,6 +1853,207 @@ void Renderer::DrawLines(D3D12Device& device, const LineVertex* verts, uint32_t 
     cmd->IASetVertexBuffers(0, 1, &vbv);
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
     cmd->DrawInstanced(count, 1, 0, 0); // LINELIST: pairs of vertices
+}
+
+// =============================================================================
+// Billboard pipeline — constant-pixel body markers (impostors)
+// =============================================================================
+namespace
+{
+const D3D12_INPUT_ELEMENT_DESC kBillboardLayout[] = {
+    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,
+      D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12,
+      D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    { "PSIZE",    0, DXGI_FORMAT_R32_FLOAT,          0, 28,
+      D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 32,
+      D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+};
+
+// Matches cbuffer BillboardConstants (b0) in billboard_vs.hlsl. 80 bytes; UploadCB
+// rounds the CBV placement to 256.
+struct BillboardConstants
+{
+    float viewProj[16];
+    float viewport[2];
+    float pad[2];
+};
+} // namespace
+
+bool Renderer::CreateBillboardPipeline(ID3D12Device* device)
+{
+    auto vs = CompileShaderFromFile(L"shaders/billboard_vs.hlsl", "main", "vs_5_1");
+    auto ps = CompileShaderFromFile(L"shaders/billboard_ps.hlsl", "main", "ps_5_1");
+    if (!vs || !ps)
+    {
+        core::Log::Error("Failed to compile billboard shaders");
+        return false;
+    }
+
+    D3D12_ROOT_PARAMETER param = {};
+    param.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV; // b0: viewProj+viewport
+    param.Descriptor.ShaderRegister = 0;
+    param.Descriptor.RegisterSpace  = 0;
+    param.ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    D3D12_ROOT_SIGNATURE_DESC rs = {};
+    rs.NumParameters = 1;
+    rs.pParameters   = &param;
+    rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    ComPtr<ID3DBlob> sigBlob, errBlob;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1,
+                                             &sigBlob, &errBlob);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Billboard root signature serialize failed: 0x%08X", hr);
+        return false;
+    }
+    hr = device->CreateRootSignature(0, sigBlob->GetBufferPointer(),
+                                     sigBlob->GetBufferSize(),
+                                     IID_PPV_ARGS(&m_billboardRootSig));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Billboard CreateRootSignature failed: 0x%08X", hr);
+        return false;
+    }
+    m_billboardRootSig->SetName(L"BillboardRootSignature");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_billboardRootSig.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    pso.InputLayout = { kBillboardLayout, static_cast<UINT>(std::size(kBillboardLayout)) };
+
+    pso.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode        = D3D12_CULL_MODE_NONE; // camera-facing quads
+    pso.RasterizerState.DepthClipEnable = TRUE;
+
+    // Alpha-blend into the HDR target; alpha rides the vertex color and the rim fade.
+    pso.BlendState.RenderTarget[0].BlendEnable           = TRUE;
+    pso.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    pso.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    pso.BlendState.RenderTarget[0].BlendOp               = D3D12_BLEND_OP_ADD;
+    pso.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_ONE;
+    pso.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    pso.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    // Reversed-Z depth TEST so nearer scene geometry occludes markers (a body you
+    // stand on hides its own center dot), but no depth WRITE so markers do not
+    // occlude each other or the scene.
+    pso.DepthStencilState.DepthEnable    = TRUE;
+    pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    pso.DepthStencilState.DepthFunc      = render::kMainDepthCompare;
+    pso.DepthStencilState.StencilEnable  = FALSE;
+
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets      = 1;
+    pso.RTVFormats[0]         = kHDRFormat;
+    pso.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    pso.SampleDesc            = { 1, 0 };
+    pso.SampleMask            = UINT_MAX;
+
+    hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_billboardPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Billboard CreateGraphicsPipelineState failed: 0x%08X", hr);
+        return false;
+    }
+    m_billboardPSO->SetName(L"BillboardPSO");
+    core::Log::Info("Billboard pipeline created (constant-pixel body markers)");
+    return true;
+}
+
+bool Renderer::EnsureBillboardVertexBuffer(D3D12Device& device, uint32_t vertexCount)
+{
+    if (m_billboardVB[0] && vertexCount <= m_billboardVBCapacity)
+        return true;
+
+    uint32_t newCap = m_billboardVBCapacity ? m_billboardVBCapacity : 1024u;
+    while (newCap < vertexCount) newCap *= 2u;
+
+    const uint64_t byteSize = static_cast<uint64_t>(newCap) * sizeof(BillboardVertex);
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = byteSize;
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.Format           = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc       = { 1, 0 };
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    for (uint32_t i = 0; i < kFrameCount; ++i)
+    {
+        // The prior buffers may be read by a frame still in flight, so retire them
+        // through the deferred queue rather than freeing under the GPU.
+        if (m_billboardVB[i])
+        {
+            if (m_billboardVBMapped[i]) { m_billboardVB[i]->Unmap(0, nullptr); m_billboardVBMapped[i] = nullptr; }
+            device.DeferredRelease(m_billboardVB[i]);
+        }
+        ComPtr<ID3D12Resource> buf;
+        HRESULT hr = device.Device()->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&buf));
+        if (FAILED(hr))
+        {
+            core::Log::Errorf("Billboard vertex buffer create failed: 0x%08X", hr);
+            return false;
+        }
+        D3D12_RANGE noRead = { 0, 0 };
+        hr = buf->Map(0, &noRead, reinterpret_cast<void**>(&m_billboardVBMapped[i]));
+        if (FAILED(hr) || !m_billboardVBMapped[i])
+        {
+            core::Log::Errorf("Billboard vertex buffer map failed: 0x%08X", hr);
+            return false;
+        }
+        m_billboardVB[i] = std::move(buf);
+        wchar_t name[20];
+        swprintf_s(name, L"BillboardVB[%u]", i);
+        m_billboardVB[i]->SetName(name);
+    }
+    m_billboardVBCapacity = newCap;
+    return true;
+}
+
+void Renderer::DrawBillboards(D3D12Device& device, const BillboardVertex* verts,
+                              uint32_t count, const core::Mat4x4& viewProj,
+                              float viewportW, float viewportH)
+{
+    if (count == 0u || !verts || !m_billboardPSO)
+        return;
+    if (!EnsureBillboardVertexBuffer(device, count))
+        return;
+
+    std::memcpy(m_billboardVBMapped[m_currentFrame], verts,
+                static_cast<size_t>(count) * sizeof(BillboardVertex));
+
+    BillboardConstants cb = {};
+    std::memcpy(cb.viewProj, viewProj.Data(), sizeof(cb.viewProj));
+    cb.viewport[0] = viewportW;
+    cb.viewport[1] = viewportH;
+
+    const D3D12_GPU_VIRTUAL_ADDRESS cbVA = UploadCB(&cb, sizeof(cb));
+    if (cbVA == 0)
+        return; // CB ring overflow (already logged)
+
+    auto* cmd = device.CmdList();
+    cmd->SetPipelineState(m_billboardPSO.Get());
+    cmd->SetGraphicsRootSignature(m_billboardRootSig.Get());
+    cmd->SetGraphicsRootConstantBufferView(0, cbVA);
+
+    D3D12_VERTEX_BUFFER_VIEW vbv = {};
+    vbv.BufferLocation = m_billboardVB[m_currentFrame]->GetGPUVirtualAddress();
+    vbv.SizeInBytes    = count * sizeof(BillboardVertex);
+    vbv.StrideInBytes  = sizeof(BillboardVertex);
+    cmd->IASetVertexBuffers(0, 1, &vbv);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawInstanced(count, 1, 0, 0); // TRIANGLELIST: six vertices per marker
 }
 
 // =============================================================================
