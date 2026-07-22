@@ -189,10 +189,20 @@ private:
         Orrery,        // whole system, compressed view scale (K<<1), free camera
         NearBody,      // parked at a real body at true scale (K=1)
         Free,          // free-fly at true scale (K=1)
+        Surface,       // low over a body's surface, rendering chunked-LOD terrain (K=1)
         Count
     };
     CameraMode m_cameraMode = CameraMode::ShipChase;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
+
+    // Chunked-LOD terrain preview (Surface camera mode). One displaced cube-sphere
+    // patch on the focus body (the Moon), built once at Init and drawn camera-
+    // relative each Surface frame.
+    render::Mesh m_terrainMesh;
+    bool         m_terrainBuilt = false;
+    uint64_t     m_terrainBodyId = 0;                        // seeded bodyId the patch sits on
+    core::Vec3d  m_terrainChunkOriginBody{ 0.0, 0.0, 0.0 }; // patch centre, body space
+    void RenderTerrainPreview();  // build the camera-relative world matrix + DrawTerrain
 
     // Set once the player ship has been placed on an orbit inside the seeded system
     // (start camera mode 4). Gates the ship's live-orbit HUD/trace so they never read

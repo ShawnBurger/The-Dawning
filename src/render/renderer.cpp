@@ -31,6 +31,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateBillboardPipeline(device.Device())) return false;
     if (!CreateAtmospherePipeline(device.Device())) return false;
     if (!CreatePlanetPSO(device.Device()))     return false;
+    if (!CreateTerrainPSO(device.Device()))    return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     // The shaders always carry the smoke probe binding, even though normal
     // frames branch around every write. Keep a one-record UAV bound so the root
@@ -233,6 +234,7 @@ void Renderer::Shutdown()
     m_skyPSO.Reset();
     m_spacePSO.Reset();
     m_planetPSO.Reset();
+    m_terrainPSO.Reset();
     m_pso.Reset();
     m_psoDrawProbe.Reset();
     m_rootSig.Reset();
@@ -2452,6 +2454,126 @@ void Renderer::DrawPlanet(D3D12Device& device, const Mesh& mesh,
     cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 
     // Restore the main opaque PSO so a following DrawMesh is unaffected.
+    cmd->SetPipelineState(MainPSO());
+}
+
+// =============================================================================
+// CreateTerrainPSO — chunked-LOD terrain-patch pipeline
+// =============================================================================
+// Identical to the planet PSO (shares m_rootSig + planet_ps for bit-identical
+// shading) except the vertex shader is terrain_vs, which passes pre-displaced
+// chunk-local vertices through and reads objectDir from the COLOR channel.
+bool Renderer::CreateTerrainPSO(ID3D12Device* device)
+{
+    auto vsBytecode = CompileShaderFromFile(L"shaders/terrain_vs.hlsl", "main", "vs_5_1");
+    auto psBytecode = CompileShaderFromFile(L"shaders/planet_ps.hlsl", "main", "ps_5_1");
+    if (!vsBytecode || !psBytecode)
+    {
+        core::Log::Error("Failed to compile shaders for terrain PSO");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_rootSig.Get();
+    psoDesc.VS = { vsBytecode->GetBufferPointer(), vsBytecode->GetBufferSize() };
+    psoDesc.PS = { psBytecode->GetBufferPointer(), psBytecode->GetBufferSize() };
+
+    psoDesc.InputLayout.pInputElementDescs = kVertexLayout;
+    psoDesc.InputLayout.NumElements        = kVertexLayoutCount;
+
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_BACK;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE; // CW = front face (LH)
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    psoDesc.DepthStencilState.DepthEnable    = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc      = render::kMainDepthCompare; // reversed-Z GREATER
+    psoDesc.DepthStencilState.StencilEnable  = FALSE;
+
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = kHDRFormat;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_terrainPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (terrain) failed: 0x%08X", hr);
+        return false;
+    }
+    m_terrainPSO->SetName(L"TerrainPatchPSO");
+    core::Log::Info("Terrain PSO created (chunked-LOD patch, depth on, CW back-face cull)");
+    return true;
+}
+
+// =============================================================================
+// DrawTerrain — one displaced cube-sphere patch through terrain_vs + planet_ps
+// =============================================================================
+// Mirrors DrawPlanet (object record + b5 params + MainPSO restore) but binds
+// m_terrainPSO. The mesh is a pre-displaced chunk (chunk-local verts, COLOR =
+// objectDir); worldMatrix places it camera-relative from the chunk's double origin.
+void Renderer::DrawTerrain(D3D12Device& device, const Mesh& mesh,
+                           const core::Mat4x4& worldMatrix,
+                           const PlanetConstants& planet)
+{
+    if (!mesh.IsValid() || !m_terrainPSO) return;
+    if (!RequireFrameResources("DrawTerrain")) return;
+
+    auto* cmd = device.CmdList();
+
+    const bool buffersMapped = m_objectBuffer.mapped[m_currentFrame] &&
+                               m_materialBuffer.mapped[m_currentFrame];
+    uint32_t objectIndex = 0;
+    const bool objectOk = buffersMapped &&
+                          m_objectCursor.Allocate(m_objectBuffer.capacity, objectIndex);
+    const uint32_t materialIndex = m_materialCursor;
+    if (!objectOk || materialIndex >= m_materialBuffer.capacity)
+    {
+        if (!m_drawOverflowLogged)
+        {
+            core::Log::Errorf(
+                "Per-draw record overflow (terrain): object %u/%u, material %u/%u. Draw skipped.",
+                m_objectCursor.Next(), m_objectBuffer.capacity,
+                materialIndex, m_materialBuffer.capacity);
+            m_drawOverflowLogged = true;
+        }
+        return;
+    }
+
+    const D3D12_GPU_VIRTUAL_ADDRESS planetVA = UploadCB(&planet, sizeof(planet));
+    if (planetVA == 0)
+        return; // CB ring overflow (already logged)
+
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    ObjectData* objectDst =
+        reinterpret_cast<ObjectData*>(m_objectBuffer.mapped[m_currentFrame]) + objectIndex;
+    WriteObjectRecord(*objectDst, worldMatrix, worldInvTranspose, objectIndex);
+    if (m_objectCursor.Next() > m_objectPeak) m_objectPeak = m_objectCursor.Next();
+
+    MaterialData material = {};
+    material.albedo[0] = 1.0f; material.albedo[1] = 1.0f; material.albedo[2] = 1.0f;
+    material.albedo[3] = 1.0f;
+    material.recordId  = materialIndex;
+    *(reinterpret_cast<MaterialData*>(m_materialBuffer.mapped[m_currentFrame]) +
+      materialIndex) = material;
+    ++m_materialCursor;
+    if (m_materialCursor > m_materialPeak) m_materialPeak = m_materialCursor;
+
+    const uint32_t indices[3] = { objectIndex, materialIndex, 0u };
+    cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
+    cmd->SetGraphicsRootConstantBufferView(11, planetVA);
+
+    cmd->SetPipelineState(m_terrainPSO.Get());
+    cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
+    cmd->IASetIndexBuffer(&mesh.ibView);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
     cmd->SetPipelineState(MainPSO());
 }
 

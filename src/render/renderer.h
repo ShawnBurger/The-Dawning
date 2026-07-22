@@ -551,6 +551,15 @@ public:
                     float metallic,
                     const PlanetConstants& planet);
 
+    // Draw one chunked-LOD terrain patch (a pre-displaced cube-sphere mesh) through
+    // terrain_vs + planet_ps, so near terrain shades identically to the far sphere.
+    // Same b5 params as DrawPlanet; the mesh's vertices are chunk-local and its
+    // COLOR channel carries the planet-fixed objectDir. worldMatrix maps chunk-local
+    // to camera-relative (built from the chunk's double origin). Restores MainPSO().
+    void DrawTerrain(D3D12Device& device, const Mesh& mesh,
+                     const core::Mat4x4& worldMatrix,
+                     const PlanetConstants& planet);
+
     // Post-process tuning. Exposure was a constant baked into
     // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
     // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
@@ -863,6 +872,11 @@ private:
     // HDR target. No separate root signature.
     ComPtr<ID3D12PipelineState> m_planetPSO;
     bool CreatePlanetPSO(ID3D12Device* device);
+
+    // Terrain-patch pipeline: shares m_rootSig and planet_ps, binds terrain_vs
+    // (pre-displaced chunk-local verts, objectDir from the COLOR channel).
+    ComPtr<ID3D12PipelineState> m_terrainPSO;
+    bool CreateTerrainPSO(ID3D12Device* device);
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
     // slots in the texture table, so the tone-map pass stays independent of

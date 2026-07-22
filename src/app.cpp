@@ -1,5 +1,7 @@
 #include "app.h"
 #include "scene/model_loader.h"
+#include "terrain/cube_sphere.h"
+#include "terrain/chunk_mesh.h"
 
 #include "core/input.h"
 #include "core/log.h"
@@ -114,6 +116,7 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     if (HasOption(args, "--camera-mode=orrery"))        options.startCameraMode = 1;
     else if (HasOption(args, "--camera-mode=nearbody")) options.startCameraMode = 2;
     else if (HasOption(args, "--camera-mode=free"))     options.startCameraMode = 3;
+    else if (HasOption(args, "--camera-mode=surface"))  options.startCameraMode = 5; // terrain preview
     else if (HasOption(args, "--camera-mode=ship"))     options.startCameraMode = 4; // ship-in-system
     else                                                options.startCameraMode = 0;
     // Near-body focus target as an un-offset local id (10 Earth / 11 Moon / 20 Mars).
@@ -310,6 +313,52 @@ bool App::InitializeScene()
         sphereData.vertices.data(), static_cast<uint32_t>(sphereData.vertices.size()),
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
+
+    // Chunked-LOD terrain preview patch (the Moon), built once and batched into this
+    // same upload. Displaced by the shared core::PlanetHeight so the near terrain
+    // matches the far shaded sphere; the vertex COLOR carries the planet-fixed
+    // objectDir so terrain_vs/planet_ps shade it exactly like the sphere.
+    ComPtr<ID3D12Resource> terrainVBUp, terrainIBUp;
+    if (m_options.starSystem)
+    {
+        terrain::ChunkParams tp;
+        tp.face = terrain::CubeFace::PosZ;
+        tp.u0 = -0.55; tp.u1 = 0.55; tp.v0 = -0.55; tp.v1 = 0.55;
+        tp.gridN = 129;
+        tp.planetRadius    = 1.7374e6; // Moon
+        tp.amplitudeMeters = 16000.0;  // exaggerated so a single patch shows relief
+        tp.type = 2; tp.seed = 33.0f; tp.seaLevel = 1.0f; tp.coastWidth = 0.0f;
+        terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
+        m_terrainChunkOriginBody = chunk.origin;
+        m_terrainBodyId = scene::kStarSystemBodyIdBase + 11;
+
+        std::vector<render::Vertex> tv(chunk.vertices.size());
+        for (size_t i = 0; i < chunk.vertices.size(); ++i)
+        {
+            const terrain::ChunkVertex& cv = chunk.vertices[i];
+            const core::Vec3d bp{ chunk.origin.x + cv.position.x,
+                                  chunk.origin.y + cv.position.y,
+                                  chunk.origin.z + cv.position.z };
+            const double bl = bp.Length();
+            const core::Vec3f od = (bl > 0.0)
+                ? core::Vec3f{ static_cast<float>(bp.x / bl),
+                               static_cast<float>(bp.y / bl),
+                               static_cast<float>(bp.z / bl) }
+                : core::Vec3f{ 0.0f, 0.0f, 1.0f };
+            tv[i].position = cv.position;
+            tv[i].normal   = cv.normal;
+            tv[i].color    = core::Color{ od.x, od.y, od.z, 1.0f };
+            tv[i].uv       = cv.uv;
+        }
+        m_terrainMesh = render::CreateMesh(
+            m_device.Device(), m_device.CmdList(),
+            tv.data(), static_cast<uint32_t>(tv.size()),
+            chunk.indices.data(), static_cast<uint32_t>(chunk.indices.size()),
+            terrainVBUp, terrainIBUp);
+        m_terrainBuilt = m_terrainMesh.IsValid();
+        core::Log::Infof("Terrain preview patch built: %zu verts, %zu indices, built=%d",
+                         tv.size(), chunk.indices.size(), m_terrainBuilt ? 1 : 0);
+    }
 
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
@@ -802,9 +851,13 @@ bool App::InitializeScene()
         core::Log::Infof("Solar system seeded: %u bodies", bodies);
         m_cameraMode = (m_options.startCameraMode == 4)
             ? CameraMode::ShipChase // ship-in-system uses the chase camera
+            : (m_options.startCameraMode == 5)
+            ? CameraMode::Surface   // 5 is overloaded (4 is ship-in-system → chase)
             : static_cast<CameraMode>(m_options.startCameraMode);
         if (m_options.startCameraMode == 2) // near-body: focus the requested body (default Earth)
             m_focusBodyId = scene::kStarSystemBodyIdBase + m_options.focusLocalId;
+        if (m_cameraMode == CameraMode::Surface) // terrain preview sits on the Moon
+            m_focusBodyId = scene::kStarSystemBodyIdBase + 11;
 
         // Teleport the playable ship onto a live orbit about Earth for EVERY
         // star-system run (any camera mode), so it shares the system's frame, feels
@@ -2457,6 +2510,14 @@ void App::ApplyCameraModeRenderState()
             m_camera.SetClipPlanes(0.1f, 1.0e12f);
             m_camera.SetMoveSpeed(1.0e7f);
             break;
+        case CameraMode::Surface:
+            // Low over a body's surface at true scale. Small near plane (never
+            // NearBody's 1.0, which would clip close terrain), fast-but-not-orbital
+            // move speed for skimming the surface.
+            m_scene.SetRenderScale(1.0);
+            m_camera.SetClipPlanes(0.05f, 1.0e12f);
+            m_camera.SetMoveSpeed(5.0e4f);
+            break;
         case CameraMode::ShipChase:
         default:
             m_scene.SetRenderScale(1.0);
@@ -2567,6 +2628,53 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
             m_chaseCameraInitialized = false; // fixed standoff, no chase smoothing
             m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
             return true;
+        }
+    }
+
+    // Surface preview: an oblique aerial pose over the terrain patch, so the
+    // displaced relief reads against the curved limb. up = the patch radial.
+    if (m_cameraMode == CameraMode::Surface && m_terrainBuilt)
+    {
+        core::Vec3d bodyPos;
+        bool found = false;
+        if (auto* pool = m_scene.GetRegistry().GetPool<ecs::GravitationalBody>())
+            for (uint32_t i = 0; i < pool->Count(); ++i)
+                if (pool->DataAt(i).bodyId == m_terrainBodyId)
+                {
+                    const ecs::Entity e = registry.EntityAtIndex(pool->EntityAt(i));
+                    if (const auto* t = registry.TryGet<ecs::Transform>(e))
+                    { bodyPos = t->position; found = true; }
+                    break;
+                }
+        if (found)
+        {
+            const core::Vec3d o = m_terrainChunkOriginBody;
+            const double ol = o.Length();
+            const core::Vec3d up = (ol > 0.0)
+                ? core::Vec3d{ o.x / ol, o.y / ol, o.z / ol } : core::Vec3d{ 0, 0, 1 };
+            // A surface tangent = normalize(up x worldY), fallback worldX.
+            core::Vec3d tan{ up.y * 0.0 - up.z * 1.0, up.z * 0.0 - up.x * 0.0,
+                             up.x * 1.0 - up.y * 0.0 };
+            double tl = tan.Length();
+            if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
+            tan = { tan.x / tl, tan.y / tl, tan.z / tl };
+
+            const core::Vec3d centreW{ bodyPos.x + o.x, bodyPos.y + o.y, bodyPos.z + o.z };
+            const double altitude = 380000.0, backDist = 650000.0;
+            const core::Vec3d camPos{ centreW.x + up.x * altitude - tan.x * backDist,
+                                      centreW.y + up.y * altitude - tan.y * backDist,
+                                      centreW.z + up.z * altitude - tan.z * backDist };
+            core::Vec3d fwdD{ centreW.x - camPos.x, centreW.y - camPos.y, centreW.z - camPos.z };
+            const double fl = fwdD.Length();
+            const core::Vec3f fwd{ static_cast<float>(fwdD.x / fl),
+                                   static_cast<float>(fwdD.y / fl),
+                                   static_cast<float>(fwdD.z / fl) };
+            const core::Vec3f upf{ static_cast<float>(up.x),
+                                   static_cast<float>(up.y),
+                                   static_cast<float>(up.z) };
+            m_chaseCameraInitialized = false;
+            if (m_camera.InitBasis(camPos, fwd, upf))
+                return true;
         }
     }
 
@@ -2966,6 +3074,45 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     return state;
 }
 
+void App::RenderTerrainPreview()
+{
+    if (!m_terrainBuilt) return;
+    auto& registry = m_scene.GetRegistry();
+    core::Vec3d bodyPos;
+    bool found = false;
+    if (auto* pool = registry.GetPool<ecs::GravitationalBody>())
+        for (uint32_t i = 0; i < pool->Count(); ++i)
+            if (pool->DataAt(i).bodyId == m_terrainBodyId)
+            {
+                const ecs::Entity e = registry.EntityAtIndex(pool->EntityAt(i));
+                if (const auto* t = registry.TryGet<ecs::Transform>(e))
+                { bodyPos = t->position; found = true; }
+                break;
+            }
+    if (!found) return;
+
+    // Moon surface params (mirrors PlanetParamsFor(11)); sunDir toward the star at
+    // the frame origin, computed in double before narrowing (RULE 1).
+    render::Renderer::PlanetConstants pc = {};
+    const core::Vec3f sunDir = (core::Vec3d{ 0.0, 0.0, 0.0 } - bodyPos).Normalized().ToFloat();
+    pc.sunDir[0] = sunDir.x; pc.sunDir[1] = sunDir.y; pc.sunDir[2] = sunDir.z;
+    pc.sunColor[0] = 1.0f; pc.sunColor[1] = 0.97f; pc.sunColor[2] = 0.92f; pc.sunColor[3] = 1.3f;
+    pc.params0[0] = 2.0f; pc.params0[1] = 1.0f; pc.params0[2] = 33.0f; pc.params0[3] = 1.0f;
+    pc.landLow[0]  = 0.045f; pc.landLow[1]  = 0.045f; pc.landLow[2]  = 0.050f;
+    pc.landHigh[0] = 0.400f; pc.landHigh[1] = 0.400f; pc.landHigh[2] = 0.420f; pc.landHigh[3] = 0.98f;
+    pc.iceColor[3] = 2.0f; // no ice cap
+    pc.ambient[0] = 0.010f; pc.ambient[1] = 0.010f; pc.ambient[2] = 0.012f;
+
+    // World matrix: the patch is chunk-local about its body-space origin; place its
+    // origin camera-relative in double, then narrow the small residual (RULE 1).
+    const core::Vec3d camPos = m_camera.Position();
+    const core::Vec3d tD{ bodyPos.x + m_terrainChunkOriginBody.x - camPos.x,
+                          bodyPos.y + m_terrainChunkOriginBody.y - camPos.y,
+                          bodyPos.z + m_terrainChunkOriginBody.z - camPos.z };
+    const core::Mat4x4 world = core::Mat4x4::Translation(tD.ToFloat());
+    m_renderer.DrawTerrain(m_device, m_terrainMesh, world, pc);
+}
+
 bool App::RenderFrame(const core::TimeStep& timeStep)
 {
     if (!m_device.WaitForCurrentFrame() || !m_device.ResetCommandList())
@@ -3244,6 +3391,8 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         else
             m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
+        if (m_cameraMode == CameraMode::Surface)
+            RenderTerrainPreview();
 
         // Planetary atmospheres: analytic single-scattering shells over the just-drawn
         // planets (blue limb glow, day/night terminator). Drawn before the orbit/marker
