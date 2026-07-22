@@ -2277,6 +2277,69 @@ are now integrated as well. The current order is:
 - Next action: pause after Step 5 as requested. No follow-on lane is claimed by
   Codex from this workstream.
 
+### WS-032: Production hero ship kit and Meshy content acceptance loop
+
+- Status: ACTIVE
+- Outcome: create the first high-quality, realistically scaled, boardable
+  production spaceship as a modular content kit, then prove the complete
+  design-authority -> Meshy source -> reviewed GLB -> deterministic cook ->
+  runtime assembly loop without allowing generated geometry to own gameplay
+  topology.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit from a stable content commit
+- Branch: `codex/production-hero-ship-kit`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-production-hero-ship-kit`
+- Base commit: `2934c71`
+- Owned paths: new production-ship dimension sheets, prompt/source manifests,
+  approved Meshy provenance, source-art staging, production assembly/collision
+  manifests and cooked packages, additive Meshy ingestion/inspection tooling,
+  focused asset tests, content documentation, and the minimum runtime catalog or
+  smoke wiring needed to load and inspect this ship independently
+- Excluded paths: `src/sim/**`, orbital mechanics, SOI transitions, renderer
+  pipelines and shaders, general lighting/shadow policy, generic physics,
+  unrelated reference-ship behavior, station/planet runtime systems, combat,
+  inventory, character animation, networking, and save-format expansion
+- Shared-file locks: WS-032 owns its new production content family and additive
+  content/tool registrations only. Claude retains simulation and orbital files.
+  Existing reference assets remain regression fixtures and are not replaced
+  until the production kit passes every acceptance gate.
+- Interface contract: The Dawning's versioned manifest is authoritative for
+  meters, axes, module transforms, sockets, collision, walk surfaces, zones,
+  pressure classes, portals, interactions, moving-part pivots, navigation, LODs,
+  and provenance. Meshy supplies reviewed render-source candidates only. The
+  ship is split into exterior, interior architecture, props, and moving rigid
+  parts; no generated monolithic "ship with interior" mesh can satisfy this
+  workstream. Every boardable opening must match an explicit exterior and
+  interior socket at the same authored dimensions.
+- Initial ship brief: a compact frontier courier approximately 28 m long, 16 m
+  wide, and 7 m high with cockpit, main corridor, two-stage airlock, engineering,
+  cargo, crew berth, service access, landing/ramp interfaces, and physically
+  plausible aerospace/composite PBR materials. Minimum standing clearance is
+  2.1 m and minimum clear door width is 0.95 m.
+- Dependencies: merged WS-021 through WS-031 asset, assembly, collision,
+  interaction, locomotion, possession, and authoritative-root contracts; current
+  GLB importer/cooker; local Git LFS support; and the credential-safe Meshy client
+- Acceptance gates: zero-secret dry-run and hard credit ceiling; retained task
+  IDs, requests, downloaded hashes, and consumed credits; source GLB importer
+  inspection; meter/axis/bounds review; exterior/interior socket alignment;
+  deterministic model/assembly/collision cooks; at least three explicit LOD
+  identities per render module; complete outside-to-airlock-to-required-zone
+  reachability; collision-safe spawn and corridor/door clearances; reversible
+  door/hatch state and exact portal passability; cockpit exit/re-entry and ship
+  control; raster/stable-DXR/full-DXR plus GPU-validation smoke; and manual
+  exterior, boarding, interior, and cockpit captures
+- Negative controls: generated scale/origin cannot override authored dimensions;
+  missing source hashes, stale task identity, unlinked modules, unreachable
+  zones, mismatched socket frames, non-sealable portals, absent collision/nav/
+  pressure metadata, combined moving parts, invalid pivots, fewer than three LOD
+  identities, or an exterior with no continuous interior fails production
+  acceptance without replacing the reference fixture.
+- Next action: freeze the ship dimension/zone/socket brief, perform zero-credit
+  Meshy request review, generate the first bounded exterior module preview, and
+  inspect its geometry before approving texture refinement or additional
+  modules.
+
 ## 20. Helper Commands
 
 Create a task worktree:
