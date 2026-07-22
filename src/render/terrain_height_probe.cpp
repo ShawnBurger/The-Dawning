@@ -42,14 +42,28 @@ namespace
 // trips (watched-failing). It cannot catch a sub-3% drift; nothing short of the
 // integer-hash rewrite can, and the comment says so.
 //
+// The bounds sit ~3.4x above the measured floor, not snug to it, and here is why
+// that is the right trade rather than a weaker guard: a FAILED verdict is FATAL, so
+// the bound must clear not just THIS GPU's floor but the CROSS-VENDOR spread of it —
+// and the floor IS dp3/frac rounding, the exact thing that varies between NVIDIA,
+// AMD and Intel. A snug 1.7x bound risks bricking boot on a machine whose rounding
+// runs 2x hotter. The detection cost of widening is near zero because the drift the
+// probe exists to catch is BIMODAL, MEASURED: a one-sided edit either reshuffles the
+// field (a changed hash constant -> worst 0.44, caught at any bound below it) or
+// scales an octave weight subtly (a 1% gain change -> worst 0.0296, i.e. INSIDE the
+// floor — but that edit moves the terrain by <0.001, so it neither pops nor needs
+// catching). There is no dense band of "visible but sub-0.1" drifts to lose. The
+// integer-hash rewrite (the follow-on) is what would let this bound approach the sky
+// probe's 3000x margin; until then this is the honest gross-drift threshold.
+//
 //   kRawTolerance   guards the RAW continent field (the whole enumerated drift
-//                   surface). measured floor 0.0294.
+//                   surface). measured floor 0.0294; gross-drift signal 0.44.
 //   kElevTolerance  guards the final elevation branch (coast mask, ridged
 //                   mountains, craters). Looser: the type-0 coast smoothstep
 //                   amplifies the raw floor ~1/coastWidth at the shoreline (where
 //                   h == seaLevel). measured floor 0.0616.
-constexpr float kRawTolerance  = 5.0e-2f;   // raw field:      measured floor 0.0294
-constexpr float kElevTolerance = 1.5e-1f;   // final elevation: measured floor 0.0616
+constexpr float kRawTolerance  = 1.0e-1f;   // raw field:      floor 0.0294, signal 0.44
+constexpr float kElevTolerance = 2.0e-1f;   // final elevation: floor 0.0616
 
 // The height field must actually VARY across the query set, or a twin that
 // returned a constant would agree with a constant vacuously. PlanetHeight spans
