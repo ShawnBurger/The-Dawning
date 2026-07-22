@@ -127,6 +127,32 @@ float Ridged3(float3 p)
     return sum;
 }
 
+float3 Hash33(float3 p)
+{
+    p = frac(p * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return frac((p.xxy + p.yxx) * p.zyx);
+}
+
+// Sparse impact craters (Mars/Moon). One jittered crater per grid cell, its centre
+// kept away from the cell edge (like the starfield) so a single-cell lookup does not
+// slice it. Returns a signed elevation delta: a depressed bowl plus a raised rim.
+float CraterField(float3 p, float freq, float density)
+{
+    float3 pp = p * freq;
+    float3 id = floor(pp);
+    float3 f  = frac(pp) - 0.5;
+
+    float present = step(1.0 - density, Hash13(id * 1.7 + 4.4));
+    float3 c   = (Hash33(id + 2.2) - 0.5) * 0.5;   // centred jitter (edge-safe)
+    float  d   = length(f - c);
+    float  rad = 0.16 + 0.16 * Hash13(id + 8.8);
+
+    float bowl = -smoothstep(rad, rad * 0.2, d) * 0.7;               // sunken floor
+    float rim  = exp(-pow(saturate((d - rad) / (rad * 0.5)), 2.0) * 4.0) * 0.5; // bright rim
+    return present * (bowl + rim);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     const int   type   = (int)(params0.x + 0.5);
@@ -151,11 +177,27 @@ float4 main(PSInput input) : SV_TARGET
     float landMask   = hasOcean ? smoothstep(seaLevel - coastWidth, seaLevel + coastWidth, h)
                                 : 1.0;
 
-    // --- Elevation & mountains (land only) ---------------------------------
+    // --- Elevation ----------------------------------------------------------
+    // Earth: coast→peak with ridged mountains. Mars/Moon: broad terrain from the
+    // height field with impact craters (dense on the Moon, sparse on Mars) driving
+    // both the relief and the maria/highland albedo split.
     float landSpan = max(1.0 - seaLevel, 0.05);
-    float elev     = hasOcean ? saturate((h - seaLevel) / landSpan) : saturate(h);
-    float mtn      = Ridged3(N * 5.7 + seedO * 1.3);
-    elev = saturate(elev + mtn * 0.35 * landMask);
+    float elev;
+    if (type == 0)
+    {
+        elev = saturate((h - seaLevel) / landSpan);
+        elev = saturate(elev + Ridged3(N * 5.7 + seedO * 1.3) * 0.35 * landMask);
+    }
+    else
+    {
+        elev = saturate(h);
+        if (type == 1 || type == 2)
+        {
+            float cd = (type == 2) ? 0.55 : 0.30;   // Moon dense, Mars sparse
+            float cr = CraterField(N, 11.0, cd) + 0.6 * CraterField(N, 25.0, cd * 0.8);
+            elev = saturate(elev + cr * 0.6);
+        }
+    }
 
     // --- Latitude & moisture ------------------------------------------------
     float lat      = abs(N.y);                       // 0 equator, 1 pole

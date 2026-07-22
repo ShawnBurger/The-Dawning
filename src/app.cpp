@@ -116,6 +116,9 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     else if (HasOption(args, "--camera-mode=free"))     options.startCameraMode = 3;
     else if (HasOption(args, "--camera-mode=ship"))     options.startCameraMode = 4; // ship-in-system
     else                                                options.startCameraMode = 0;
+    // Near-body focus target as an un-offset local id (10 Earth / 11 Moon / 20 Mars).
+    options.focusLocalId = static_cast<uint64_t>(
+        ReadDoubleOption(args, "--focus-body=", static_cast<double>(options.focusLocalId)));
 
     if (options.smoke && !HasOption(args, "--show-overlay"))
         options.showOverlay = false;
@@ -795,8 +798,8 @@ bool App::InitializeScene()
         m_cameraMode = (m_options.startCameraMode == 4)
             ? CameraMode::ShipChase // ship-in-system uses the chase camera
             : static_cast<CameraMode>(m_options.startCameraMode);
-        if (m_options.startCameraMode == 2) // near-body defaults to Earth
-            m_focusBodyId = scene::kStarSystemBodyIdBase + 10;
+        if (m_options.startCameraMode == 2) // near-body: focus the requested body (default Earth)
+            m_focusBodyId = scene::kStarSystemBodyIdBase + m_options.focusLocalId;
 
         // Teleport the playable ship onto a live orbit about Earth for EVERY
         // star-system run (any camera mode), so it shares the system's frame, feels
