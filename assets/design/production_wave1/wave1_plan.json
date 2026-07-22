@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "wave_id": "production_assets_wave1_2026_07_22",
+  "status": "generation_ready",
+  "units": "meters",
+  "coordinate_system": {
+    "handedness": "left",
+    "up": "+Y",
+    "forward": "+Z",
+    "generated_axes_are_non_authoritative": true
+  },
+  "credit_policy": {
+    "verified_balance_at_claim": 9927,
+    "wave_ceiling": 600,
+    "planned_concept_credits": 45,
+    "planned_preview_credits": 160,
+    "conditional_multiview_credits": 150,
+    "conditional_refine_credits": 80,
+    "contingency_credits": 165,
+    "refine_only_after_geometry_acceptance": true
+  },
+  "source_references": [
+    {
+      "filename": "Flight_Tech_Ship_Images_Complete.pdf",
+      "sha256": "2288fc6d879357b76882b745f86ce30cd5892be107266493139d1f70e985adf0",
+      "distribution": "user-provided reference; not redistributed",
+      "use": "proportion, orthographic coverage, functional massing, and surface-detail hierarchy only",
+      "forbidden": [
+        "copied silhouette",
+        "copied manufacturer language",
+        "copied logos or labels",
+        "copied named ship design"
+      ]
+    }
+  ],
+  "global_generation_rules": {
+    "provider": "Meshy",
+    "ai_model": "meshy-6",
+    "target_formats": ["glb"],
+    "enable_pbr": true,
+    "hd_texture_for_accepted_hero_assets": true,
+    "remove_lighting": true,
+    "generated_scale_is_authoritative": false,
+    "generated_collision_is_authoritative": false,
+    "generated_openings_are_authoritative": false,
+    "promote_generated_text_or_logos": false,
+    "monolithic_exterior_and_interior_allowed": false
+  },
+  "design_authority": {
+    "ship.longreach_expedition_cutter_mk1": {
+      "display_name": "Longreach Expedition Cutter Mk1",
+      "role": "six-crew long-range survey, salvage, and courier ship",
+      "manufacturer_language": "Asterline frontier industrial",
+      "envelope": {"width_x": 18.0, "height_y": 11.0, "length_z": 52.0},
+      "proportion_contract": {
+        "ordering": "length_z > width_x > height_y",
+        "minimum_length_to_width": 2.5,
+        "allowed_height_to_width": [0.45, 0.68],
+        "reject": ["saucer", "disk", "width-dominant", "fighter-like wing planform", "post-generation stretch"]
+      },
+      "interior_contract": {
+        "decks": 2,
+        "nominal_clear_height": 2.5,
+        "minimum_standing_clearance": 2.1,
+        "minimum_door_clear_width": 1.05,
+        "main_corridor_clear_width": 1.5,
+        "cockpit_clear_envelope": [6.4, 3.2, 8.5],
+        "required_zones": ["boarding_airlock", "cockpit", "operations", "crew", "cargo", "engineering", "service_spine"],
+        "boardable_openings": ["port_airlock", "ventral_cargo_ramp", "dorsal_docking_collar"]
+      },
+      "material_language": ["brushed titanium", "painted aluminum", "dark carbon composite", "ceramic heat shield", "restrained amber safety color"],
+      "surface_hierarchy": ["axial pressure keel", "replaceable drive pods", "radiators and thermal breaks", "recessed service bays", "fasteners, seals, and access logic"]
+    },
+    "station.meridian_exchange_mk1": {
+      "display_name": "Meridian Exchange Orbital Station",
+      "role": "modular trade, repair, habitation, and traffic-control outpost",
+      "manufacturer_language": "Asterline civic-industrial",
+      "envelope": {"width_x": 128.0, "height_y": 52.0, "length_z": 180.0},
+      "exterior_contract": {
+        "static_core": "armored axial utility spine and central transfer hub",
+        "separate_future_parts": ["habitation ring", "radiator wings", "solar arrays", "docking-arm elevators"],
+        "required_interfaces": ["four radial docking collars", "two capital berths", "cargo truss", "service umbilicals", "escape pod bays"]
+      },
+      "interior_contract": {
+        "nominal_clear_height": 2.6,
+        "minimum_standing_clearance": 2.1,
+        "minimum_door_clear_width": 1.2,
+        "main_corridor_clear_width": 2.4,
+        "required_kits": ["corridor", "airlock", "operations", "cargo", "engineering", "habitation", "medical"]
+      },
+      "material_language": ["zinc-gray structural alloy", "white service panels", "dark non-slip deck", "amber wayfinding", "replaceable glazed display modules"]
+    },
+    "equipment.argent_eva_mk1": {
+      "display_name": "Argent EVA Suit Mk1",
+      "role": "repair, boarding, and hazardous-environment pressure armor",
+      "human_envelope": {"suited_height": 1.93, "shoulder_width": 0.72, "depth_with_pack": 0.48},
+      "required_modules": ["helmet", "pressure collar", "torso shell", "life-support pack", "upper arms", "forearms", "gloves", "pelvis", "thighs", "shins", "boots"],
+      "mobility_contract": ["clear neck rotation", "unobstructed shoulder elevation", "elbow and knee flexion gaps", "wrist tool clearance", "hip crouch clearance"],
+      "material_language": ["woven pressure layer", "matte ceramic-composite shells", "titanium joint hardware", "clear laminated visor", "localized rescue orange"]
+    },
+    "weapon.helix_carbine_mk1": {
+      "display_name": "Helix Service Carbine Mk1",
+      "role": "vacuum-capable modular infantry carbine",
+      "envelope": {"width_x": 0.085, "height_y": 0.27, "length_z": 0.86},
+      "required_rigid_parts": ["receiver", "barrel_group", "stock", "magazine", "optic", "charging_handle", "selector", "trigger", "muzzle_device"],
+      "material_language": ["phosphate steel", "matte aluminum", "fiber-reinforced polymer", "heat-stained barrel alloy", "low-glare optical glass"]
+    },
+    "weapon.helix_sidearm_mk1": {
+      "display_name": "Helix Service Sidearm Mk1",
+      "role": "sealed-duty personal defense sidearm",
+      "envelope": {"width_x": 0.052, "height_y": 0.19, "length_z": 0.31},
+      "required_rigid_parts": ["frame", "upper_receiver", "barrel_group", "magazine", "trigger", "selector", "sight_module"],
+      "material_language": ["nitrided steel", "matte aluminum", "textured polymer", "low-glare optical glass"]
+    }
+  },
+  "requests": [
+    {
+      "request_id": "concept.ship.longreach.exterior",
+      "phase": "concept",
+      "name": "longreach_expedition_cutter_exterior_concept",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "exterior_hull_concept",
+      "image_model": "gpt-image-2",
+      "pose_mode": null,
+      "expected_credits": 9,
+      "prompt": "Original photorealistic multiview concept of a 52 m long, 18 m wide, 11 m high expedition spacecraft, clearly longer than wide. Six-crew pressurized cutter with armored axial keel, compact wedge nose, two tucked aft drive pods, dorsal docking collar, port airlock, ventral cargo ramp, radiators, RCS clusters, landing gear bays, layered titanium and carbon-composite panels. Grounded spacecraft engineering, not an aircraft. Consistent orthographic proportions, neutral studio light, no text, logo, stand, ground, weapons, detached parts, or background clutter."
+    },
+    {
+      "request_id": "concept.station.meridian.exterior",
+      "phase": "concept",
+      "name": "meridian_exchange_station_exterior_concept",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "exterior_core_concept",
+      "image_model": "gpt-image-2",
+      "pose_mode": null,
+      "expected_credits": 9,
+      "prompt": "Original photorealistic multiview concept of a modular orbital trade and repair station, 180 m axial spine, 128 m across docking arms, 52 m high. Armored central transfer hub, four radial docking collars, two larger ship berths, cargo truss, tanks, service umbilicals, radiator roots, observation and traffic-control module. Believable pressure volumes and construction access, modular rather than monolithic, no gravity fantasy. Consistent orthographic geometry, neutral space-light studio, no ships, people, text, logos, weapons, planet, or background clutter."
+    },
+    {
+      "request_id": "concept.armor.argent.full_suit",
+      "phase": "concept",
+      "name": "argent_eva_suit_full_body_concept",
+      "asset_id": "equipment.argent_eva_mk1",
+      "module_id": "full_suit_concept",
+      "image_model": "gpt-image-2",
+      "pose_mode": "t-pose",
+      "expected_credits": 9,
+      "prompt": "Photorealistic original full-body hard-surface EVA suit on one neutral adult human in a strict T-pose. Functional pressure garment under modular ceramic-composite helmet, collar, torso, shoulder, forearm, pelvis, thigh, shin and boot shells; compact life-support pack; sealed joints with believable flex gaps; clear laminated visor; tool mounts and rescue hardware. Industrial near-future engineering, not superhero armor, slim enough for ship corridors. Symmetric neutral lighting, no weapon, cape, text, logo, stand, or background clutter."
+    },
+    {
+      "request_id": "concept.weapon.helix.carbine",
+      "phase": "concept",
+      "name": "helix_service_carbine_concept",
+      "asset_id": "weapon.helix_carbine_mk1",
+      "module_id": "carbine_concept",
+      "image_model": "gpt-image-2",
+      "pose_mode": null,
+      "expected_credits": 9,
+      "prompt": "Original photorealistic near-future vacuum-capable service carbine, 86 cm long, physically plausible compact receiver and barrel, folding adjustable stock, removable box magazine, low-profile optic, charging handle, selector, trigger guard, heat shielding, sling points and tool-less service latches. Functional layered metal and reinforced polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter."
+    },
+    {
+      "request_id": "concept.weapon.helix.sidearm",
+      "phase": "concept",
+      "name": "helix_service_sidearm_concept",
+      "asset_id": "weapon.helix_sidearm_mk1",
+      "module_id": "sidearm_concept",
+      "image_model": "gpt-image-2",
+      "pose_mode": null,
+      "expected_credits": 9,
+      "prompt": "Original photorealistic sealed-duty near-future sidearm, 31 cm long, plausible bore axis, compact upper receiver and barrel group, removable grip magazine, protected trigger, ambidextrous selector, low-profile sight module, service takedown seams and gloved-hand ergonomics. Functional metal and textured polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter."
+    },
+    {
+      "request_id": "preview.ship.longreach.cockpit_frame",
+      "phase": "preview",
+      "name": "longreach_cockpit_pressure_frame",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_pressure_frame",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic hard-surface cockpit pressure-frame segment for a large expedition spacecraft, 6.4 m outer width, 3.2 m outer height, 0.55 m deep, with a 5.7 m by 2.55 m clear faceted opening. Layered load-bearing titanium ring, pressure seals, bolted splice plates, cable and ventilation channels, light recesses, inspection covers and realistic bevels. Symmetric, watertight solid architecture, isolated single object, front faces +Z. No wall fill, window, door, floor, console, seat, loose cables, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit realistic spacecraft pressure structure: brushed titanium load members, dark elastomer seals, graphite composite cable covers, subtle machining and maintenance wear, restrained amber service accents, no baked highlights, pseudo-text, logos, dirt wash, or emissive glow."
+    },
+    {
+      "request_id": "preview.ship.longreach.pilot_seat",
+      "phase": "preview",
+      "name": "longreach_cockpit_pilot_seat",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_pilot_seat",
+      "polycount": 100000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic spacecraft pilot seat for a suited adult, 0.74 m wide, 1.35 m high, 0.92 m deep. Rigid shock-isolated base, articulated back shell, headrest, segmented pressure cushions, five-point restraint anchors, folding arm supports, visible adjustment rails and rear service access. Human ergonomic proportions and believable construction, neutral upright pose, isolated single object, forward faces +Z. No person, cockpit, controls, screens, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit realistic cockpit seat: dark woven pressure fabric, charcoal composite shell, brushed titanium frame and rails, restrained amber release hardware, localized hand-contact wear, no baked lighting, pseudo-text, logos, broad grime, or emissive glow."
+    },
+    {
+      "request_id": "preview.ship.longreach.flight_console",
+      "phase": "preview",
+      "name": "longreach_cockpit_flight_console",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_flight_console",
+      "polycount": 140000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic wraparound two-crew spacecraft flight console, 4.8 m wide, 1.15 m high, 1.25 m deep. Low central sightline, angled instrument wings, structural pedestal, replaceable display bezels, guarded switches, rotary controls, handholds, ventilation, cable access and service panels. Functional near-future avionics with layered depth and realistic bevels, isolated single object, pilot side faces -Z. No seats, room, floating screens, holograms, fake text, logos, stand, ground, or background."
+      ,"texture_prompt": "De-lit realistic flight hardware: dark low-glare composite, anodized aluminum bezels, physical black display glass, brushed metal controls, restrained amber and cyan indicator lenses, subtle hand-contact wear, no baked highlights, pseudo-text, logos, random grime, or active emissive content."
+    },
+    {
+      "request_id": "preview.ship.longreach.service_wall",
+      "phase": "preview",
+      "name": "longreach_cockpit_service_wall_bay",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "cockpit_service_wall_bay",
+      "polycount": 110000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic modular spacecraft cockpit service-wall bay, exactly 2.4 m wide, 2.5 m high and 0.28 m deep. Structural edge rails, removable pressure liner panels, flush equipment access doors, recessed cable and ventilation channel, two handholds, integrated task-light recesses, believable fasteners, seals and physical thickness. Flat rectangular rear mounting plane, isolated single object, visible face +Z. No floor, ceiling, window, room, pipes outside the bay, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit spacecraft interior architecture: warm gray painted alloy panels, dark graphite rails and seals, brushed titanium fasteners, restrained amber maintenance latches, subtle edge and hand wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow."
+    },
+    {
+      "request_id": "preview.station.meridian.corridor_wall",
+      "phase": "preview",
+      "name": "meridian_station_corridor_wall_bay",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "corridor_wall_bay",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic modular orbital-station corridor wall bay, exactly 2.4 m wide, 2.6 m high and 0.32 m deep. Heavy structural side posts, replaceable white service panels, recessed utility chase, ventilation grille, equipment locker, handrail, task-light recesses, pressure seals, service fasteners and realistic bevels. Flat rear mounting plane and clear floor edge, isolated single object, visible face +Z. No doorway, floor, ceiling, room, exposed loose wires, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit civic-industrial station materials: zinc-gray structural alloy, off-white replaceable panels, dark non-slip lower kick plate, brushed steel rail, restrained amber wayfinding accents, plausible maintenance wear, no baked lighting, pseudo-text, logos, random grime, or emissive glow."
+    },
+    {
+      "request_id": "preview.station.meridian.airlock_frame",
+      "phase": "preview",
+      "name": "meridian_station_airlock_frame",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "airlock_pressure_frame",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic orbital-station airlock pressure frame, 2.7 m outer width, 2.9 m outer height, 0.55 m deep, surrounding a clean 1.55 m wide by 2.3 m high opening. Reinforced alloy ribs, double pressure seals, latch receivers, hinge and actuator mounting pads, threshold drainage, emergency handwheel socket, inspection covers and realistic bevels. Watertight solid frame, isolated single object, front faces +Z. No door leaf, wall fill, room, people, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit station pressure hardware: zinc-gray alloy frame, brushed steel latch surfaces, dark elastomer seals, off-white inspection covers, restrained amber emergency accents, localized service wear, no baked lighting, pseudo-text, logos, broad grime, or emissive glow."
+    },
+    {
+      "request_id": "preview.station.meridian.operations_console",
+      "phase": "preview",
+      "name": "meridian_station_operations_console",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "operations_console",
+      "polycount": 140000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic two-person orbital-station operations console, 3.0 m wide, 1.25 m high and 1.05 m deep. Structural pedestal, angled work surface, replaceable physical display bezels, guarded switches, rotary controls, communication handset cradles, handholds, ventilation, cable access and rear service panels. Civil traffic-control and docking hardware with ergonomic reach and layered depth, isolated single object, operator side faces -Z. No chairs, room, floating screens, holograms, fake text, logos, stand, ground, or background."
+      ,"texture_prompt": "De-lit realistic station control hardware: low-glare graphite composite, off-white alloy shell, anodized metal bezels, physical black display glass, brushed controls, restrained amber and cyan lenses, subtle hand wear, no baked highlights, pseudo-text, logos, random grime, or active emissive content."
+    },
+    {
+      "request_id": "preview.station.meridian.deck_bay",
+      "phase": "preview",
+      "name": "meridian_station_deck_service_bay",
+      "asset_id": "station.meridian_exchange_mk1",
+      "module_id": "deck_service_bay",
+      "polycount": 100000,
+      "expected_credits": 20,
+      "prompt": "One photorealistic modular orbital-station deck bay, exactly 2.4 m wide, 3.0 m long and 0.22 m thick. Flat load-bearing underside, framed removable non-slip walking panels, flush cargo tie-down sockets, narrow utility channels, sealed access covers, threshold-compatible edges, realistic panel gaps, fasteners and bevels. Clear uninterrupted 1.5 m central walking strip, isolated single object, top faces +Y. No walls, ceiling, furniture, loose cables, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit station deck materials: dark graphite non-slip panels, zinc-gray structural frame, brushed steel tie-downs, restrained amber edge markings without symbols, localized foot and cargo wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow."
+    }
+  ]
+}
