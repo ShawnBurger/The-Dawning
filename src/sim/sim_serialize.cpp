@@ -313,7 +313,7 @@ SimLoadStatus ValidateSnapshot(SimSnapshot& s, std::string& err)
         if (!Finite(c.momentum) || !Finite(c.restMass) || !Finite(c.coordinateTime) || !Finite(c.properTimeDeviation))
         { err = "clock non-finite"; return SimLoadStatus::InvalidData; }
         if (!(c.restMass > 0.0)) { err = "restMass <= 0"; return SimLoadStatus::InvalidData; }
-        if (!(c.properTimeDeviation <= 1e-6)) { err = "properTimeDeviation > 0"; return SimLoadStatus::InvalidData; }
+        if (!(c.properTimeDeviation <= 0.0)) { err = "properTimeDeviation > 0"; return SimLoadStatus::InvalidData; }
         if (!ids.insert(c.bodyId).second) { err = "duplicate clock bodyId"; return SimLoadStatus::InvalidData; }
     }
     return SimLoadStatus::Ok;

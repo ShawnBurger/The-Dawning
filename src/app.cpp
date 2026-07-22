@@ -1479,6 +1479,7 @@ int App::RunMainLoop()
                     core::Log::Error("Smoke mode failed: path tracing unavailable");
                     m_exitCode = 2;
                     m_running = false;
+                    break; // exit now so RenderFrame can't overwrite exit code 2
                 }
             }
 

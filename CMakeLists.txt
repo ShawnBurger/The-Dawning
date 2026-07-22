@@ -498,6 +498,12 @@ if(MSVC)
         /WX
         /permissive-
     )
+
+    target_compile_options(TheDawningAssemblyInspector PRIVATE
+        /W4
+        /WX
+        /permissive-
+    )
 endif()
 
 # =============================================================================
