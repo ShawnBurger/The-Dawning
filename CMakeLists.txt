@@ -37,10 +37,12 @@ set(CORE_SOURCES
 set(TERRAIN_SOURCES
     src/terrain/cube_sphere.cpp
     src/terrain/chunk_mesh.cpp
+    src/terrain/planet_quadtree.cpp
 )
 set(TERRAIN_HEADERS
     src/terrain/cube_sphere.h
     src/terrain/chunk_mesh.h
+    src/terrain/planet_quadtree.h
 )
 
 set(CORE_HEADERS
@@ -286,6 +288,7 @@ set(TEST_SOURCES
     tests/test_math.cpp
     tests/test_planet_height.cpp
     tests/test_terrain_chunk.cpp
+    tests/test_planet_quadtree.cpp
     tests/test_job_system.cpp
     tests/test_log.cpp
     tests/test_ecs.cpp
@@ -623,6 +626,8 @@ add_executable(TheDawningTests
     src/terrain/cube_sphere.cpp
     src/terrain/chunk_mesh.h
     src/terrain/chunk_mesh.cpp
+    src/terrain/planet_quadtree.h
+    src/terrain/planet_quadtree.cpp
     ${ECS_HEADERS}
     ${SHIP_SOURCES}
     ${SHIP_HEADERS}

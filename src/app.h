@@ -195,14 +195,17 @@ private:
     CameraMode m_cameraMode = CameraMode::ShipChase;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
 
-    // Chunked-LOD terrain preview (Surface camera mode). One displaced cube-sphere
-    // patch on the focus body (the Moon), built once at Init and drawn camera-
-    // relative each Surface frame.
-    render::Mesh m_terrainMesh;
-    bool         m_terrainBuilt = false;
-    uint64_t     m_terrainBodyId = 0;                        // seeded bodyId the patch sits on
-    core::Vec3d  m_terrainChunkOriginBody{ 0.0, 0.0, 0.0 }; // patch centre, body space
-    void RenderTerrainPreview();  // build the camera-relative world matrix + DrawTerrain
+    // Chunked-LOD terrain preview (Surface camera mode): the quadtree-selected leaf
+    // set on the focus body (the Moon), each a displaced cube-sphere patch built
+    // once at Init (fine under the camera, coarse toward the horizon) and drawn
+    // camera-relative each Surface frame.
+    struct TerrainLeaf { render::Mesh mesh; core::Vec3d originBody; };
+    std::vector<TerrainLeaf> m_terrainLeaves;
+    bool        m_terrainBuilt  = false;
+    uint64_t    m_terrainBodyId = 0;        // seeded bodyId the patches sit on
+    core::Vec3d m_terrainCamBody{ 0, 0, 0 };   // Surface camera pos, body space (framing only)
+    core::Vec3d m_terrainFocusBody{ 0, 0, 0 }; // look-at surface point, body space
+    void RenderTerrainPreview();  // draw every leaf camera-relative
 
     // Set once the player ship has been placed on an orbit inside the seeded system
     // (start camera mode 4). Gates the ship's live-orbit HUD/trace so they never read
