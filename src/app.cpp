@@ -6,6 +6,7 @@
 #include "gameplay/on_foot_controller.h"
 #include "gameplay/pilot_possession.h"
 #include "gameplay/playable_ship.h"
+#include "scene/star_system_seed.h"   // kStarSystemBodyIdBase
 #include "render/mesh.h"
 #include "render/texture.h"
 
@@ -65,6 +66,11 @@ dawning::AppOptions ParseOptions(const char* commandLine)
     options.showOverlay = !HasOption(args, "--no-overlay");
     options.smokeSeconds = ReadDoubleOption(args, "--smoke-seconds=", options.smokeSeconds);
     options.smokeRTDelaySeconds = ReadDoubleOption(args, "--smoke-rt-delay=", options.smokeRTDelaySeconds);
+    options.starSystem = HasOption(args, "--star-system");
+    if (HasOption(args, "--camera-mode=orrery"))        options.startCameraMode = 1;
+    else if (HasOption(args, "--camera-mode=nearbody")) options.startCameraMode = 2;
+    else if (HasOption(args, "--camera-mode=free"))     options.startCameraMode = 3;
+    else                                                options.startCameraMode = 0;
 
     if (options.smoke && !HasOption(args, "--show-overlay"))
         options.showOverlay = false;
@@ -836,10 +842,13 @@ bool App::InitializeScene()
     // meters-scale chase camera until a solar-system camera mode frames them; the
     // sim, however, is now driving a real world every fixed step. Gated out of the
     // smoke run so the smoke's entity/snapshot baseline is unchanged.
-    if (!m_options.smoke)
+    if (!m_options.smoke || m_options.starSystem)
     {
         const uint32_t bodies = m_scene.SeedStarSystem(sphere, 0.5f);
         core::Log::Infof("Solar system seeded: %u bodies", bodies);
+        m_cameraMode = static_cast<CameraMode>(m_options.startCameraMode);
+        if (m_options.startCameraMode == 2) // near-body defaults to Earth
+            m_focusBodyId = scene::kStarSystemBodyIdBase + 10;
     }
 
     core::Log::Infof("Scene populated: %u entities", m_scene.EntityCount());
@@ -1183,6 +1192,22 @@ int App::RunMainLoop()
             m_timer.SetTimeScale((std::max)(m_timer.GetTimeScale() * 0.5, 1.0));
         if (input.KeyPressed(VK_OEM_2))
             m_timer.SetTimeScale(1.0);
+
+        // F5 cycles which seeded body the near-body view frames (Sun, Earth,
+        // Moon, Mars). Harmless in other modes.
+        if (input.KeyPressed(VK_F5))
+        {
+            static const uint64_t kFocusCycle[] = { 10, 11, 20, 1 }; // Earth, Moon, Mars, Sun
+            uint32_t next = 0;
+            const uint64_t current = m_focusBodyId
+                ? (m_focusBodyId - scene::kStarSystemBodyIdBase) : 10;
+            for (uint32_t i = 0; i < 4; ++i)
+                if (kFocusCycle[i] == current) { next = (i + 1) % 4; break; }
+            m_focusBodyId = scene::kStarSystemBodyIdBase + kFocusCycle[next];
+            m_chaseCameraInitialized = false;
+            core::Log::Infof("Near-body focus: bodyId %llu",
+                             static_cast<unsigned long long>(m_focusBodyId));
+        }
 
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
         {
@@ -2207,12 +2232,51 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
     }
 
     const auto& registry = m_scene.GetRegistry();
+
+    // Near-body mode: park the camera at a standoff from a seeded celestial body,
+    // framing it at true scale. Falls through to free-fly if no body is seeded
+    // (e.g. the default smoke run).
+    if (m_cameraMode == CameraMode::NearBody)
+    {
+        const uint64_t focus = m_focusBodyId
+            ? m_focusBodyId
+            : (scene::kStarSystemBodyIdBase + 10); // default: Earth
+        core::Vec3d bodyPos;
+        double bodyRadius = 0.0;
+        bool found = false;
+        if (auto* pool = m_scene.GetRegistry().GetPool<ecs::GravitationalBody>())
+        {
+            for (uint32_t i = 0; i < pool->Count(); ++i)
+                if (pool->DataAt(i).bodyId == focus)
+                {
+                    const ecs::Entity e = registry.EntityAtIndex(pool->EntityAt(i));
+                    if (const auto* t = registry.TryGet<ecs::Transform>(e))
+                    {
+                        bodyPos = t->position;
+                        bodyRadius = pool->DataAt(i).radius;
+                        found = true;
+                    }
+                    break;
+                }
+        }
+        if (found)
+        {
+            const gameplay::ChaseCameraPose pose =
+                gameplay::BuildNearBodyCameraPose(bodyPos, bodyRadius);
+            m_chaseCameraInitialized = false; // fixed standoff, no chase smoothing
+            m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
+            return true;
+        }
+    }
+
     const ecs::Entity chaseTarget =
         m_options.smoke && !m_smokeCameraTarget.IsNull()
             ? m_smokeCameraTarget
             : m_playerShip;
-    if (const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget))
+    if (m_cameraMode == CameraMode::ShipChase &&
+        registry.TryGet<ecs::Transform>(chaseTarget))
     {
+        const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget);
         const gameplay::ChaseCameraPose target = gameplay::BuildChaseCameraPose(*ship);
         gameplay::ChaseCameraPose pose = target;
         if (m_chaseCameraInitialized)

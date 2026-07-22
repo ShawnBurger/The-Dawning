@@ -359,6 +359,34 @@ inline ChaseCameraPose SmoothChaseCameraPose(
     return smoothed;
 }
 
+// Park the camera at a standoff from a celestial body, framing it. The standoff
+// is a MULTIPLE of the body's true radius, so the same call frames a moon or a
+// star at a sensible screen size. `azimuthDeg`/`elevationDeg` orbit the vantage
+// around the body. The camera looks back at the body's centre. Works at true
+// scale (K=1): with reversed-Z the near plane (set by the mode) is the precision
+// lever, so a body of radius r renders solid across its whole limb.
+inline ChaseCameraPose BuildNearBodyCameraPose(const core::Vec3d& bodyPos,
+                                               double bodyRadius,
+                                               double standoffRadii = 3.0,
+                                               float azimuthDeg = 35.0f,
+                                               float elevationDeg = 12.0f)
+{
+    const double dist = (bodyRadius > 0.0 ? bodyRadius : 1.0) * standoffRadii;
+    const double az = static_cast<double>(azimuthDeg) * core::DEG_TO_RAD;
+    const double el = static_cast<double>(elevationDeg) * core::DEG_TO_RAD;
+    // Unit direction from the body out to the camera.
+    const core::Vec3d dir{ std::cos(el) * std::sin(az),
+                           std::sin(el),
+                           std::cos(el) * std::cos(az) };
+    ChaseCameraPose pose;
+    pose.position = bodyPos + dir * dist;
+    // Look back toward the body: forward = -dir. Matches the yaw/pitch convention
+    // BuildChaseCameraPose uses (yaw = atan2(fwd.x, fwd.z), pitch = asin(fwd.y)).
+    pose.yawDegrees   = static_cast<float>(std::atan2(-dir.x, -dir.z) * core::RAD_TO_DEG);
+    pose.pitchDegrees = static_cast<float>(std::asin(-dir.y) * core::RAD_TO_DEG);
+    return pose;
+}
+
 inline ChaseCameraPose BuildChaseCameraPose(const ecs::Transform& ship,
                                             float distance = 8.0f,
                                             float height = 2.4f,

@@ -34,6 +34,11 @@ struct AppOptions
     bool smokeForceGrow = false;
     bool gpuValidation = false;
     bool showOverlay = true;
+    // Force-seed the solar system even under --smoke (default smoke does not seed),
+    // and start in a chosen solar-system camera mode. Used to headlessly capture a
+    // mode (e.g. --smoke --smoke-capture --star-system --camera-mode=nearbody).
+    bool starSystem = false;
+    int  startCameraMode = 0; // matches App::CameraMode ordinal; 0 = ShipChase
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;
 };
