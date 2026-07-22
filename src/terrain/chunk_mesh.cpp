@@ -6,6 +6,8 @@
 
 #include "core/planet_height.h"
 
+#include <algorithm>
+
 namespace terrain
 {
 namespace
@@ -46,7 +48,7 @@ core::Vec3d SurfacePoint(const core::Vec3d& dir, const ChunkParams& p)
 ChunkMesh GenerateChunk(const ChunkParams& p)
 {
     ChunkMesh mesh;
-    const int N = (p.gridN < 2) ? 2 : p.gridN;
+    const int N = std::clamp(p.gridN, kMinChunkGridN, kMaxChunkGridN);
 
     // Chunk origin: the surface point at the patch centre, in double. Every vertex
     // is stored relative to this, so the narrowed floats are chunk-sized, not

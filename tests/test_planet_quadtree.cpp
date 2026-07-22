@@ -105,6 +105,76 @@ TEST_CASE(Quadtree_DeterministicAndBounded)
         same = (a[i].face == b[i].face && a[i].level == b[i].level &&
                 a[i].u0 == b[i].u0 && a[i].v0 == b[i].v0);
     CHECK(same);
-    CHECK(a.size() <= static_cast<size_t>(c.maxLeaves + 8));
+    CHECK(a.size() <= static_cast<size_t>(c.maxLeaves));
     for (const auto& p : a) CHECK(p.level <= c.maxLevel);
+}
+
+TEST_CASE(Quadtree_LeafCapIsHardAndCoverageIsPreserved)
+{
+    terrain::QuadtreeConfig c = MoonCfg();
+    c.pixelError = 0.0001;
+    c.maxLevel = 20;
+    c.maxLeaves = 31; // not every cap is reachable because a split adds 3 leaves
+
+    std::vector<terrain::QuadPatch> leaves;
+    terrain::SelectQuadtreeLOD(c, { 0.0, 0.0, c.planetRadius + 10.0 }, leaves);
+    CHECK(leaves.size() <= static_cast<size_t>(c.maxLeaves));
+    CHECK(leaves.size() >= static_cast<size_t>(terrain::kMinQuadtreeLeaves));
+
+    for (int f = 0; f < 6; ++f)
+    {
+        double area = 0.0;
+        for (const auto& p : leaves)
+            if (static_cast<int>(p.face) == f)
+                area += (p.u1 - p.u0) * (p.v1 - p.v0);
+        CHECK_APPROX_EPS(area, 4.0, 1e-9);
+    }
+}
+
+TEST_CASE(Quadtree_MalformedBoundsAreSanitized)
+{
+    terrain::QuadtreeConfig c = MoonCfg();
+    c.maxLevel = 1000;
+    c.maxLeaves = 1;
+    c.pixelError = 0.0001;
+    c.tanHalfFovY = 0.0;
+
+    std::vector<terrain::QuadPatch> leaves;
+    terrain::SelectQuadtreeLOD(c, { NAN, 0.0, 0.0 }, leaves);
+    CHECK_EQ(leaves.size(), static_cast<size_t>(terrain::kMinQuadtreeLeaves));
+    for (const auto& p : leaves)
+        CHECK(p.level >= 0 && p.level <= terrain::kMaxQuadtreeLevel);
+
+    CHECK(std::isfinite(terrain::NodeGeometricError(c, -1000)));
+    CHECK(std::isfinite(terrain::NodeGeometricError(c, 1000)));
+
+    c.maxLeaves = 4096;
+    terrain::SelectQuadtreeLOD(c, { NAN, 0.0, 0.0 }, leaves);
+    CHECK_EQ(leaves.size(), static_cast<size_t>(terrain::kMinQuadtreeLeaves));
+}
+
+TEST_CASE(Quadtree_ExtremeFiniteInputsRemainDeterministic)
+{
+    terrain::QuadtreeConfig c = MoonCfg();
+    c.planetRadius = (std::numeric_limits<double>::max)();
+    c.amplitude = (std::numeric_limits<double>::max)();
+    c.viewportHeight = (std::numeric_limits<double>::max)();
+    c.tanHalfFovY = (std::numeric_limits<double>::min)();
+    c.maxLevel = 2;
+    c.maxLeaves = 24;
+
+    CHECK(std::isfinite(terrain::NodeGeometricError(c, 0)));
+    std::vector<terrain::QuadPatch> first;
+    std::vector<terrain::QuadPatch> second;
+    terrain::SelectQuadtreeLOD(c, { 0.0, 0.0, 0.0 }, first);
+    terrain::SelectQuadtreeLOD(c, { 0.0, 0.0, 0.0 }, second);
+    CHECK_EQ(first.size(), second.size());
+    CHECK(first.size() <= static_cast<size_t>(c.maxLeaves));
+    for (size_t i = 0; i < first.size(); ++i)
+    {
+        CHECK_EQ(static_cast<int>(first[i].face), static_cast<int>(second[i].face));
+        CHECK_EQ(first[i].level, second[i].level);
+        CHECK(first[i].u0 == second[i].u0);
+        CHECK(first[i].v0 == second[i].v0);
+    }
 }

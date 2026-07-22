@@ -187,7 +187,7 @@ bool ToFloat3(
     const std::array<double, 3>& values,
     core::Vec3f& converted)
 {
-    const double maximum = (std::numeric_limits<float>::max)();
+    constexpr double maximum = (std::numeric_limits<float>::max)();
     for (const double value : values)
         if (!Finite(value) || std::abs(value) > maximum)
             return false;
@@ -814,7 +814,7 @@ bool AssemblyLocalPointToWorld(
         return false;
     const double scale = root.scale.x;
     const core::Vec3d scaled = local * scale;
-    const double maximum = (std::numeric_limits<float>::max)();
+    constexpr double maximum = (std::numeric_limits<float>::max)();
     if (!Finite(scaled) || std::abs(scaled.x) > maximum ||
         std::abs(scaled.y) > maximum || std::abs(scaled.z) > maximum)
     {
@@ -839,7 +839,7 @@ bool WorldPointToAssemblyLocal(
     if (!IsValidPossessionRoot(root, uniformScaleTolerance) || !Finite(world))
         return false;
     const core::Vec3d offset = world - root.position;
-    const double maximum = (std::numeric_limits<float>::max)();
+    constexpr double maximum = (std::numeric_limits<float>::max)();
     if (!Finite(offset) || std::abs(offset.x) > maximum ||
         std::abs(offset.y) > maximum || std::abs(offset.z) > maximum)
     {
@@ -866,7 +866,7 @@ bool AssemblyLocalDirectionToWorld(
     {
         return false;
     }
-    const double maximum = (std::numeric_limits<float>::max)();
+    constexpr double maximum = (std::numeric_limits<float>::max)();
     if (std::abs(local.x) > maximum || std::abs(local.y) > maximum ||
         std::abs(local.z) > maximum)
     {

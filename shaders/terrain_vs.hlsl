@@ -17,6 +17,7 @@
 #include "gpu_draw_records.hlsli"
 
 StructuredBuffer<ObjectData> objectBuffer : register(t0, space2);
+RWByteAddressBuffer drawRecordProbe : register(u0, space4);
 
 cbuffer CBDrawIndex : register(b3)
 {
@@ -53,6 +54,11 @@ VSOutput main(VSInput input)
     VSOutput output;
 
     ObjectData obj = objectBuffer[objectIndex];
+
+    if (drawProbeEnabled != 0)
+    {
+        DawningWriteObjectProbe(drawRecordProbe, objectIndex, obj);
+    }
 
     float4 p = float4(input.position, 1.0);
     float3 positionWS = float3(dot(obj.worldRow0, p),

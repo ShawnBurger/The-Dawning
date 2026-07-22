@@ -848,6 +848,20 @@ source_group("Tests" FILES ${TEST_SOURCES} ${TEST_HEADERS})
 
 add_test(NAME unit_tests COMMAND TheDawningTests)
 if(Python3_Interpreter_FOUND)
+    # Discovery is the coverage floor: every tests/test_*.py file runs even when
+    # a contributor forgets to add a dedicated CTest entry. The inspector-backed
+    # contracts below remain separate because they require generated executable
+    # paths; those cases skip themselves during plain unittest discovery.
+    add_test(
+        NAME python_contract_suite
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                -s ${CMAKE_CURRENT_SOURCE_DIR}/tests
+                -p test_*.py
+                -v
+    )
+    set_tests_properties(python_contract_suite PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
     add_test(
         NAME asset_manifest_contract
         COMMAND ${Python3_EXECUTABLE}

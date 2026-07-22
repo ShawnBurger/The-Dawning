@@ -95,7 +95,11 @@ uint32_t HashMaterialData(const MaterialData& record)
 
 uint32_t RequiredObjectCapacity(uint32_t maxDraws)
 {
-    return (std::max)(kMinObjectCapacity, 2u * maxDraws);
+    constexpr uint32_t maxValue = (std::numeric_limits<uint32_t>::max)();
+    const uint32_t doubled = maxDraws > maxValue / 2u
+        ? maxValue
+        : maxDraws * 2u;
+    return (std::max)(kMinObjectCapacity, doubled);
 }
 
 uint32_t RequiredMaterialCapacity(uint32_t maxDraws)

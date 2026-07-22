@@ -19,8 +19,11 @@
 // =============================================================================
 
 #include "entity.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
 
 namespace ecs
 {
@@ -58,6 +61,10 @@ public:
 
     void Add(uint32_t entityIndex, const T& component)
     {
+        // EntityManager deliberately reserves kMaxIndex so the all-ones packed
+        // handle remains NullEntity. Reject direct pool calls outside that same
+        // domain before capacity doubling can wrap or attempt an enormous alloc.
+        if (entityIndex >= Entity::kMaxIndex) return;
         if (Has(entityIndex)) { Get(entityIndex) = component; return; }
         EnsureSparse(entityIndex);
         EnsureDense(m_count + 1);
@@ -126,20 +133,20 @@ private:
     {
         if (entityIndex < m_sparseCapacity) return;
 
-        uint32_t newCap = m_sparseCapacity == 0 ? 256 : m_sparseCapacity;
-        while (newCap <= entityIndex) newCap *= 2;
+        const uint32_t required = entityIndex + 1;
+        uint32_t newCap = NextCapacity(m_sparseCapacity, 256, required);
+        if (newCap < required || newCap < m_sparseCapacity)
+            throw std::length_error("component sparse-set capacity overflow");
 
-        auto* newSparse = new uint32_t[newCap];
-        for (uint32_t i = 0; i < newCap; i++)
-            newSparse[i] = UINT32_MAX;
+        auto newSparse = std::make_unique<uint32_t[]>(newCap);
+        std::fill_n(newSparse.get(), newCap, UINT32_MAX);
 
         if (m_sparse)
         {
-            for (uint32_t i = 0; i < m_sparseCapacity; i++)
-                newSparse[i] = m_sparse[i];
+            std::copy_n(m_sparse, m_sparseCapacity, newSparse.get());
             delete[] m_sparse;
         }
-        m_sparse = newSparse;
+        m_sparse = newSparse.release();
         m_sparseCapacity = newCap;
     }
 
@@ -147,25 +154,35 @@ private:
     {
         if (required <= m_denseCapacity) return;
 
-        uint32_t newCap = m_denseCapacity == 0 ? 64 : m_denseCapacity;
-        while (newCap < required) newCap *= 2;
+        uint32_t newCap = NextCapacity(m_denseCapacity, 64, required);
+        if (newCap < required || newCap < m_count)
+            throw std::length_error("component dense-set capacity overflow");
 
-        auto* newDense = new uint32_t[newCap];
-        auto* newData  = new T[newCap];
+        auto newDense = std::make_unique<uint32_t[]>(newCap);
+        auto newData  = std::make_unique<T[]>(newCap);
 
         if (m_dense)
         {
-            for (uint32_t i = 0; i < m_count; i++)
-            {
-                newDense[i] = m_dense[i];
-                newData[i] = m_data[i];
-            }
+            std::copy_n(m_dense, m_count, newDense.get());
+            std::copy_n(m_data, m_count, newData.get());
             delete[] m_dense;
             delete[] m_data;
         }
-        m_dense = newDense;
-        m_data = newData;
+        m_dense = newDense.release();
+        m_data = newData.release();
         m_denseCapacity = newCap;
+    }
+
+    static uint32_t NextCapacity(uint32_t current, uint32_t initial, uint32_t required)
+    {
+        uint32_t capacity = current == 0 ? initial : current;
+        while (capacity < required)
+        {
+            if (capacity > Entity::kMaxIndex / 2)
+                return Entity::kMaxIndex;
+            capacity *= 2;
+        }
+        return capacity;
     }
 
     uint32_t* m_sparse = nullptr;

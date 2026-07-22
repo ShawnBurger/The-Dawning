@@ -118,7 +118,7 @@ bool ToRootTransform(
     const asset::AssemblyTransform& source,
     ecs::Transform& transform)
 {
-    const double maxFloat = (std::numeric_limits<float>::max)();
+    constexpr double maxFloat = (std::numeric_limits<float>::max)();
     for (double value : source.positionMeters)
         if (!std::isfinite(value))
             return false;

@@ -43,7 +43,7 @@ bool Finite(const core::Quatf& value)
 
 bool ValidConfig(const InteriorLightFrameConfig& config)
 {
-    const double maximumFloat = (std::numeric_limits<float>::max)();
+    constexpr double maximumFloat = (std::numeric_limits<float>::max)();
     return config.maxLights > 0 &&
            Finite(config.maximumCameraRelativeMagnitude) &&
            config.maximumCameraRelativeMagnitude > 0.0 &&
@@ -314,7 +314,7 @@ InteriorLightingResult BuildInteriorLightFrame(
             const double scaledX = light.localPositionMeters[0] * uniformScale;
             const double scaledY = light.localPositionMeters[1] * uniformScale;
             const double scaledZ = light.localPositionMeters[2] * uniformScale;
-            const double maximumFloat = (std::numeric_limits<float>::max)();
+            constexpr double maximumFloat = (std::numeric_limits<float>::max)();
             if (!Finite(scaledX) || !Finite(scaledY) || !Finite(scaledZ) ||
                 std::abs(scaledX) > maximumFloat ||
                 std::abs(scaledY) > maximumFloat ||

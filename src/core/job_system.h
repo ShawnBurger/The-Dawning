@@ -48,9 +48,10 @@ public:
     unsigned ThreadCount() const { return static_cast<unsigned>(m_threads.size()); }
 
     // Enqueue `jobCount` work items, split into groups of `groupSize` consecutive
-    // indices per queued task (groupSize 0 is treated as 1). ASYNC: returns once
-    // the tasks are queued; call Wait() to block for completion. `job(i)` is called
-    // once for every i in [0, jobCount). A job MUST NOT throw (a throwing job
+    // indices per queued task (groupSize 0 is treated as 1). An empty callback is
+    // a no-op. ASYNC: returns once the tasks are queued; call Wait() to block for
+    // completion. `job(i)` is called once for every i in [0, jobCount). A job MUST
+    // NOT throw (a throwing job
     // std::terminate()s a worker) and MUST NOT touch shared state without its own
     // synchronisation - independent per-index writes are the intended use.
     void Dispatch(uint32_t jobCount, uint32_t groupSize,

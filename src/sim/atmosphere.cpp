@@ -145,7 +145,7 @@ double SmoothCeilingTaper(double h, double ceiling, double fadeWidth)
 // USSA76 base layers below 86 km (geopotential altitude, base temperature, lapse
 // rate), verbatim from the standard (ATMOSPHERIC_FLIGHT.md sec 1.2).
 struct Layer { double hb; double Tb; double L; };
-constexpr int kLayerCount = 7;
+constexpr size_t kLayerCount = 7;
 constexpr std::array<Layer, kLayerCount> kLayers = {{
     {     0.0, 288.15, -0.0065 },
     { 11000.0, 216.65,  0.0    },
@@ -166,7 +166,7 @@ const std::array<double, kLayerCount>& BasePressures()
     static const std::array<double, kLayerCount> pb = [] {
         std::array<double, kLayerCount> p{};
         p[0] = kSeaLevelPressure;
-        for (int n = 0; n + 1 < kLayerCount; ++n)
+        for (size_t n = 0; n + 1 < kLayerCount; ++n)
         {
             const Layer& lyr = kLayers[n];
             const double top = kLayers[n + 1].hb;
@@ -203,12 +203,12 @@ AtmosphereState SampleUSSA76(double h, double ceiling, double fadeWidth)
         h = 0.0;  // clamp to sea level below the datum
 
     // Find the layer containing h (layers are few; a linear scan is fine).
-    int n = 0;
-    for (int i = 0; i + 1 < kLayerCount; ++i)
+    size_t n = 0;
+    for (size_t i = 0; i + 1 < kLayerCount; ++i)
         if (h >= kLayers[i + 1].hb) n = i + 1;
 
-    const Layer& lyr = kLayers[n];
-    const double Pb = BasePressures()[n];
+    const Layer& lyr = kLayers.at(n);
+    const double Pb = BasePressures().at(n);
     const double T = lyr.Tb + lyr.L * (h - lyr.hb);
     double P;
     if (lyr.L != 0.0)

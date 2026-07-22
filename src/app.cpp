@@ -29,6 +29,9 @@ namespace
 
 constexpr const char* kSmokeCaptureFile = "smoke_capture.ppm";
 constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
+constexpr uint32_t kTerrainLeafBudget = 768;
+constexpr size_t kTerrainCacheMaxEntries = 2048;
+constexpr uint32_t kTerrainCacheStaleFrames = 120;
 
 // The player ship's GravitationalBody id. Distinct from the seeded celestial bodies,
 // which live at kStarSystemBodyIdBase + local id (the star's builder id is also 1,
@@ -314,30 +317,6 @@ bool App::InitializeScene()
         sphereData.vertices.data(), static_cast<uint32_t>(sphereData.vertices.size()),
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
-
-    // Chunked-LOD terrain preview (the Moon): only the FRAMING is fixed here; the
-    // leaf patches are STREAMED per frame in RenderTerrainPreview (reselect LOD for
-    // the live camera, generate+cache newly-visible write-once upload meshes). The
-    // camera pose is body-space (independent of the Moon's world position).
-    if (m_options.starSystem && m_options.startCameraMode == 5) // Surface mode only
-    {
-        const double moonR = 1.7374e6;
-        m_terrainBodyId = scene::kStarSystemBodyIdBase + 11;
-
-        const core::Vec3d focusDir = terrain::FaceToDirection(terrain::CubeFace::PosZ, 0.2, 0.1);
-        m_terrainFocusBody = { focusDir.x * moonR, focusDir.y * moonR, focusDir.z * moonR };
-        core::Vec3d tan{ focusDir.y * 0.0 - focusDir.z * 1.0,
-                         focusDir.z * 0.0 - focusDir.x * 0.0,
-                         focusDir.x * 1.0 - focusDir.y * 0.0 };
-        double tl = tan.Length();
-        if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
-        tan = { tan.x / tl, tan.y / tl, tan.z / tl };
-        const double altitude = 120000.0, backDist = 170000.0;
-        m_terrainCamBody = { m_terrainFocusBody.x + focusDir.x * altitude - tan.x * backDist,
-                             m_terrainFocusBody.y + focusDir.y * altitude - tan.y * backDist,
-                             m_terrainFocusBody.z + focusDir.z * altitude - tan.z * backDist };
-        m_terrainBuilt = true;
-    }
 
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
@@ -828,6 +807,12 @@ bool App::InitializeScene()
     {
         const uint32_t bodies = m_scene.SeedStarSystem(sphere, 0.5f);
         core::Log::Infof("Solar system seeded: %u bodies", bodies);
+        if (!m_scene.HasStarSystem())
+        {
+            core::Log::Error("Solar system activation failed");
+            return false;
+        }
+        PrepareTerrainPreview();
         m_cameraMode = (m_options.startCameraMode == 4)
             ? CameraMode::ShipChase // ship-in-system uses the chase camera
             : (m_options.startCameraMode == 5)
@@ -1460,14 +1445,23 @@ int App::RunMainLoop()
         // does not drag the camera across a mode jump.
         if (input.KeyPressed(VK_F4))
         {
-            static const char* kCameraModeNames[] =
-                { "ShipChase", "Orrery", "NearBody", "Free" };
+            const CameraMode previousMode = m_cameraMode;
             m_cameraMode = static_cast<CameraMode>(
                 (static_cast<uint32_t>(m_cameraMode) + 1u) %
                 static_cast<uint32_t>(CameraMode::Count));
+            if (previousMode == CameraMode::Surface &&
+                m_cameraMode != CameraMode::Surface)
+            {
+                ReleaseTerrainCache();
+            }
+            if (m_cameraMode == CameraMode::Surface && m_scene.HasStarSystem())
+            {
+                PrepareTerrainPreview();
+                m_focusBodyId = m_terrainBodyId;
+            }
             m_chaseCameraInitialized = false;
             core::Log::Infof("Camera mode: %s",
-                             kCameraModeNames[static_cast<uint32_t>(m_cameraMode)]);
+                             kCameraModeLabels[static_cast<uint32_t>(m_cameraMode)].log);
         }
 
         // Time warp (KSP-style): ',' slower, '.' faster, '/' reset. Deterministic:
@@ -2978,14 +2972,13 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     state.cameraPosition = m_camera.Position();
 
     // Navigation block — only meaningful once the reference star system is seeded.
-    if (m_options.starSystem)
+    if (m_scene.HasStarSystem())
     {
         state.navActive = true;
 
-        static const char* kModeNames[] = { "SHIP", "ORRERY", "NEAR-BODY", "FREE" };
         const uint32_t modeIdx = static_cast<uint32_t>(m_cameraMode);
         state.cameraModeName =
-            modeIdx < static_cast<uint32_t>(CameraMode::Count) ? kModeNames[modeIdx] : "?";
+            modeIdx < kCameraModeLabels.size() ? kCameraModeLabels[modeIdx].overlay : "?";
         state.timeWarp = m_timer.GetTimeScale();
 
         // The F5-selected focus body (near-body/orrery framing), defaulting to Earth.
@@ -3063,6 +3056,118 @@ uint64_t TerrainLeafKey(const terrain::QuadPatch& p)
 }
 } // namespace
 
+void App::PrepareTerrainPreview()
+{
+    m_terrainBuilt = false;
+    m_terrainBodyId = scene::kStarSystemBodyIdBase + 11;
+
+    double moonRadius = 0.0;
+    if (const auto* pool = m_scene.GetRegistry().GetPool<ecs::GravitationalBody>())
+    {
+        for (uint32_t i = 0; i < pool->Count(); ++i)
+        {
+            const ecs::GravitationalBody& body = pool->DataAt(i);
+            if (body.bodyId == m_terrainBodyId)
+            {
+                moonRadius = body.radius;
+                break;
+            }
+        }
+    }
+    if (!std::isfinite(moonRadius) || moonRadius <= 0.0)
+    {
+        core::Log::Warn("Surface terrain preview could not find a valid Moon body");
+        return;
+    }
+
+    // Only the framing is fixed here. RenderTerrainPreview reselects the live
+    // quadtree leaves and streams newly visible write-once meshes every frame.
+    // Keeping the pose in body space lets it follow the Moon's orbital motion.
+    const core::Vec3d focusDir =
+        terrain::FaceToDirection(terrain::CubeFace::PosZ, 0.2, 0.1);
+    m_terrainFocusBody = {
+        focusDir.x * moonRadius,
+        focusDir.y * moonRadius,
+        focusDir.z * moonRadius
+    };
+    core::Vec3d tangent{
+        -focusDir.z,
+        0.0,
+        focusDir.x
+    };
+    double tangentLength = tangent.Length();
+    if (tangentLength < 1e-6)
+    {
+        tangent = { 1.0, 0.0, 0.0 };
+        tangentLength = 1.0;
+    }
+    tangent = {
+        tangent.x / tangentLength,
+        tangent.y / tangentLength,
+        tangent.z / tangentLength
+    };
+
+    constexpr double kAltitude = 120000.0;
+    constexpr double kBackDistance = 170000.0;
+    m_terrainCamBody = {
+        m_terrainFocusBody.x + focusDir.x * kAltitude - tangent.x * kBackDistance,
+        m_terrainFocusBody.y + focusDir.y * kAltitude - tangent.y * kBackDistance,
+        m_terrainFocusBody.z + focusDir.z * kAltitude - tangent.z * kBackDistance
+    };
+    m_terrainBuilt = true;
+}
+
+void App::EvictTerrainCache()
+{
+    if (m_terrainCache.empty()) return;
+
+    struct Candidate
+    {
+        uint64_t key;
+        uint32_t age;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(m_terrainCache.size());
+    for (const auto& [key, leaf] : m_terrainCache)
+    {
+        // Unsigned subtraction intentionally handles the frame counter wrapping.
+        const uint32_t age = m_terrainStreamFrame - leaf.lastSeen;
+        if (age != 0) candidates.push_back({ key, age });
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) {
+                  if (a.age != b.age) return a.age > b.age;
+                  return a.key < b.key;
+              });
+
+    for (const Candidate& candidate : candidates)
+    {
+        const bool stale = candidate.age >= kTerrainCacheStaleFrames;
+        const bool overBudget = m_terrainCache.size() > kTerrainCacheMaxEntries;
+        if (!stale && !overBudget) break;
+
+        auto it = m_terrainCache.find(candidate.key);
+        if (it == m_terrainCache.end()) continue;
+        // Draw commands recorded in this or an earlier in-flight frame can still
+        // reference these UPLOAD heaps. Fence-retire both COM resources before the
+        // cache entry drops its owning references.
+        m_device.DeferredRelease(it->second.mesh.vertexBuffer);
+        m_device.DeferredRelease(it->second.mesh.indexBuffer);
+        m_terrainCache.erase(it);
+    }
+}
+
+void App::ReleaseTerrainCache()
+{
+    for (auto& [key, leaf] : m_terrainCache)
+    {
+        (void)key;
+        m_device.DeferredRelease(leaf.mesh.vertexBuffer);
+        m_device.DeferredRelease(leaf.mesh.indexBuffer);
+    }
+    m_terrainCache.clear();
+}
+
 void App::RenderTerrainPreview()
 {
     if (!m_terrainBuilt) return;
@@ -3109,6 +3214,7 @@ void App::RenderTerrainPreview()
     terrain::QuadtreeConfig qc;
     qc.planetRadius = moonR; qc.amplitude = amplitude;
     qc.pixelError = 8.0; qc.maxLevel = 6;
+    qc.maxLeaves = static_cast<int>(kTerrainLeafBudget);
     std::vector<terrain::QuadPatch> patches;
     terrain::SelectQuadtreeLOD(qc, camBody, patches);
 
@@ -3155,7 +3261,8 @@ void App::RenderTerrainPreview()
                 tv.data(), static_cast<uint32_t>(tv.size()),
                 chunk.indices.data(), static_cast<uint32_t>(chunk.indices.size()));
             if (!lm.IsValid()) continue;
-            it = m_terrainCache.emplace(key, TerrainLeaf{ lm, chunk.origin, 0 }).first;
+            it = m_terrainCache.emplace(
+                key, TerrainLeaf{ std::move(lm), chunk.origin, 0 }).first;
         }
         it->second.lastSeen = m_terrainStreamFrame;
 
@@ -3165,6 +3272,8 @@ void App::RenderTerrainPreview()
         const core::Mat4x4 world = core::Mat4x4::Translation(tD.ToFloat());
         m_renderer.DrawTerrain(m_device, it->second.mesh, world, pc);
     }
+
+    EvictTerrainCache();
 }
 
 bool App::RenderFrame(const core::TimeStep& timeStep)
@@ -3224,11 +3333,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         const uint32_t rampPerFrame = m_options.smokeForceGrow ? 16u : 4u;
         maxDrawsHint += static_cast<uint32_t>(m_frameCount) * rampPerFrame;
     }
-    // Terrain leaves each cost one object/material record (Surface mode only). The
-    // streamed leaf set fills in during the frame (after this hint is taken), so
-    // reserve a generous fixed allowance for the visible-hemisphere patch count.
+    // Terrain leaves each cost one object/material record (Surface mode only).
+    // RenderTerrainPreview gives the selector this exact hard cap, so the frame
+    // buffers cannot overflow even if a future camera pose sees every leaf.
     if (m_cameraMode == CameraMode::Surface)
-        maxDrawsHint += 768u;
+        maxDrawsHint += kTerrainLeafBudget;
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
     const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
                                   !renderedPathTracing;
@@ -3351,7 +3460,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         core::Vec3f lightDir   = core::Vec3f(0.5f, 0.8f, 0.3f).Normalized();
         core::Vec3f lightColor = { 1.0f, 0.97f, 0.92f };
         core::Vec3f ambient    = { 0.12f, 0.14f, 0.22f };
-        if (m_options.starSystem && m_cameraMode != CameraMode::Orrery)
+        if (m_scene.HasStarSystem() && m_cameraMode != CameraMode::Orrery)
         {
             const uint64_t focusId = m_focusBodyId
                 ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
@@ -3445,7 +3554,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         // Deep-space starfield background in the star-system views; the grey sky
         // gradient in the demo sandbox. Only the visible background differs — the IBL
         // environment is baked from the sky and is untouched either way.
-        if (m_options.starSystem)
+        if (m_scene.HasStarSystem())
             m_renderer.DrawSpace(m_device);
         else
             m_renderer.DrawSky(m_device);
@@ -3774,7 +3883,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         // orrery), so the demo geometry is out of view and the probes legitimately
         // do not apply — downgrade their failure to non-fatal there. The default
         // smoke (no --star-system) keeps full teeth.
-        if (!ibl.ok && !m_options.starSystem)
+        if (!ibl.ok && !m_scene.HasStarSystem())
         {
             if (live)
                 core::Log::Error(
@@ -3808,11 +3917,10 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
                                 validation.shadowBlendMismatchPixels == 0 &&
                                 validation.shadowBlendExpectedQ8 ==
                                     validation.shadowBlendOutputQ8;
-        const bool valid = validation.ObjectRecordsChecked() > 0 &&
-                           validation.materialRecordsChecked > 0 &&
-                           validation.ObjectMismatches() == 0 &&
-                           validation.materialMismatches == 0 &&
-                           blendValid;
+        const bool drawRecordsValid = validation.ObjectRecordsChecked() > 0 &&
+                                      validation.materialRecordsChecked > 0 &&
+                                      validation.ObjectMismatches() == 0 &&
+                                      validation.materialMismatches == 0;
         // Emitted per PASS, with the pass in the key. The harness stores markers
         // in a hashtable keyed by name, so a shared key would collapse the two
         // passes to whichever logged last - green while the other pass was
@@ -3823,7 +3931,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             "draw_probe_shadow_mismatches=%u "
             "draw_probe_main_records=%u draw_probe_main_distinct=%u "
             "draw_probe_main_mismatches=%u",
-            valid ? "ok" : "failed",
+            drawRecordsValid ? "ok" : "failed",
             validation.shadowRecordsChecked,
             validation.shadowDistinctMarkers,
             validation.shadowMismatches,
@@ -3852,7 +3960,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             static_cast<unsigned long long>(validation.shadowBlendPrimaryQ8),
             static_cast<unsigned long long>(validation.shadowBlendSignalQ8),
             static_cast<unsigned long long>(validation.shadowBlendMismatchPixels));
-        if (!valid && !m_options.starSystem) // demo-scene probe; N/A to the star scene
+        if ((!drawRecordsValid || !blendValid) && !m_scene.HasStarSystem())
             core::Log::Error("GPU draw-record or cascade-blend consumption probe failed");
     }
 
@@ -3971,6 +4079,8 @@ void App::Shutdown()
 
     if (m_deviceReady && !m_device.IsDeviceLost() && !m_device.WaitForGpu())
         core::Log::Error("GPU did not become idle before application resource shutdown");
+    if (m_deviceReady)
+        ReleaseTerrainCache();
     if (m_sceneReady)
     {
         if (!m_runtimeAssembly.Shutdown(m_scene, m_device, m_renderer))

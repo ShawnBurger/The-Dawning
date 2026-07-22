@@ -154,6 +154,23 @@ TEST_CASE(JobSystem_DegenerateCases)
     }
 }
 
+TEST_CASE(JobSystem_EmptyCallbackIsANoop)
+{
+    core::JobSystem js(1);
+    js.Dispatch(3, 1, std::function<void(uint32_t)>{});
+    js.Wait();
+    CHECK_FALSE(js.Busy());
+}
+
+TEST_CASE(JobSystem_LargeGroupSizeDoesNotOverflowCeilingDivision)
+{
+    core::JobSystem js(1);
+    std::atomic<uint32_t> visits{ 0 };
+    js.ParallelFor(3, [&](uint32_t) { visits.fetch_add(1); }, UINT32_MAX);
+    CHECK_EQ(visits.load(), 3u);
+    CHECK_FALSE(js.Busy());
+}
+
 // =============================================================================
 // T6 - THE INTENDED DETERMINISM PATTERN: parallelise the MAP, keep the REDUCTION
 //      in fixed index order on one thread => bit-exact with a fully serial sum.

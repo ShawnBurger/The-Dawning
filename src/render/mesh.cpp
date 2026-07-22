@@ -6,6 +6,8 @@
 #include "../core/log.h"
 #include <cstring>
 #include <cstdint>
+#include <limits>
+#include <utility>
 
 namespace render
 {
@@ -20,6 +22,12 @@ static ComPtr<ID3D12Resource> CreateBuffer(
     D3D12_RESOURCE_STATES initialState,
     const wchar_t* name = nullptr)
 {
+    if (!device || size == 0)
+    {
+        core::Log::Error("CreateBuffer: invalid device or zero-sized allocation");
+        return nullptr;
+    }
+
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type = heapType;
 
@@ -125,6 +133,42 @@ static void StorePosition(float out[4], const core::Vec3f& position)
 }
 
 template <typename IndexT>
+static bool ValidateMeshInput(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* cmdList,
+    const Vertex* vertices, uint32_t vertexCount,
+    const IndexT* indices, uint32_t indexCount,
+    bool commandListRequired)
+{
+    if (!device || (commandListRequired && !cmdList) ||
+        !vertices || !indices || vertexCount == 0 || indexCount == 0)
+    {
+        core::Log::Error("Mesh creation rejected null or empty input");
+        return false;
+    }
+
+    const uint64_t vbSize = static_cast<uint64_t>(vertexCount) * sizeof(Vertex);
+    const uint64_t ibSize = static_cast<uint64_t>(indexCount) * sizeof(IndexT);
+    if (vbSize > (std::numeric_limits<UINT>::max)() ||
+        ibSize > (std::numeric_limits<UINT>::max)())
+    {
+        core::Log::Error("Mesh creation rejected data larger than a D3D12 buffer view");
+        return false;
+    }
+
+    for (uint32_t i = 0; i < indexCount; ++i)
+    {
+        if (static_cast<uint32_t>(indices[i]) >= vertexCount)
+        {
+            core::Log::Errorf("Mesh creation rejected out-of-range index %u at element %u",
+                              static_cast<uint32_t>(indices[i]), i);
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename IndexT>
 static void BuildRTTriangleMetadata(
     Mesh& mesh,
     const Vertex* vertices, uint32_t vertexCount,
@@ -182,6 +226,12 @@ Mesh CreateMesh(
     ComPtr<ID3D12Resource>& outVertexUpload,
     ComPtr<ID3D12Resource>& outIndexUpload)
 {
+    outVertexUpload.Reset();
+    outIndexUpload.Reset();
+    if (!ValidateMeshInput(device, cmdList, vertices, vertexCount,
+                           indices, indexCount, true))
+        return Mesh{};
+
     Mesh mesh;
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
@@ -207,19 +257,19 @@ Mesh CreateMesh(
     }
 
     // Create staging buffers on UPLOAD heap
-    outVertexUpload = CreateBuffer(device, vbSize,
+    ComPtr<ID3D12Resource> vertexUpload = CreateBuffer(device, vbSize,
         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-    outIndexUpload = CreateBuffer(device, ibSize,
+    ComPtr<ID3D12Resource> indexUpload = CreateBuffer(device, ibSize,
         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
-    if (!outVertexUpload || !outIndexUpload)
+    if (!vertexUpload || !indexUpload)
     {
         core::Log::Error("Failed to create mesh staging upload buffers");
         return Mesh{};
     }
 
     // Upload vertex data
-    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
+    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), vertexUpload.Get(),
                           vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER))
     {
         core::Log::Error("Failed to upload mesh vertex data");
@@ -227,7 +277,7 @@ Mesh CreateMesh(
     }
 
     // Upload index data
-    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
+    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), indexUpload.Get(),
                           indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER))
     {
         core::Log::Error("Failed to upload mesh index data");
@@ -242,6 +292,11 @@ Mesh CreateMesh(
     mesh.ibView.BufferLocation = mesh.indexBuffer->GetGPUVirtualAddress();
     mesh.ibView.SizeInBytes    = static_cast<UINT>(ibSize);
     mesh.ibView.Format         = DXGI_FORMAT_R16_UINT;
+
+    // Publish staging resources only after every allocation and command-list
+    // recording step succeeds. A failed Mesh never leaves half-valid outputs.
+    outVertexUpload = std::move(vertexUpload);
+    outIndexUpload = std::move(indexUpload);
 
     core::Log::Infof("Mesh created: %u verts, %u indices (VB=%llu bytes, IB=%llu bytes)",
                      vertexCount, indexCount,
@@ -259,7 +314,9 @@ Mesh CreateUploadMesh(
     const uint16_t* indices, uint32_t indexCount)
 {
     Mesh mesh;
-    if (!device || vertexCount == 0 || indexCount == 0) return Mesh{};
+    if (!ValidateMeshInput(device, nullptr, vertices, vertexCount,
+                           indices, indexCount, false))
+        return Mesh{};
     mesh.vertexCount = vertexCount;
     mesh.indexCount  = indexCount;
 
@@ -280,10 +337,18 @@ Mesh CreateUploadMesh(
     const D3D12_RANGE noRead{ 0, 0 };
     void* vp = nullptr;
     void* ip = nullptr;
-    if (FAILED(mesh.vertexBuffer->Map(0, &noRead, &vp)) || !vp) return Mesh{};
+    if (FAILED(mesh.vertexBuffer->Map(0, &noRead, &vp)) || !vp)
+    {
+        core::Log::Error("Failed to map upload-mesh vertex buffer");
+        return Mesh{};
+    }
     std::memcpy(vp, vertices, vbSize);
     mesh.vertexBuffer->Unmap(0, nullptr);
-    if (FAILED(mesh.indexBuffer->Map(0, &noRead, &ip)) || !ip) return Mesh{};
+    if (FAILED(mesh.indexBuffer->Map(0, &noRead, &ip)) || !ip)
+    {
+        core::Log::Error("Failed to map upload-mesh index buffer");
+        return Mesh{};
+    }
     std::memcpy(ip, indices, ibSize);
     mesh.indexBuffer->Unmap(0, nullptr);
 
@@ -304,6 +369,12 @@ Mesh CreateMesh32(
     ComPtr<ID3D12Resource>& outVertexUpload,
     ComPtr<ID3D12Resource>& outIndexUpload)
 {
+    outVertexUpload.Reset();
+    outIndexUpload.Reset();
+    if (!ValidateMeshInput(device, cmdList, vertices, vertexCount,
+                           indices, indexCount, true))
+        return Mesh{};
+
     Mesh mesh;
     mesh.vertexCount = vertexCount;
     mesh.indexCount = indexCount;
@@ -325,24 +396,24 @@ Mesh CreateMesh32(
         return Mesh{};
     }
 
-    outVertexUpload = CreateBuffer(device, vbSize,
+    ComPtr<ID3D12Resource> vertexUpload = CreateBuffer(device, vbSize,
         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-    outIndexUpload = CreateBuffer(device, ibSize,
+    ComPtr<ID3D12Resource> indexUpload = CreateBuffer(device, ibSize,
         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
-    if (!outVertexUpload || !outIndexUpload)
+    if (!vertexUpload || !indexUpload)
     {
         core::Log::Error("Failed to create mesh staging upload buffers (32-bit)");
         return Mesh{};
     }
 
-    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), outVertexUpload.Get(),
+    if (!UploadBufferData(cmdList, mesh.vertexBuffer.Get(), vertexUpload.Get(),
                           vertices, vbSize, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER))
     {
         core::Log::Error("Failed to upload mesh vertex data (32-bit)");
         return Mesh{};
     }
-    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), outIndexUpload.Get(),
+    if (!UploadBufferData(cmdList, mesh.indexBuffer.Get(), indexUpload.Get(),
                           indices, ibSize, D3D12_RESOURCE_STATE_INDEX_BUFFER))
     {
         core::Log::Error("Failed to upload mesh index data (32-bit)");
@@ -356,6 +427,9 @@ Mesh CreateMesh32(
     mesh.ibView.BufferLocation = mesh.indexBuffer->GetGPUVirtualAddress();
     mesh.ibView.SizeInBytes    = static_cast<UINT>(ibSize);
     mesh.ibView.Format         = DXGI_FORMAT_R32_UINT;
+
+    outVertexUpload = std::move(vertexUpload);
+    outIndexUpload = std::move(indexUpload);
 
     core::Log::Infof("Mesh created (32-bit idx): %u verts, %u indices", vertexCount, indexCount);
     return mesh;

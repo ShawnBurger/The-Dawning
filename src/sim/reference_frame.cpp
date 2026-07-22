@@ -116,7 +116,7 @@ Vec3d Separation(const WorldPos& from, const WorldPos& to)
     // term below is zero and only the small, precise offset difference survives.
     if (!ValidSector(from) || !ValidSector(to))
     {
-        const double nan = (std::numeric_limits<double>::quiet_NaN)();
+        constexpr double nan = (std::numeric_limits<double>::quiet_NaN)();
         return { nan, nan, nan };
     }
     const int64_t dsx = to.sx - from.sx;

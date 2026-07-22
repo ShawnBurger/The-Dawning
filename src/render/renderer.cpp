@@ -2440,10 +2440,9 @@ void Renderer::DrawPlanet(D3D12Device& device, const Mesh& mesh,
     ++m_materialCursor;
     if (m_materialCursor > m_materialPeak) m_materialPeak = m_materialCursor;
 
-    // probeEnabled forced 0: planet_vs declares no draw-record UAV and bodies are
-    // never in the probe frame (the demo scene seeds none), so this pass is
-    // deliberately outside that verification.
-    const uint32_t indices[3] = { objectIndex, materialIndex, 0u };
+    const uint32_t indices[3] = {
+        objectIndex, materialIndex, m_drawProbeEnabled ? 1u : 0u
+    };
     cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
     cmd->SetGraphicsRootConstantBufferView(11, planetVA);
 
@@ -2564,7 +2563,9 @@ void Renderer::DrawTerrain(D3D12Device& device, const Mesh& mesh,
     ++m_materialCursor;
     if (m_materialCursor > m_materialPeak) m_materialPeak = m_materialCursor;
 
-    const uint32_t indices[3] = { objectIndex, materialIndex, 0u };
+    const uint32_t indices[3] = {
+        objectIndex, materialIndex, m_drawProbeEnabled ? 1u : 0u
+    };
     cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
     cmd->SetGraphicsRootConstantBufferView(11, planetVA);
 

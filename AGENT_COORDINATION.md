@@ -2426,6 +2426,45 @@ are now integrated as well. The current order is:
 - Next action: the renderer-facing GPU phase stays deferred while Claude owns
   the active atmosphere lane.
 
+### WS-035: Whole-repository adversarial audit and hardening
+
+- Status: COMPLETE - 2026-07-22
+- Outcome: inspect the complete integrated engine at `origin/main`, reproduce
+  correctness and integration defects, implement only evidence-backed fixes,
+  add focused negative coverage, and finish with Debug/Release, CTest, Python,
+  and runtime smoke validation.
+- Primary: Codex
+- Reviewer: Codex adversarial manual review after implementation
+- Branch: `codex/repo-deep-audit`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-repo-deep-audit`
+- Base commit: `17e621b`
+- Read scope: entire tracked repository, including current terrain, atmosphere,
+  rendering, gameplay, simulation, scene, asset, tools, shaders, and tests.
+- Write scope: initially additive audit documentation, CMake test registration,
+  and focused regression tests. Production files become owned only when a
+  defect is independently reproduced and the smallest safe fix is identified.
+- Excluded from speculative edits: active Claude worktrees, unmerged branches,
+  generated vendor art, and the dirty WS-034 asset worktree. The integrated
+  terrain tip is audited but remains read-only unless a concrete defect crosses
+  its published contract.
+- Acceptance gates: clean fresh configure; Debug and Release `/W4` builds;
+  every CTest registration; direct Python discovery so unregistered tests cannot
+  hide; deterministic reruns; static boundary and unchecked-arithmetic review;
+  focused watched-failing tests for each fix; raster, stable-DXR, and full-DXR
+  smoke profiles when hardware permits; `git diff --check`; and final manual
+  review of every changed line.
+- Negative controls: no broad cleanup, formatting churn, guessed refactors,
+  generated-file rewrites, API-key access, silent contract weakening, or fixes
+  that merely suppress a failing assertion.
+- Result: corrected boundedness, ownership, parser, runtime-state, Surface-mode,
+  and GPU-probe defects; registered Python discovery; added focused regressions.
+  Debug/Release CTest, 567 C++ cases, 61 Python cases, ASan, `/analyze`, raster,
+  stable/full DXR, production flight, resize/growth, GPU validation, direct
+  Surface, and F4-to-Surface verification all passed.
+- Audit record:
+  `docs/research/REPOSITORY_DEEP_AUDIT_2026-07-22.md`
+
 ## 20. Helper Commands
 
 Create a task worktree:

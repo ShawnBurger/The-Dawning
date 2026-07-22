@@ -57,7 +57,7 @@ namespace render
 // The view-projection is NOT here. It lives in CBPerPass, uploaded once per
 // pass. That is what lets the shadow pass and the main pass share one record
 // shape, and what makes each future shadow cascade cost 256 flat bytes rather
-// than another 96 bytes per entity per cascade.
+// than another 112 bytes per entity per cascade.
 struct ObjectData
 {
     // Camera-relative object-to-world. Every world matrix reaching the renderer
@@ -329,6 +329,9 @@ void WriteObjectRecord(ObjectData& out,
 constexpr uint32_t kMinObjectCapacity   = 4;
 constexpr uint32_t kMinMaterialCapacity = 2;
 
+// Saturates rather than wrapping when a malformed/external count cannot be
+// doubled in uint32_t. The eventual resource allocation then fails explicitly
+// instead of under-allocating a valid-looking buffer.
 uint32_t RequiredObjectCapacity(uint32_t maxDraws);
 uint32_t RequiredMaterialCapacity(uint32_t maxDraws);
 

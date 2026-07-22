@@ -80,6 +80,10 @@ public:
     // number of celestial bodies created. Idempotent guard: seeds at most once.
     uint32_t SeedStarSystem(MeshHandle bodySphere, float meshRadius);
 
+    // Runtime truth for presentation systems. The command-line option only says
+    // whether smoke mode requested a star system; normal gameplay seeds one too.
+    bool HasStarSystem() const noexcept { return m_starSystemActive; }
+
     // Switch celestial bodies between TRUE radius (near-body / ship views) and
     // exaggerated ORRERY markers. At the orrery scale (K~1e-9) a true-radius
     // planet is sub-pixel, so in orrery mode each body is scaled to render at a

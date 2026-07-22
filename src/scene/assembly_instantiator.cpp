@@ -118,7 +118,7 @@ bool ComposeTransform(
     const double scaledX = local.positionMeters[0] * root.scale.x;
     const double scaledY = local.positionMeters[1] * root.scale.y;
     const double scaledZ = local.positionMeters[2] * root.scale.z;
-    const double maxFloat = (std::numeric_limits<float>::max)();
+    constexpr double maxFloat = (std::numeric_limits<float>::max)();
     if (!Finite(scaledX) || !Finite(scaledY) || !Finite(scaledZ) ||
         std::abs(scaledX) > maxFloat || std::abs(scaledY) > maxFloat ||
         std::abs(scaledZ) > maxFloat)

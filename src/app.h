@@ -193,16 +193,29 @@ private:
         Surface,       // low over a body's surface, rendering chunked-LOD terrain (K=1)
         Count
     };
+    struct CameraModeLabels
+    {
+        const char* log;
+        const char* overlay;
+    };
+    inline static constexpr std::array<CameraModeLabels, 5> kCameraModeLabels = {
+        CameraModeLabels{ "ShipChase", "SHIP" },
+        CameraModeLabels{ "Orrery", "ORRERY" },
+        CameraModeLabels{ "NearBody", "NEAR-BODY" },
+        CameraModeLabels{ "Free", "FREE" },
+        CameraModeLabels{ "Surface", "SURFACE" }
+    };
+    static_assert(kCameraModeLabels.size() == static_cast<size_t>(CameraMode::Count));
     CameraMode m_cameraMode = CameraMode::ShipChase;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
 
     // Chunked-LOD terrain preview (Surface camera mode): the quadtree-selected leaf
     // set on the focus body (the Moon), each a displaced cube-sphere patch built
-    // once at Init (fine under the camera, coarse toward the horizon) and drawn
+    // on demand (fine under the camera, coarse toward the horizon) and drawn
     // camera-relative each Surface frame.
     struct TerrainLeaf { render::Mesh mesh; core::Vec3d originBody; uint32_t lastSeen = 0; };
     std::unordered_map<uint64_t, TerrainLeaf> m_terrainCache; // keyed by face/level/cell
-    bool        m_terrainBuilt  = false;    // Surface mode active + framing computed
+    bool        m_terrainBuilt  = false;    // verified terrain body + framing computed
     uint64_t    m_terrainBodyId = 0;        // seeded bodyId the patches sit on
     core::Vec3d m_terrainCamBody{ 0, 0, 0 };   // Surface camera pos, body space (framing)
     core::Vec3d m_terrainFocusBody{ 0, 0, 0 }; // look-at surface point, body space
@@ -210,7 +223,10 @@ private:
     // Stream the quadtree leaf set for the current camera each frame: reselect LOD,
     // generate+cache newly-visible patches (write-once upload meshes), draw the
     // resident visible set camera-relative.
+    void PrepareTerrainPreview();
     void RenderTerrainPreview();
+    void EvictTerrainCache();
+    void ReleaseTerrainCache();
 
     // Set once the player ship has been placed on an orbit inside the seeded system
     // (start camera mode 4). Gates the ship's live-orbit HUD/trace so they never read

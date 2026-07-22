@@ -128,15 +128,14 @@ InteriorCapsuleOverlap CapsuleBoxOverlap(
         (box.minimum.z - radius) - capsule.center.z,
         (box.maximum.z + radius) - capsule.center.z
     };
-    size_t best = 0;
-    for (size_t i = 1; i < translations.size(); ++i)
-    {
-        if (std::abs(translations[i]) < std::abs(translations[best]))
-            best = i;
-    }
+    const auto bestIt = std::min_element(
+        translations.begin(), translations.end(),
+        [](double a, double b) { return std::abs(a) < std::abs(b); });
+    const size_t best = static_cast<size_t>(bestIt - translations.begin());
+    const double bestTranslation = *bestIt;
     const uint32_t axis = static_cast<uint32_t>(best / 2);
-    SetComponent(result.normal, axis, translations[best] < 0.0 ? -1.0 : 1.0);
-    result.depth = std::abs(translations[best]);
+    SetComponent(result.normal, axis, bestTranslation < 0.0 ? -1.0 : 1.0);
+    result.depth = std::abs(bestTranslation);
     return result;
 }
 

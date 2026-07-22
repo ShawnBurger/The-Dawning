@@ -25,6 +25,11 @@
 namespace terrain
 {
 
+// Chunk indices are uint16_t. A 256x256 grid has exactly 65,536 vertices and is
+// therefore the largest grid whose final vertex index (65,535) is representable.
+inline constexpr int kMinChunkGridN = 2;
+inline constexpr int kMaxChunkGridN = 256;
+
 // What patch to build and what body to build it on.
 struct ChunkParams
 {
@@ -33,7 +38,7 @@ struct ChunkParams
     double   u1        =  1.0;
     double   v0        = -1.0;
     double   v1        =  1.0;
-    int      gridN     = 33;     // vertices per edge (32x32 quads)
+    int      gridN     = 33;     // vertices per edge, clamped to [2, 256]
     double   planetRadius    = 6.371e6;  // metres
     double   amplitudeMeters = 8000.0;   // height field [0,1] * this = displacement m
     int      type      = 0;      // 0 Earth, 1 Mars, 2 Moon, 3 generic

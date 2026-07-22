@@ -737,7 +737,7 @@ private:
     bool EnsureIBLConsumeProbeResources(ID3D12Device* device);
     bool PrepareIBLConsumeProbe(D3D12Device& device);
 
-    FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 96
+    FrameStructuredBuffer m_objectBuffer;     // stride sizeof(ObjectData)   = 112
     FrameStructuredBuffer m_materialBuffer;   // stride sizeof(MaterialData) = 80
 
     // Monotonic across BOTH passes within a frame, reset in BeginFrameResources.

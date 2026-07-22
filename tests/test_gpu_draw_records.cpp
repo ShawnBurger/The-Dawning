@@ -22,6 +22,7 @@
 #include "render/gpu_draw_records.h"
 
 #include <cstring>
+#include <limits>
 
 namespace
 {
@@ -395,6 +396,14 @@ TEST_CASE(GpuDrawRecords_ObjectCapacityIsTwicePerDraw)
     CHECK_EQ(render::RequiredObjectCapacity(1000), 2000u);
     CHECK_EQ(render::RequiredObjectCapacity(5000), 10000u);
     CHECK_EQ(render::RequiredMaterialCapacity(1000), 1000u);
+}
+
+TEST_CASE(GpuDrawRecords_ObjectCapacitySaturatesInsteadOfWrapping)
+{
+    constexpr uint32_t maxValue = (std::numeric_limits<uint32_t>::max)();
+    CHECK_EQ(render::RequiredObjectCapacity(maxValue / 2u), maxValue - 1u);
+    CHECK_EQ(render::RequiredObjectCapacity(maxValue / 2u + 1u), maxValue);
+    CHECK_EQ(render::RequiredObjectCapacity(maxValue), maxValue);
 }
 
 // The floors keep the buffers non-empty in an empty scene, so Renderer::Init can

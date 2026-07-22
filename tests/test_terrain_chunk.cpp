@@ -77,6 +77,29 @@ TEST_CASE(ChunkMesh_VertexAndIndexCounts)
     CHECK_EQ(m.indices.size(),  static_cast<size_t>(32 * 32 * 6));
 }
 
+TEST_CASE(ChunkMesh_GridSizeIsClampedToIndexRange)
+{
+    terrain::ChunkParams tooSmall;
+    tooSmall.gridN = -100;
+    tooSmall.amplitudeMeters = 0.0;
+    terrain::ChunkMesh small = terrain::GenerateChunk(tooSmall);
+    CHECK_EQ(small.vertices.size(), static_cast<size_t>(4));
+    CHECK_EQ(small.indices.size(), static_cast<size_t>(6));
+
+    terrain::ChunkParams tooLarge;
+    tooLarge.gridN = terrain::kMaxChunkGridN + 1;
+    tooLarge.amplitudeMeters = 0.0;
+    terrain::ChunkMesh large = terrain::GenerateChunk(tooLarge);
+    const size_t maxN = static_cast<size_t>(terrain::kMaxChunkGridN);
+    CHECK_EQ(large.vertices.size(), maxN * maxN);
+    CHECK_EQ(large.indices.size(), (maxN - 1) * (maxN - 1) * 6);
+
+    uint16_t largestIndex = 0;
+    for (uint16_t index : large.indices)
+        largestIndex = (std::max)(largestIndex, index);
+    CHECK_EQ(largestIndex, UINT16_MAX);
+}
+
 TEST_CASE(ChunkMesh_DisplacementMatchesSharedHeightField)
 {
     // Every vertex's radial distance from the planet centre must equal

@@ -14,8 +14,25 @@ JobSystem::JobSystem(unsigned threadCount)
         n = (hc > 1) ? (hc - 1) : 1; // leave one core for the caller; always >= 1
     }
     m_threads.reserve(n);
-    for (unsigned i = 0; i < n; ++i)
-        m_threads.emplace_back([this] { WorkerLoop(); });
+    try
+    {
+        for (unsigned i = 0; i < n; ++i)
+            m_threads.emplace_back([this] { WorkerLoop(); });
+    }
+    catch (...)
+    {
+        // A partially constructed vector of joinable std::threads would call
+        // std::terminate while unwinding. Stop and join the workers that did
+        // start, then preserve the original construction failure.
+        {
+            std::lock_guard<std::mutex> lk(m_queueMutex);
+            m_stop = true;
+        }
+        m_queueCv.notify_all();
+        for (std::thread& thread : m_threads)
+            if (thread.joinable()) thread.join();
+        throw;
+    }
 }
 
 JobSystem::~JobSystem()
@@ -56,26 +73,47 @@ void JobSystem::WorkerLoop()
 void JobSystem::Dispatch(uint32_t jobCount, uint32_t groupSize,
                          const std::function<void(uint32_t)>& job)
 {
-    if (jobCount == 0)
+    if (jobCount == 0 || !job)
         return;
     if (groupSize == 0)
         groupSize = 1;
-    const uint32_t groups = (jobCount + groupSize - 1) / groupSize;
+    // Overflow-safe ceiling division. (jobCount + groupSize - 1) wraps for a
+    // perfectly valid large groupSize and used to turn a non-empty dispatch into
+    // zero queued work.
+    const uint32_t groups = 1u + (jobCount - 1u) / groupSize;
 
     // Publish the outstanding count BEFORE enqueuing, so a worker that finishes a
     // task can never drive pending to 0 before every task of this dispatch is counted.
     m_pending.fetch_add(groups, std::memory_order_acq_rel);
+    uint32_t enqueued = 0;
+    try
     {
         std::lock_guard<std::mutex> lk(m_queueMutex);
         for (uint32_t g = 0; g < groups; ++g)
         {
             const uint32_t begin = g * groupSize;
-            const uint32_t end = std::min(begin + groupSize, jobCount);
+            const uint32_t end = begin + (std::min)(groupSize, jobCount - begin);
             m_queue.emplace([job, begin, end] {
                 for (uint32_t i = begin; i < end; ++i)
                     job(i);
             });
+            ++enqueued;
         }
+    }
+    catch (...)
+    {
+        // Queue allocation/callable-copy failure may happen after a prefix was
+        // committed. Remove the never-enqueued suffix from the barrier count so
+        // Wait cannot hang; the prefix remains valid work and is woken below.
+        const uint64_t omitted = static_cast<uint64_t>(groups - enqueued);
+        const uint64_t previous = m_pending.fetch_sub(omitted, std::memory_order_acq_rel);
+        if (previous == omitted)
+        {
+            std::lock_guard<std::mutex> lk(m_doneMutex);
+            m_doneCv.notify_all();
+        }
+        if (enqueued != 0) m_queueCv.notify_all();
+        throw;
     }
     m_queueCv.notify_all();
 }

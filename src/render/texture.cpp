@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -23,6 +24,13 @@ static constexpr uint32_t MakeFourCC(char a, char b, char c, char d)
         | (static_cast<uint32_t>(b) << 8)
         | (static_cast<uint32_t>(c) << 16)
         | (static_cast<uint32_t>(d) << 24);
+}
+
+static bool IsSupportedTextureExtent(uint32_t width, uint32_t height)
+{
+    return width > 0 && height > 0 &&
+           width <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION &&
+           height <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 }
 
 static uint32_t AlignTo(uint32_t value, uint32_t alignment)
@@ -123,25 +131,34 @@ static bool ComputeSurfaceInfo(
     uint32_t& numRows,
     uint64_t& totalBytes)
 {
-    if (width == 0 || height == 0 || format == DXGI_FORMAT_UNKNOWN)
+    if (!IsSupportedTextureExtent(width, height) || format == DXGI_FORMAT_UNKNOWN)
         return false;
 
+    uint64_t rowBytes64 = 0;
+    uint64_t numRows64 = 0;
     if (IsBlockCompressed(format))
     {
-        uint32_t blockBytes = BCBlockBytes(format);
+        const uint32_t blockBytes = BCBlockBytes(format);
         if (blockBytes == 0) return false;
-        rowBytes = ((width + 3u) / 4u) * blockBytes;
-        numRows = (height + 3u) / 4u;
+        rowBytes64 = ((static_cast<uint64_t>(width) + 3u) / 4u) * blockBytes;
+        numRows64 = (static_cast<uint64_t>(height) + 3u) / 4u;
     }
     else
     {
-        uint32_t bpp = BitsPerPixel(format);
+        const uint32_t bpp = BitsPerPixel(format);
         if (bpp == 0) return false;
-        rowBytes = (width * bpp + 7u) / 8u;
-        numRows = height;
+        rowBytes64 = (static_cast<uint64_t>(width) * bpp + 7u) / 8u;
+        numRows64 = height;
     }
 
-    totalBytes = static_cast<uint64_t>(rowBytes) * numRows;
+    constexpr uint64_t maxU32 = (std::numeric_limits<uint32_t>::max)();
+    if (rowBytes64 == 0 || rowBytes64 > maxU32 ||
+        numRows64 == 0 || numRows64 > maxU32)
+        return false;
+
+    rowBytes = static_cast<uint32_t>(rowBytes64);
+    numRows = static_cast<uint32_t>(numRows64);
+    totalBytes = rowBytes64 * numRows64;
     return true;
 }
 
@@ -185,7 +202,7 @@ static std::vector<std::vector<uint32_t>> GenerateMipChainRGBA8(
     uint32_t height)
 {
     std::vector<std::vector<uint32_t>> mips;
-    if (!pixels || width == 0 || height == 0)
+    if (!pixels || !IsSupportedTextureExtent(width, height))
         return mips;
 
     const uint32_t mipCount = CalculateMipCount(width, height);
@@ -265,7 +282,8 @@ static Texture CreateTexture2DFromSubresources(
     const wchar_t* name)
 {
     Texture texture;
-    if (!device || !cmdList || !subresources || width == 0 || height == 0 ||
+    if (!device || !cmdList || !subresources ||
+        !IsSupportedTextureExtent(width, height) ||
         format == DXGI_FORMAT_UNKNOWN || mipCount == 0 || mipCount > UINT16_MAX)
     {
         core::Log::Error("CreateTexture2DFromSubresources: invalid input");
@@ -425,6 +443,7 @@ Texture CreateTexture2DFromRGBA8(
     ComPtr<ID3D12Resource>& outUpload,
     const wchar_t* name)
 {
+    outUpload.Reset();
     auto mipPixels = GenerateMipChainRGBA8(pixels, width, height);
     if (mipPixels.empty())
     {
@@ -510,11 +529,12 @@ static DXGI_FORMAT FormatFromDDSHeader(const DDSHeader& header, const uint8_t* b
             if (size < dataOffset + sizeof(DDSHeaderDXT10))
                 return DXGI_FORMAT_UNKNOWN;
             {
-                const auto* dx10 = reinterpret_cast<const DDSHeaderDXT10*>(bytes + dataOffset);
+                DDSHeaderDXT10 dx10 = {};
+                std::memcpy(&dx10, bytes + dataOffset, sizeof(dx10));
                 dataOffset += sizeof(DDSHeaderDXT10);
-                if (dx10->arraySize != 1 || dx10->resourceDimension != 3)
+                if (dx10.arraySize != 1 || dx10.resourceDimension != 3)
                     return DXGI_FORMAT_UNKNOWN;
-                return static_cast<DXGI_FORMAT>(dx10->dxgiFormat);
+                return static_cast<DXGI_FORMAT>(dx10.dxgiFormat);
             }
         default:
             return DXGI_FORMAT_UNKNOWN;
@@ -610,6 +630,7 @@ Texture CreateTexture2DFromDDSFile(
     const wchar_t* name)
 {
     Texture texture;
+    outUpload.Reset();
     if (!filePath || !filePath[0])
         return texture;
 
@@ -642,30 +663,34 @@ Texture CreateTexture2DFromDDSFile(
         return texture;
     }
 
-    uint32_t magic = *reinterpret_cast<const uint32_t*>(bytes.data());
+    uint32_t magic = 0;
+    std::memcpy(&magic, bytes.data(), sizeof(magic));
     if (magic != kDDSMagic)
     {
         core::Log::Errorf("Invalid DDS magic: %s", filePath);
         return texture;
     }
 
-    const auto* header = reinterpret_cast<const DDSHeader*>(bytes.data() + sizeof(uint32_t));
-    if (header->size != sizeof(DDSHeader) || header->ddspf.size != sizeof(DDSPixelFormat))
+    DDSHeader header = {};
+    std::memcpy(&header, bytes.data() + sizeof(uint32_t), sizeof(header));
+    if (header.size != sizeof(DDSHeader) ||
+        header.ddspf.size != sizeof(DDSPixelFormat) ||
+        !IsSupportedTextureExtent(header.width, header.height))
     {
         core::Log::Errorf("Invalid DDS header: %s", filePath);
         return texture;
     }
 
     size_t dataOffset = sizeof(uint32_t) + sizeof(DDSHeader);
-    DXGI_FORMAT format = FormatFromDDSHeader(*header, bytes.data(), bytes.size(), dataOffset);
+    DXGI_FORMAT format = FormatFromDDSHeader(header, bytes.data(), bytes.size(), dataOffset);
     if (format == DXGI_FORMAT_UNKNOWN)
     {
         core::Log::Errorf("Unsupported DDS format: %s", filePath);
         return texture;
     }
 
-    const uint32_t maxMipCount = CalculateMipCount(header->width, header->height);
-    uint32_t mipCount = header->mipMapCount > 0 ? header->mipMapCount : 1;
+    const uint32_t maxMipCount = CalculateMipCount(header.width, header.height);
+    uint32_t mipCount = header.mipMapCount > 0 ? header.mipMapCount : 1;
     if (mipCount > maxMipCount)
     {
         core::Log::Errorf("DDS texture has invalid mip count: %s", filePath);
@@ -676,8 +701,8 @@ Texture CreateTexture2DFromDDSFile(
     subresources.reserve(mipCount);
 
     size_t mipOffset = dataOffset;
-    uint32_t mipWidth = header->width;
-    uint32_t mipHeight = header->height;
+    uint32_t mipWidth = header.width;
+    uint32_t mipHeight = header.height;
     for (uint32_t mip = 0; mip < mipCount; ++mip)
     {
         uint32_t rowBytes = 0;
@@ -712,8 +737,8 @@ Texture CreateTexture2DFromDDSFile(
         device,
         cmdList,
         subresources.data(),
-        header->width,
-        header->height,
+        header.width,
+        header.height,
         format,
         mipCount,
         outUpload,
@@ -734,6 +759,7 @@ Texture CreateTexture2DFromKTXFile(
     const wchar_t* name)
 {
     Texture texture;
+    outUpload.Reset();
     if (!filePath || !filePath[0])
         return texture;
 
@@ -805,7 +831,8 @@ Texture CreateTexture2DFromKTXFile(
     const uint32_t fileMipCountRaw = headerU32(56);
     const uint32_t keyValueBytes = headerU32(60);
 
-    if (width == 0 || height == 0 || depth != 0 || arrayElements != 0 || faces != 1)
+    if (!IsSupportedTextureExtent(width, height) ||
+        depth != 0 || arrayElements != 0 || faces != 1)
     {
         core::Log::Errorf("Unsupported KTX texture shape: %s", filePath);
         return texture;
@@ -938,6 +965,12 @@ static Texture DecodeWICFrameToTexture(
         core::Log::Errorf("WIC GetSize failed for %s: 0x%08X", logLabel, hr);
         return texture;
     }
+    if (!IsSupportedTextureExtent(width, height))
+    {
+        core::Log::Errorf("WIC texture dimensions are unsupported for %s: %ux%u",
+                          logLabel, width, height);
+        return texture;
+    }
 
     ComPtr<IWICFormatConverter> converter;
     hr = factory->CreateFormatConverter(&converter);
@@ -960,8 +993,9 @@ static Texture DecodeWICFrameToTexture(
     }
 
     const uint32_t rowBytes = width * 4u;
-    std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * height);
-    hr = converter->CopyPixels(nullptr, rowBytes, static_cast<UINT>(pixels.size()), pixels.data());
+    const size_t pixelBytes = static_cast<size_t>(rowBytes) * height;
+    std::vector<uint8_t> pixels(pixelBytes);
+    hr = converter->CopyPixels(nullptr, rowBytes, static_cast<UINT>(pixelBytes), pixels.data());
     if (FAILED(hr))
     {
         core::Log::Errorf("WIC CopyPixels failed for %s: 0x%08X", logLabel, hr);
@@ -994,8 +1028,14 @@ Texture CreateTexture2DFromWICMemory(
     const wchar_t* name)
 {
     Texture texture;
+    outUpload.Reset();
     if (!bytes || byteCount == 0)
         return texture;
+    if (byteCount > (std::numeric_limits<DWORD>::max)())
+    {
+        core::Log::Error("Embedded WIC texture exceeds the decoder's 32-bit input limit");
+        return texture;
+    }
 
     // WIC's memory stream takes a 32-bit length. A single texture larger than 4
     // GiB is not a real case, but rejecting it is cheaper than a silent truncation.
@@ -1070,6 +1110,7 @@ Texture CreateTexture2DFromWICFile(
     const wchar_t* name)
 {
     Texture texture;
+    outUpload.Reset();
     if (!filePath || !filePath[0])
         return texture;
 
@@ -1219,8 +1260,9 @@ std::vector<uint32_t> GenerateCheckerTextureRGBA8(
     if (width == 0) width = 1;
     if (height == 0) height = 1;
     if (checkSize == 0) checkSize = 1;
+    if (!IsSupportedTextureExtent(width, height)) return {};
 
-    std::vector<uint32_t> pixels(width * height);
+    std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
     const uint32_t ca = PackRGBA8(a);
     const uint32_t cb = PackRGBA8(b);
 
@@ -1245,6 +1287,7 @@ std::vector<uint32_t> GenerateCheckerORMTextureRGBA8(
     float baseMetallic,
     float altMetallic)
 {
+    if (!IsSupportedTextureExtent(width, height)) return {};
     std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
     if (checkerSize == 0) checkerSize = 1;
 
@@ -1292,6 +1335,7 @@ std::vector<uint32_t> GeneratePanelEmissiveTextureRGBA8(
     uint32_t cellSize,
     float panelFraction)
 {
+    if (!IsSupportedTextureExtent(width, height)) return {};
     std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
     if (cellSize == 0) cellSize = 1;
     if (panelFraction < 0.05f) panelFraction = 0.05f;
@@ -1339,6 +1383,7 @@ std::vector<uint32_t> GenerateWaveNormalTextureRGBA8(
     if (height == 0) height = 1;
     if (frequency <= 0.0f) frequency = 4.0f;
     if (strength < 0.0f) strength = 0.0f;
+    if (!IsSupportedTextureExtent(width, height)) return {};
 
     std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
     const float twoPi = core::PI * 2.0f;

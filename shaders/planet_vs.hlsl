@@ -9,14 +9,15 @@
 // so spinning the body scrolls the procedural continents for free while the
 // world-space normal still drives the lighting/terminator.
 //
-// It deliberately does NOT declare the draw-record probe UAV: celestial bodies
-// are not part of the smoke probe frame, so witnessing them would witness a read
-// nothing verifies. basic_vs.hlsl stays the probed vertex stage, untouched.
+// It participates in the same draw-record probe as basic_vs. Star-system and
+// Surface smoke frames contain procedural planets, so excluding this shader
+// left real ObjectData reads outside a probe advertised as covering every draw.
 // =============================================================================
 
 #include "gpu_draw_records.hlsli"
 
 StructuredBuffer<ObjectData> objectBuffer : register(t0, space2);
+RWByteAddressBuffer drawRecordProbe : register(u0, space4);
 
 cbuffer CBDrawIndex : register(b3)
 {
@@ -53,6 +54,11 @@ VSOutput main(VSInput input)
     VSOutput output;
 
     ObjectData obj = objectBuffer[objectIndex];
+
+    if (drawProbeEnabled != 0)
+    {
+        DawningWriteObjectProbe(drawRecordProbe, objectIndex, obj);
+    }
 
     float4 p = float4(input.position, 1.0);
     float3 positionWS = float3(dot(obj.worldRow0, p),

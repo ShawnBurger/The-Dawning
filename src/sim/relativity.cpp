@@ -57,7 +57,7 @@ double SaturatingProduct(double lhs, double rhs)
 {
     if (lhs == 0.0 || rhs == 0.0)
         return 0.0;
-    const double maximum = (std::numeric_limits<double>::max)();
+    constexpr double maximum = (std::numeric_limits<double>::max)();
     if (lhs > maximum / rhs)
         return maximum;
     return lhs * rhs;

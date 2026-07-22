@@ -129,7 +129,7 @@ LoadedModelResources UploadImportedModelResources(
 
     try
     {
-        const size_t maxSize = (std::numeric_limits<size_t>::max)();
+        constexpr size_t maxSize = (std::numeric_limits<size_t>::max)();
         if (model.primitives.size() > (maxSize - model.images.size()) / 2u)
         {
             loaded.error = "model resource count overflow";

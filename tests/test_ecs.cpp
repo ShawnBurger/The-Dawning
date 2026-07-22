@@ -475,6 +475,16 @@ TEST_CASE(ComponentPool_GrowsSparseAndDenseArrays)
     CHECK_EQ(pool.Get(5000u).id, 5000);   // survived the reallocations
 }
 
+TEST_CASE(ComponentPool_RejectsIndicesOutsideEntityDomain)
+{
+    ecs::ComponentPool<Payload> pool;
+    pool.Add(ecs::Entity::kMaxIndex, Payload{ 1, 1.0f });
+    pool.Add(UINT32_MAX, Payload{ 2, 2.0f });
+    CHECK_EQ(pool.Count(), 0u);
+    CHECK_FALSE(pool.Has(ecs::Entity::kMaxIndex));
+    CHECK_FALSE(pool.Has(UINT32_MAX));
+}
+
 // =============================================================================
 // Registry
 // =============================================================================

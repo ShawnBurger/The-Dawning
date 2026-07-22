@@ -108,7 +108,7 @@ bool Compose(
     const double scaledX = local.position.x * root.scale.x;
     const double scaledY = local.position.y * root.scale.y;
     const double scaledZ = local.position.z * root.scale.z;
-    const double maximumFloat = (std::numeric_limits<float>::max)();
+    constexpr double maximumFloat = (std::numeric_limits<float>::max)();
     if (!Finite(scaledX) || !Finite(scaledY) || !Finite(scaledZ) ||
         std::abs(scaledX) > maximumFloat ||
         std::abs(scaledY) > maximumFloat ||
