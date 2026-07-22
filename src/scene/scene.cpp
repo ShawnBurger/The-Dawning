@@ -128,9 +128,46 @@ uint32_t Scene::SeedStarSystem(MeshHandle bodySphere, float meshRadius)
         m_registry, kStarSystemBodyIdBase, bodySphere.value, meshRadius);
 
     m_starSystemActive = true;
+    m_bodyMeshRadius = meshRadius;
     core::Log::Infof("[SIM] star_system_seeded bodies=%u visuals=%u soi=on",
                      created, visuals);
     return created;
+}
+
+void Scene::ApplyStarSystemRenderMode(bool orrery)
+{
+    if (!m_starSystemActive)
+        return;
+    auto* pool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!pool)
+        return;
+    for (uint32_t i = 0; i < pool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = pool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // gameplay body, not a seeded celestial
+        const ecs::Entity e = m_registry.EntityAtIndex(pool->EntityAt(i));
+        ecs::Transform* t = m_registry.TryGet<ecs::Transform>(e);
+        if (!t)
+            continue;
+
+        float s;
+        if (orrery)
+        {
+            // Render each body at a fixed marker size in RENDER units: the K in
+            // ToCameraRelativeMatrix multiplies scale, so scale = markerUnits /
+            // (meshRadius * K) yields `markerUnits` on screen regardless of K.
+            // Sun larger (~7 units), planets floored to ~2 so they stay visible.
+            const double markerUnits = (std::max)(7.0, g.radius / 5.0e7);
+            s = static_cast<float>(markerUnits /
+                (static_cast<double>(m_bodyMeshRadius) * m_renderScale));
+        }
+        else
+        {
+            s = static_cast<float>(g.radius / m_bodyMeshRadius); // true radius
+        }
+        t->scale = { s, s, s };
+    }
 }
 
 void Scene::DestroyEntity(ecs::Entity entity)

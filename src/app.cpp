@@ -2240,6 +2240,9 @@ void App::ApplyCameraModeRenderState()
             m_camera.SetMoveSpeed(5.0f);
             break;
     }
+    // Bodies render at true radius everywhere except the orrery, where they are
+    // scaled up to visible markers (K set just above cancels in the scale math).
+    m_scene.ApplyStarSystemRenderMode(m_cameraMode == CameraMode::Orrery);
 }
 
 bool App::UpdateCamera(const core::TimeStep& timeStep)
@@ -2272,6 +2275,21 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
     }
 
     const auto& registry = m_scene.GetRegistry();
+
+    // Orrery mode: frame the WHOLE system from a fixed vantage looking at the Sun
+    // (frame origin). The standoff is a multiple of the outer orbit so Sun ->
+    // Mars all fit; K (set in ApplyCameraModeRenderState) compresses it to view.
+    if (m_cameraMode == CameraMode::Orrery)
+    {
+        constexpr double kAU = 1.495978707e11;
+        const gameplay::ChaseCameraPose pose = gameplay::BuildNearBodyCameraPose(
+            core::Vec3d{ 0.0, 0.0, 0.0 }, // Sun at the frame origin
+            1.52 * kAU,                   // "radius" = Mars' orbit, so the system fits
+            1.35, 40.0f, 28.0f);
+        m_chaseCameraInitialized = false;
+        m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
+        return true;
+    }
 
     // Near-body mode: park the camera at a standoff from a seeded celestial body,
     // framing it at true scale. Falls through to free-fly if no body is seeded

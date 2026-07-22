@@ -60,6 +60,14 @@ public:
     // number of celestial bodies created. Idempotent guard: seeds at most once.
     uint32_t SeedStarSystem(MeshHandle bodySphere, float meshRadius);
 
+    // Switch celestial bodies between TRUE radius (near-body / ship views) and
+    // exaggerated ORRERY markers. At the orrery scale (K~1e-9) a true-radius
+    // planet is sub-pixel, so in orrery mode each body is scaled to render at a
+    // fixed few-unit marker size (Sun larger, planets ~2 units) — the K cancels,
+    // giving a constant on-screen size regardless of the compression. Idempotent;
+    // call each frame with the active mode.
+    void ApplyStarSystemRenderMode(bool orrery);
+
     // --- Systems ---
 
     // Phase 1: advance the one authoritative fixed-step scheduler.
@@ -163,6 +171,7 @@ private:
     bool                 m_starSystemActive = false;
     double               m_soiHysteresis    = 0.01;
     double               m_renderScale      = 1.0; // K; per-mode, see SetRenderScale
+    float                m_bodyMeshRadius   = 0.5f; // radius the body sphere mesh spans
     sim::FlightAssistParams m_flightAssist;
     sim::CloseEncounterConfig m_closeEncounters;
     std::vector<sim::FtlCommand> m_ftlCommands;
