@@ -50,6 +50,16 @@ public:
     // Destroy an entity
     void DestroyEntity(ecs::Entity entity);
 
+    // Seed the deterministic reference star system (Sun + two planets + a moon,
+    // true-scale, real mu) into the master frame: creates the sim entities, gives
+    // each body the shared `bodySphere` mesh at its true radius, and enables live
+    // sphere-of-influence transitions so on-rails bodies re-patch primaries as
+    // they cross SOI boundaries. Seeded bodyIds live in a high reserved namespace
+    // so they cannot collide with gameplay bodies (the ship is bodyId 1).
+    // `meshRadius` is the radius the sphere mesh was generated at. Returns the
+    // number of celestial bodies created. Idempotent guard: seeds at most once.
+    uint32_t SeedStarSystem(MeshHandle bodySphere, float meshRadius);
+
     // --- Systems ---
 
     // Phase 1: advance the one authoritative fixed-step scheduler.
@@ -140,6 +150,11 @@ private:
     sim::FrameId         m_masterFrame = sim::kInvalidFrame;
     double               m_coordinateTime = 0.0;
     uint64_t             m_simTick = 0;
+    // Patched-conics: once a star system is seeded, UpdateSystems runs the SOI
+    // transition phase every step (off until then so the empty sandbox pays
+    // nothing and its behaviour is unchanged).
+    bool                 m_starSystemActive = false;
+    double               m_soiHysteresis    = 0.01;
     sim::FlightAssistParams m_flightAssist;
     sim::CloseEncounterConfig m_closeEncounters;
     std::vector<sim::FtlCommand> m_ftlCommands;

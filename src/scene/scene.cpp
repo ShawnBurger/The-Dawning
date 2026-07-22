@@ -3,7 +3,10 @@
 // =============================================================================
 
 #include "scene.h"
+#include "star_system_seed.h"
 #include "../ecs/systems.h"
+#include "../sim/star_system.h"
+#include "../sim/system_instantiate.h"
 #include "../core/log.h"
 #include <algorithm>
 #include <cstddef>
@@ -108,6 +111,28 @@ ecs::Entity Scene::CreateSpinner(const char* name,
     return e;
 }
 
+uint32_t Scene::SeedStarSystem(MeshHandle bodySphere, float meshRadius)
+{
+    if (m_starSystemActive)
+        return 0; // seed once
+
+    // Shift bodyIds into the reserved namespace so the star (id 1 in the builder)
+    // does not collide with the ship (id 1) and abort the gravity step.
+    const sim::StarSystem system = OffsetStarSystemBodyIds(
+        sim::BuildReferenceSystem(), kStarSystemBodyIdBase);
+
+    const uint32_t created =
+        sim::InstantiateStarSystem(m_registry, m_masterFrame, system);
+
+    const uint32_t visuals = AttachStarSystemVisuals(
+        m_registry, kStarSystemBodyIdBase, bodySphere.value, meshRadius);
+
+    m_starSystemActive = true;
+    core::Log::Infof("[SIM] star_system_seeded bodies=%u visuals=%u soi=on",
+                     created, visuals);
+    return created;
+}
+
 void Scene::DestroyEntity(ecs::Entity entity)
 {
     ClearAtmosphereBinding(entity);
@@ -129,6 +154,8 @@ sim::SimulationStepResult Scene::UpdateSystems(double dt)
     config.coordinateTime = m_coordinateTime;
     config.flightAssist = m_flightAssist;
     config.closeEncounters = m_closeEncounters;
+    config.enableSoiTransitions = m_starSystemActive;
+    config.soiHysteresis = m_soiHysteresis;
     config.ftlCommands = m_ftlCommands;
     config.atmosphereBindings = m_atmosphereBindings;
     config.clockGravityBindings = m_clockGravityBindings;

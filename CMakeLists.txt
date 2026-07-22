@@ -221,6 +221,7 @@ set(SCENE_SOURCES
     src/scene/assembly_runtime_resources.cpp
     src/scene/resource_manager.cpp
     src/scene/scene.cpp
+    src/scene/star_system_seed.cpp
     src/scene/model_loader.cpp
 )
 
@@ -236,6 +237,7 @@ set(SCENE_HEADERS
     src/scene/handle_slot_map.h
     src/scene/resource_manager.h
     src/scene/scene.h
+    src/scene/star_system_seed.h
 )
 
 set(TEST_SOURCES
@@ -290,6 +292,7 @@ set(TEST_SOURCES
     tests/test_transfer_planner.cpp
     tests/test_star_system.cpp
     tests/test_system_instantiate.cpp
+    tests/test_star_system_seed.cpp
     tests/test_soi_transition.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
@@ -588,6 +591,11 @@ add_executable(TheDawningTests
     src/scene/assembly_runtime_resources.h
     src/scene/resource_handle.h
     src/scene/handle_slot_map.h
+    # Star-system seeding: bodyId de-collision + true-radius visual attach.
+    # GPU-free (ecs + core + sim headers only); tests/test_star_system_seed.cpp
+    # drives it against the SHIPPED StepSimulation.
+    src/scene/star_system_seed.cpp
+    src/scene/star_system_seed.h
     # GPU-facing per-draw record layouts and their sizing arithmetic. Safe here
     # despite living under src/render: gpu_draw_records.h deliberately includes
     # no D3D12 header, precisely so these layouts can be tested on a machine

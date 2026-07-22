@@ -830,6 +830,18 @@ bool App::InitializeScene()
             2.0f + static_cast<float>(i) * 0.3f);
     }
 
+    // Seed the true-scale reference solar system into the live game (Sun + two
+    // planets + a moon, real mu / real AU) with sphere-of-influence transitions
+    // running. The bodies sit ~1 AU out, so they are invisible in the default
+    // meters-scale chase camera until a solar-system camera mode frames them; the
+    // sim, however, is now driving a real world every fixed step. Gated out of the
+    // smoke run so the smoke's entity/snapshot baseline is unchanged.
+    if (!m_options.smoke)
+    {
+        const uint32_t bodies = m_scene.SeedStarSystem(sphere, 0.5f);
+        core::Log::Infof("Solar system seeded: %u bodies", bodies);
+    }
+
     core::Log::Infof("Scene populated: %u entities", m_scene.EntityCount());
     return true;
 }
