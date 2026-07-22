@@ -21,30 +21,62 @@
 #define DAWNING_PLANET_NOISE_HLSLI
 
 // -----------------------------------------------------------------------------
-// Hash-based value noise (Dave Hoskins "hash without sine") — LUT-free, stable
-// across GPUs, no frac(sin()) banding at multi-octave frequencies.
+// Integer-hash value noise. The lattice corners are hashed with pcg3d (Jarzynski &
+// Olano, "Hash Functions for GPU Rendering", JCGT 2020) — pure uint32 arithmetic,
+// so the corner values are BIT-IDENTICAL on the CPU (core::planet_height, the
+// terrain collision/mesh field) and the GPU (this shader, the shaded sphere) BY
+// CONSTRUCTION: uint * + ^ >> are 32-bit modular ops both languages define
+// identically, and FXC cannot reassociate or FMA-fuse integer math. This is what
+// makes the near mesh and far sphere agree. It replaces the sine-free FLOAT hash
+// (Hoskins), whose final frac() of a ~4400-magnitude product rounded differently
+// on the GPU's dp3 dot hardware, giving a ~3% CPU/GPU divergence (measured).
+// The residual is now only the float interpolation weights (~1e-7).
 // -----------------------------------------------------------------------------
-float Hash13(float3 p)
+uint3 Pcg3d(uint3 v)
 {
-    p = frac(p * 0.1031);
-    p += dot(p, p.zyx + 31.32);
-    return frac((p.x + p.y) * p.z);
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return v;
+}
+
+// uint -> [0,1) via the exact mantissa bit-trick: build a float in [1,2) and
+// subtract 1. No uint->float conversion rounding to disagree on.
+float UintToUnit(uint h) { return asfloat(0x3f800000u | (h >> 9)) - 1.0; }
+
+// Hash an integer lattice cell to [0,1) / [0,1)^3. `salt` (XORed into a component)
+// decorrelates independent uses at the same cell (value noise vs crater fields).
+float HashCell1(int3 c, uint salt)
+{
+    uint3 h = Pcg3d(uint3(asuint(c.x), asuint(c.y), asuint(c.z) ^ salt));
+    return UintToUnit(h.x);
+}
+float3 HashCell3(int3 c, uint salt)
+{
+    uint3 h = Pcg3d(uint3(asuint(c.x), asuint(c.y), asuint(c.z) ^ salt));
+    return float3(UintToUnit(h.x), UintToUnit(h.y), UintToUnit(h.z));
 }
 
 float ValueNoise(float3 x)
 {
-    float3 i = floor(x);
-    float3 f = frac(x);
-    float3 u = f * f * (3.0 - 2.0 * f); // smoothstep interpolant
+    float3 fl = floor(x);
+    int3   i  = int3(fl);       // floor THEN cast: exact integer cell, negatives ok
+    float3 f  = x - fl;         // == frac(x), reusing the floor
+    // Quintic (C2) interpolant: field, slope AND curvature are continuous across a
+    // cell boundary, so if the CPU and GPU ever pick adjacent cells (a coordinate
+    // within a ULP of an integer) the disagreement is bounded to the local slope
+    // times that ULP, not a hash jump.
+    float3 u  = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
-    float n000 = Hash13(i + float3(0, 0, 0));
-    float n100 = Hash13(i + float3(1, 0, 0));
-    float n010 = Hash13(i + float3(0, 1, 0));
-    float n110 = Hash13(i + float3(1, 1, 0));
-    float n001 = Hash13(i + float3(0, 0, 1));
-    float n101 = Hash13(i + float3(1, 0, 1));
-    float n011 = Hash13(i + float3(0, 1, 1));
-    float n111 = Hash13(i + float3(1, 1, 1));
+    float n000 = HashCell1(i + int3(0, 0, 0), 0u);
+    float n100 = HashCell1(i + int3(1, 0, 0), 0u);
+    float n010 = HashCell1(i + int3(0, 1, 0), 0u);
+    float n110 = HashCell1(i + int3(1, 1, 0), 0u);
+    float n001 = HashCell1(i + int3(0, 0, 1), 0u);
+    float n101 = HashCell1(i + int3(1, 0, 1), 0u);
+    float n011 = HashCell1(i + int3(0, 1, 1), 0u);
+    float n111 = HashCell1(i + int3(1, 1, 1), 0u);
 
     float nx00 = lerp(n000, n100, u.x);
     float nx10 = lerp(n010, n110, u.x);
@@ -102,26 +134,23 @@ float Ridged3(float3 p)
     return sum;
 }
 
-float3 Hash33(float3 p)
-{
-    p = frac(p * float3(0.1031, 0.1030, 0.0973));
-    p += dot(p, p.yxz + 33.33);
-    return frac((p.xxy + p.yxx) * p.zyx);
-}
-
 // Sparse impact craters (Mars/Moon). One jittered crater per grid cell, its centre
 // kept away from the cell edge (like the starfield) so a single-cell lookup does not
 // slice it. Returns a signed elevation delta: a depressed bowl plus a raised rim.
+// The three per-cell hashes use distinct salts of the SAME integer cell id, so they
+// are bit-exact CPU/GPU (the exp/pow in the rim are transcendentals and add ~1e-6,
+// which rides the elevation channel only, never the raw field).
 float CraterField(float3 p, float freq, float density)
 {
     float3 pp = p * freq;
-    float3 id = floor(pp);
-    float3 f  = frac(pp) - 0.5;
+    float3 fl = floor(pp);
+    int3   id = int3(fl);
+    float3 f  = (pp - fl) - 0.5;
 
-    float present = step(1.0 - density, Hash13(id * 1.7 + 4.4));
-    float3 c   = (Hash33(id + 2.2) - 0.5) * 0.5;   // centred jitter (edge-safe)
+    float  present = step(1.0 - density, HashCell1(id, 0x9E3779B9u));
+    float3 c   = (HashCell3(id, 0x85EBCA6Bu) - 0.5) * 0.5;   // centred jitter (edge-safe)
     float  d   = length(f - c);
-    float  rad = 0.16 + 0.16 * Hash13(id + 8.8);
+    float  rad = 0.16 + 0.16 * HashCell1(id, 0xC2B2AE35u);
 
     float bowl = -smoothstep(rad, rad * 0.2, d) * 0.7;               // sunken floor
     float rim  = exp(-pow(saturate((d - rad) / (rad * 0.5)), 2.0) * 4.0) * 0.5; // bright rim

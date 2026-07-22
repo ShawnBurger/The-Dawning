@@ -358,8 +358,8 @@ Assert-Marker "ibl_enabled" "yes"
 # CPU test in TheDawningTests green (they check the twin against itself, not the
 # shader). This probe evaluates the SHIPPED GPU field for 64 (direction, body-type)
 # queries and the CPU compares against core::PlanetHeight fed the identical inputs.
-# WATCHED FAILING: change 0.1031 to 0.10311 in the GPU Hash13 only -> worst delta
-# 0.0294 -> 0.44, this fails, and all 559 CPU tests still pass.
+# WATCHED FAILING: change a pcg3d constant (1664525u) in the GPU planet_noise.hlsli
+# only -> worst delta 5.6e-6 -> 0.46, this fails, and all 559 CPU tests still pass.
 #
 # Listed by NAME so that if the probe stopped being called the run goes red here
 # rather than silently green — the same reason the ibl_* markers are listed.

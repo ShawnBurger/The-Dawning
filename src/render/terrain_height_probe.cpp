@@ -19,51 +19,33 @@ namespace
 
 // Verdict thresholds, CALIBRATED FROM MEASUREMENT (not chosen by reflex).
 //
-// Two channels, two tolerances, because the two twins do not — cannot — agree to
-// the sky probe's 3e-8. That figure holds because the sky is a trivial affine
-// blend; PlanetHeight is 5-octave domain-warped fBm over the Hoskins "hash without
-// sine". Its CPU/GPU divergence is NOT simple mul-add FMA fusion — forcing the GPU
-// arithmetic `precise` (no contraction) moved the worst delta by <1e-4. It is the
-// GPU dot-product instruction (dp3, used by mul(kNoiseRot,·) and Hash13's dot)
-// rounding its 3-term reduction differently from the CPU's sequential adds, plus
-// frac() precision once the warped, seed-offset coordinate grows large — and it
-// SCALES WITH COORDINATE MAGNITUDE: generic (seed 7) agrees to <1e-3, Moon (seed
-// 33) to ~3e-2. MEASURED worst raw delta 0.0294; that is the reproducibility floor
-// of this fBm, confirmed rather than assumed. A bit-exact INTEGER hash (bit ops are
-// exact on both CPU and GPU) would collapse it to ~1e-6, which also matters for P5
-// landing collision (CPU height must equal the visible surface); that is a
-// deliberate terrain follow-on — it changes the shipped noise, so it is NOT folded
-// in here.
+// The noise is integer-hash value noise: the 8 lattice corners are hashed with
+// pcg3d (Jarzynski & Olano, JCGT 2020) — pure uint32 arithmetic, bit-identical on
+// CPU and GPU BY CONSTRUCTION — and the interpolant is quintic (C2), so a coordinate
+// landing within a ULP of a cell boundary costs O(ULP^2), not a hash jump. That
+// collapsed the divergence the old float (Hoskins) hash had, whose final frac() of a
+// ~4400-magnitude product rounded differently on the GPU's dp3 hardware: MEASURED,
+// worst raw delta 0.0294 -> 0.0000056, worst elevation 0.0616 -> 0.0000153. This is
+// a genuine bit-exactness guard now, ~1000x tighter than the gross-drift threshold
+// it replaced, and it matters beyond visuals — P5 landing collision reads
+// core::PlanetHeight and must equal the visible GPU surface: 1.5e-5 of Moon
+// amplitude is a 0.24 m worst-case mismatch, down from 480 m.
 //
-// So this probe is a GROSS-DRIFT guard, not a bit-exactness guard, and it is
-// honest about which: a one-sided edit to any enumerated constant (a hash factor,
-// an octave count, kNoiseRot, lacunarity 2.02, gain 0.5, seed derivation) reshuffles
-// the field and moves the delta to O(0.1..0.5) — several times these bounds, so it
-// trips (watched-failing). It cannot catch a sub-3% drift; nothing short of the
-// integer-hash rewrite can, and the comment says so.
+// The residual that remains is, for raw, the float interpolation weights (~5e-6),
+// and for elevation additionally the exp/pow in the crater rim — transcendentals
+// that vary a little more across GPU vendors, hence the wider elevation bound. The
+// bounds sit ~35x above the measured residual: a FAILED verdict is FATAL, so the
+// margin absorbs cross-vendor variation in the interpolation/transcendental math
+// while staying far below any real drift. A one-sided edit to a pcg3d constant, an
+// octave count, kNoiseRot, lacunarity or seed derivation reshuffles the field to
+// O(0.1..1.0) — thousands of times these bounds (watched-failing).
 //
-// The bounds sit ~3.4x above the measured floor, not snug to it, and here is why
-// that is the right trade rather than a weaker guard: a FAILED verdict is FATAL, so
-// the bound must clear not just THIS GPU's floor but the CROSS-VENDOR spread of it —
-// and the floor IS dp3/frac rounding, the exact thing that varies between NVIDIA,
-// AMD and Intel. A snug 1.7x bound risks bricking boot on a machine whose rounding
-// runs 2x hotter. The detection cost of widening is near zero because the drift the
-// probe exists to catch is BIMODAL, MEASURED: a one-sided edit either reshuffles the
-// field (a changed hash constant -> worst 0.44, caught at any bound below it) or
-// scales an octave weight subtly (a 1% gain change -> worst 0.0296, i.e. INSIDE the
-// floor — but that edit moves the terrain by <0.001, so it neither pops nor needs
-// catching). There is no dense band of "visible but sub-0.1" drifts to lose. The
-// integer-hash rewrite (the follow-on) is what would let this bound approach the sky
-// probe's 3000x margin; until then this is the honest gross-drift threshold.
-//
-//   kRawTolerance   guards the RAW continent field (the whole enumerated drift
-//                   surface). measured floor 0.0294; gross-drift signal 0.44.
-//   kElevTolerance  guards the final elevation branch (coast mask, ridged
-//                   mountains, craters). Looser: the type-0 coast smoothstep
-//                   amplifies the raw floor ~1/coastWidth at the shoreline (where
-//                   h == seaLevel). measured floor 0.0616.
-constexpr float kRawTolerance  = 1.0e-1f;   // raw field:      floor 0.0294, signal 0.44
-constexpr float kElevTolerance = 2.0e-1f;   // final elevation: floor 0.0616
+//   kRawTolerance   guards the RAW continent field (the enumerated drift surface).
+//                   measured residual 5.6e-6.
+//   kElevTolerance  guards the final elevation branch (coast mask, ridged mountains,
+//                   craters incl. the exp/pow rim). measured residual 1.5e-5.
+constexpr float kRawTolerance  = 2.0e-4f;   // raw field:      residual 5.6e-6
+constexpr float kElevTolerance = 5.0e-4f;   // final elevation: residual 1.5e-5
 
 // The height field must actually VARY across the query set, or a twin that
 // returned a constant would agree with a constant vacuously. PlanetHeight spans

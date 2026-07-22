@@ -15,6 +15,8 @@
 #include "planet_height.h"
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 
 namespace core
 {
@@ -22,7 +24,6 @@ namespace
 {
 
 // --- HLSL-equivalent scalar/vector helpers -----------------------------------
-inline float Frac(float x) { return x - std::floor(x); }
 inline float StepF(float edge, float x) { return x >= edge ? 1.0f : 0.0f; }
 
 inline float SmoothStepF(float e0, float e1, float x)
@@ -31,11 +32,47 @@ inline float SmoothStepF(float e0, float e1, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
-inline Vec3f Floor3(const Vec3f& v) { return { std::floor(v.x), std::floor(v.y), std::floor(v.z) }; }
-inline Vec3f Frac3(const Vec3f& v)  { return { Frac(v.x), Frac(v.y), Frac(v.z) }; }
 inline Vec3f AddS(const Vec3f& v, float s) { return { v.x + s, v.y + s, v.z + s }; }
-// Component-wise (Hadamard) product — HLSL float3 * float3.
-inline Vec3f Had(const Vec3f& a, const Vec3f& b) { return { a.x * b.x, a.y * b.y, a.z * b.z }; }
+
+// --- pcg3d integer hash — the CPU twin of planet_noise.hlsli's Pcg3d ----------
+// BIT-IDENTICAL to the HLSL by construction: uint32 * + ^ >> are 32-bit modular
+// operations both languages define the same way, in the same statement order.
+struct U3 { uint32_t x, y, z; };
+inline U3 Pcg3d(U3 v)
+{
+    v.x = v.x * 1664525u + 1013904223u;
+    v.y = v.y * 1664525u + 1013904223u;
+    v.z = v.z * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v.x ^= v.x >> 16; v.y ^= v.y >> 16; v.z ^= v.z >> 16;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return v;
+}
+
+// uint -> [0,1) via the exact mantissa bit-trick (HLSL asfloat, C++ memcpy).
+inline float UintToUnit(uint32_t h)
+{
+    const uint32_t bits = 0x3f800000u | (h >> 9);
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f - 1.0f;
+}
+
+// Hash an integer lattice cell; `salt` (XORed into z) decorrelates independent uses.
+inline float HashCell1(int cx, int cy, int cz, uint32_t salt)
+{
+    const U3 h = Pcg3d({ static_cast<uint32_t>(cx),
+                         static_cast<uint32_t>(cy),
+                         static_cast<uint32_t>(cz) ^ salt });
+    return UintToUnit(h.x);
+}
+inline Vec3f HashCell3(int cx, int cy, int cz, uint32_t salt)
+{
+    const U3 h = Pcg3d({ static_cast<uint32_t>(cx),
+                         static_cast<uint32_t>(cy),
+                         static_cast<uint32_t>(cz) ^ salt });
+    return { UintToUnit(h.x), UintToUnit(h.y), UintToUnit(h.z) };
+}
 
 // kNoiseRot rows, exactly as the HLSL float3x3 constructor lays them out.
 inline Vec3f MulNoiseRot(const Vec3f& p)
@@ -46,37 +83,33 @@ inline Vec3f MulNoiseRot(const Vec3f& p)
     return { r0.Dot(p), r1.Dot(p), r2.Dot(p) };
 }
 
-// --- Hash / noise (mirror of planet_noise.hlsli) -----------------------------
-float Hash13(Vec3f p)
-{
-    p = Frac3(p * 0.1031f);
-    // p.zyx = (p.z, p.y, p.x)
-    p = AddS(p, p.Dot(Vec3f{ p.z, p.y, p.x } + Vec3f{ 31.32f, 31.32f, 31.32f }));
-    return Frac((p.x + p.y) * p.z);
-}
-
+// --- Value noise (mirror of planet_noise.hlsli) ------------------------------
 float ValueNoise(const Vec3f& x)
 {
-    Vec3f i = Floor3(x);
-    Vec3f f = Frac3(x);
-    Vec3f u = Had(Had(f, f), Vec3f{ 3.0f - 2.0f * f.x, 3.0f - 2.0f * f.y, 3.0f - 2.0f * f.z });
+    const float flx = std::floor(x.x), fly = std::floor(x.y), flz = std::floor(x.z);
+    const int   ix = static_cast<int>(flx), iy = static_cast<int>(fly), iz = static_cast<int>(flz);
+    const float fx = x.x - flx, fy = x.y - fly, fz = x.z - flz;
+    // Quintic (C2) interpolant — same expression as the HLSL, component by component.
+    const float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+    const float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+    const float uz = fz * fz * fz * (fz * (fz * 6.0f - 15.0f) + 10.0f);
 
-    float n000 = Hash13(i + Vec3f{ 0, 0, 0 });
-    float n100 = Hash13(i + Vec3f{ 1, 0, 0 });
-    float n010 = Hash13(i + Vec3f{ 0, 1, 0 });
-    float n110 = Hash13(i + Vec3f{ 1, 1, 0 });
-    float n001 = Hash13(i + Vec3f{ 0, 0, 1 });
-    float n101 = Hash13(i + Vec3f{ 1, 0, 1 });
-    float n011 = Hash13(i + Vec3f{ 0, 1, 1 });
-    float n111 = Hash13(i + Vec3f{ 1, 1, 1 });
+    const float n000 = HashCell1(ix,     iy,     iz,     0u);
+    const float n100 = HashCell1(ix + 1, iy,     iz,     0u);
+    const float n010 = HashCell1(ix,     iy + 1, iz,     0u);
+    const float n110 = HashCell1(ix + 1, iy + 1, iz,     0u);
+    const float n001 = HashCell1(ix,     iy,     iz + 1, 0u);
+    const float n101 = HashCell1(ix + 1, iy,     iz + 1, 0u);
+    const float n011 = HashCell1(ix,     iy + 1, iz + 1, 0u);
+    const float n111 = HashCell1(ix + 1, iy + 1, iz + 1, 0u);
 
-    float nx00 = Lerp(n000, n100, u.x);
-    float nx10 = Lerp(n010, n110, u.x);
-    float nx01 = Lerp(n001, n101, u.x);
-    float nx11 = Lerp(n011, n111, u.x);
-    float nxy0 = Lerp(nx00, nx10, u.y);
-    float nxy1 = Lerp(nx01, nx11, u.y);
-    return Lerp(nxy0, nxy1, u.z);
+    const float nx00 = Lerp(n000, n100, ux);
+    const float nx10 = Lerp(n010, n110, ux);
+    const float nx01 = Lerp(n001, n101, ux);
+    const float nx11 = Lerp(n011, n111, ux);
+    const float nxy0 = Lerp(nx00, nx10, uy);
+    const float nxy1 = Lerp(nx01, nx11, uy);
+    return Lerp(nxy0, nxy1, uz);
 }
 
 float Fbm5(Vec3f p)
@@ -118,31 +151,21 @@ float Ridged3(Vec3f p)
     return sum;
 }
 
-Vec3f Hash33(Vec3f p)
-{
-    p = Frac3(Had(p, Vec3f{ 0.1031f, 0.1030f, 0.0973f }));
-    // p.yxz = (p.y, p.x, p.z)
-    p = AddS(p, p.Dot(Vec3f{ p.y, p.x, p.z } + Vec3f{ 33.33f, 33.33f, 33.33f }));
-    // (p.xxy + p.yxx) * p.zyx
-    Vec3f a{ p.x, p.x, p.y };
-    Vec3f b{ p.y, p.x, p.x };
-    Vec3f c{ p.z, p.y, p.x };
-    return Frac3(Had(a + b, c));
-}
-
 float CraterField(const Vec3f& p, float freq, float density)
 {
-    Vec3f pp = p * freq;
-    Vec3f id = Floor3(pp);
-    Vec3f f  = AddS(Frac3(pp), -0.5f);
+    const Vec3f pp = p * freq;
+    const float flx = std::floor(pp.x), fly = std::floor(pp.y), flz = std::floor(pp.z);
+    const int   idx = static_cast<int>(flx), idy = static_cast<int>(fly), idz = static_cast<int>(flz);
+    const Vec3f f{ (pp.x - flx) - 0.5f, (pp.y - fly) - 0.5f, (pp.z - flz) - 0.5f };
 
-    float present = StepF(1.0f - density, Hash13(id * 1.7f + Vec3f{ 4.4f, 4.4f, 4.4f }));
-    Vec3f c   = (Hash33(id + Vec3f{ 2.2f, 2.2f, 2.2f }) + Vec3f{ -0.5f, -0.5f, -0.5f }) * 0.5f;
-    float d   = (f - c).Length();
-    float rad = 0.16f + 0.16f * Hash13(id + Vec3f{ 8.8f, 8.8f, 8.8f });
+    const float present = StepF(1.0f - density, HashCell1(idx, idy, idz, 0x9E3779B9u));
+    const Vec3f h3 = HashCell3(idx, idy, idz, 0x85EBCA6Bu);
+    const Vec3f c{ (h3.x - 0.5f) * 0.5f, (h3.y - 0.5f) * 0.5f, (h3.z - 0.5f) * 0.5f };
+    const float d   = (f - c).Length();
+    const float rad = 0.16f + 0.16f * HashCell1(idx, idy, idz, 0xC2B2AE35u);
 
-    float bowl = -SmoothStepF(rad, rad * 0.2f, d) * 0.7f;
-    float rim  = std::exp(-std::pow(Saturate((d - rad) / (rad * 0.5f)), 2.0f) * 4.0f) * 0.5f;
+    const float bowl = -SmoothStepF(rad, rad * 0.2f, d) * 0.7f;
+    const float rim  = std::exp(-std::pow(Saturate((d - rad) / (rad * 0.5f)), 2.0f) * 4.0f) * 0.5f;
     return present * (bowl + rim);
 }
 
