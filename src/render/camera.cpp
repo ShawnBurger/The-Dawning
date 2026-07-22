@@ -131,10 +131,14 @@ core::Mat4x4 Camera::ViewMatrix() const
 
 core::Mat4x4 Camera::ProjectionMatrix(float aspectRatio) const
 {
-    return core::Mat4x4::PerspectiveFovLH(
+    // Reversed-Z, infinite far. The raster depth pipeline (D32_FLOAT, cleared to
+    // 0, GREATER test) is configured to match; see render_constants.h. m_farZ is
+    // intentionally unused — there is no far plane, and the near plane is the
+    // precision lever set per camera mode via SetClipPlanes().
+    return core::Mat4x4::PerspectiveFovLH_ReverseZ(
         m_fovDeg * core::DEG_TO_RAD,
         aspectRatio,
-        m_nearZ, m_farZ);
+        m_nearZ);
 }
 
 core::Mat4x4 Camera::ViewProjectionMatrix(float aspectRatio) const

@@ -96,6 +96,55 @@ TEST_CASE(PerspectiveFovLH_DepthEndpoints)
     }
 }
 
+// Reversed-Z with an infinite far plane maps the NEAR plane to 1 and recedes to
+// 0 at infinity, and depth DECREASES with distance. This is the astronomical-
+// scale depth strategy; the raster clear (0.0) and DepthFunc (GREATER) are the
+// runtime half, pinned by the smoke depth-order probe.
+TEST_CASE(PerspectiveFovLH_ReverseZ_DepthEndpointsAndOrder)
+{
+    const float nearZ = 0.1f;
+    const core::Mat4x4 p =
+        core::Mat4x4::PerspectiveFovLH_ReverseZ(core::PI / 3.0f, 16.0f / 9.0f, nearZ);
+
+    // near -> 1 exactly; a very distant point -> ~0 (never negative, never clipped).
+    CHECK_APPROX(p.TransformPoint({ 0.0f, 0.0f, nearZ }).z, 1.0f);
+    const float atFar = p.TransformPoint({ 0.0f, 0.0f, 1.0e11f }).z; // ~1 AU away
+    CHECK(atFar >= 0.0f && atFar < 1.0e-3f);
+
+    // Centre stays centred.
+    CHECK_APPROX(p.TransformPoint({ 0.0f, 0.0f, nearZ }).x, 0.0f);
+    CHECK_APPROX(p.TransformPoint({ 0.0f, 0.0f, nearZ }).y, 0.0f);
+
+    // Depth is strictly DECREASING with distance and stays inside [0, 1] — the
+    // reversed order the GREATER depth test relies on. Watched by inverting the
+    // near-plane term: near -> 1 breaks first.
+    float previous = 2.0f;
+    for (float z = nearZ; z <= 1.0e9f; z *= 4.0f)
+    {
+        const float depth = p.TransformPoint({ 0.0f, 0.0f, z }).z;
+        CHECK(depth < previous);
+        CHECK(depth >= 0.0f && depth <= 1.0f);
+        previous = depth;
+    }
+}
+
+// Reversed-Z must change ONLY the depth (z/w) terms — the fov/aspect (x, y)
+// mapping must be byte-identical to the forward projection, because DXR ray
+// generation and the frustum edges depend on it. This is what lets the DXR path
+// stay untouched while the raster depth flips.
+TEST_CASE(PerspectiveFovLH_ReverseZ_PreservesFovMapping)
+{
+    const float fovY = core::PI / 3.0f, aspect = 16.0f / 9.0f, z = 25.0f;
+    const core::Mat4x4 fwd = core::Mat4x4::PerspectiveFovLH(fovY, aspect, 0.1f, 1000.0f);
+    const core::Mat4x4 rev = core::Mat4x4::PerspectiveFovLH_ReverseZ(fovY, aspect, 0.1f);
+
+    // Same x/y NDC for the same view-space point (depth differs, x/y must not).
+    const core::Vec3f pf = fwd.TransformPoint({ 7.0f, -3.0f, z });
+    const core::Vec3f pr = rev.TransformPoint({ 7.0f, -3.0f, z });
+    CHECK_APPROX(pf.x, pr.x);
+    CHECK_APPROX(pf.y, pr.y);
+}
+
 // A point exactly on the frustum edge must land exactly on the NDC edge.
 // This is what pins down the fovY / aspect relationship.
 TEST_CASE(PerspectiveFovLH_FrustumEdgesMapToNdcEdges)

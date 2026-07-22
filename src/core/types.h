@@ -487,6 +487,57 @@ struct Mat4x4
         return r;
     }
 
+    // REVERSED-Z perspective with an INFINITE far plane, LH, Z in [0,1].
+    // Maps nearZ -> 1 and z_view -> +inf -> 0. Pairing float depth (D32_FLOAT)
+    // with reversed-Z gives near-constant relative precision (dz/z ~ 2^-23), so a
+    // single frustum spans a huge near/far ratio without z-fighting — the depth
+    // strategy for true-scale astronomical rendering. There is NO far plane, so
+    // nothing is far-clipped; the near plane is the sole precision lever.
+    // Derivation: take the finite reversed form (near/far swapped) and let far->inf,
+    // which sends m[2][2] -> 0 and m[3][2] -> nearZ. Then clip.z = nearZ,
+    // clip.w = z_view, so z_ndc = nearZ / z_view.
+    static Mat4x4 PerspectiveFovLH_ReverseZ(float fovY, float aspect, float nearZ)
+    {
+        float h = 1.0f / std::tan(fovY * 0.5f);
+        float w = h / aspect;
+
+        Mat4x4 r;
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                r.m[i][j] = 0.0f;
+
+        r.m[0][0] = w;
+        r.m[1][1] = h;
+        r.m[2][2] = 0.0f;
+        r.m[2][3] = 1.0f;
+        r.m[3][2] = nearZ;
+        return r;
+    }
+
+    // REVERSED-Z perspective with a FINITE far plane, LH, Z in [0,1]. Maps
+    // nearZ -> 1 and farZ -> 0 (the standard build with near/far swapped in q).
+    // Provided for passes that genuinely need a bounded far; the infinite variant
+    // above is the default.
+    static Mat4x4 PerspectiveFovLH_ReverseZFinite(float fovY, float aspect,
+                                                  float nearZ, float farZ)
+    {
+        float h = 1.0f / std::tan(fovY * 0.5f);
+        float w = h / aspect;
+        float q = nearZ / (nearZ - farZ); // swapped vs forward-Z's far/(far-near)
+
+        Mat4x4 r;
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                r.m[i][j] = 0.0f;
+
+        r.m[0][0] = w;
+        r.m[1][1] = h;
+        r.m[2][2] = q;
+        r.m[2][3] = 1.0f;
+        r.m[3][2] = -farZ * q;
+        return r;
+    }
+
     // Orthographic projection
     static Mat4x4 OrthoLH(float width, float height, float nearZ, float farZ)
     {

@@ -4,6 +4,7 @@
 
 #include "renderer.h"
 #include "shader_utils.h"
+#include "render_constants.h"
 #include "../core/log.h"
 #include "../core/sky_radiance.h"   // core::Luminance, for the IBL smoke marker
 #include <cstring>
@@ -774,7 +775,8 @@ void Renderer::BeginScenePass(D3D12Device& device)
     auto rtv = m_hdrRtvHeap->GetCPUDescriptorHandleForHeapStart();
     auto dsv = device.DSV();
     cmd->ClearRenderTargetView(rtv, kSceneClearColor, 0, nullptr);
-    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, render::kMainDepthClear,
+                               0, 0, nullptr); // reversed-Z: far = 0
     cmd->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
 }
 
@@ -1393,10 +1395,12 @@ bool Renderer::CreatePSO(ID3D12Device* device)
     psoDesc.BlendState.RenderTarget[0].LogicOpEnable         = FALSE;
     psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-    // Depth-stencil: depth test on, write on
+    // Depth-stencil: depth test on, write on. Reversed-Z (near=1, far=0) so the
+    // opaque pass keeps the fragment with the GREATER depth. Builds BOTH m_pso
+    // and m_psoDrawProbe below, so both stay consistent.
     psoDesc.DepthStencilState.DepthEnable    = TRUE;
     psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;
+    psoDesc.DepthStencilState.DepthFunc      = render::kMainDepthCompare;
     psoDesc.DepthStencilState.StencilEnable  = FALSE;
 
     // Output

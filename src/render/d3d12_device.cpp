@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "d3d12_device.h"
+#include "render_constants.h"
 #include "../core/log.h"
 #include <d3d12sdklayers.h>
 #include <cstdlib>
@@ -329,7 +330,7 @@ bool D3D12Device::CreateDepthBuffer()
 
     D3D12_CLEAR_VALUE clearValue = {};
     clearValue.Format               = DXGI_FORMAT_D32_FLOAT;
-    clearValue.DepthStencil.Depth   = 1.0f;
+    clearValue.DepthStencil.Depth   = render::kMainDepthClear; // reversed-Z: far = 0
     clearValue.DepthStencil.Stencil = 0;
 
     D3D12_HEAP_PROPERTIES heapProps = {};
