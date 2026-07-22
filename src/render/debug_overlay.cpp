@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cmath>
 
 namespace render
 {
@@ -400,12 +401,18 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
     const Pixel text = { 232, 238, 247, 255 };
     const Pixel muted = { 159, 174, 197, 245 };
     const Pixel accent = state.pathTracing ? Pixel{ 89, 178, 255, 255 } : Pixel{ 118, 222, 172, 255 };
+    const Pixel navAccent = { 255, 209, 102, 255 }; // warm amber for the nav heading
+
+    // The panel is only as tall as its content: the engine block always, plus the
+    // navigation block when a star system is active. The unused lower region of the
+    // fixed-size texture stays transparent (alpha 0), so the compact engine-only
+    // overlay is pixel-identical to before this block existed.
+    const int usedHeight = state.navActive ? static_cast<int>(kOverlayHeight) : 176;
 
     DrawRect(0, 0, kOverlayWidth, kOverlayHeight, { 0, 0, 0, 0 });
-    DrawRect(0, 0, kOverlayWidth, kOverlayHeight, panel);
-    DrawRect(0, 0, 5, kOverlayHeight, accent);
+    DrawRect(0, 0, kOverlayWidth, usedHeight, panel);
+    DrawRect(0, 0, 5, usedHeight, accent);
     DrawRect(0, 31, kOverlayWidth, 1, line);
-    DrawRect(14, 118, kOverlayWidth - 28, 40, panel2);
 
     char buf[160];
     DrawTextLine("THE DAWNING V3 DEBUG", 16, 7, text, true);
@@ -440,7 +447,66 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
                   state.mouseCaptured ? "CAPTURED" : "FREE");
     DrawTextLine(buf, 16, 101, muted);
 
-    DrawTextLine("F1 RENDER   F2 QUALITY   F3 OVERLAY   ESC RELEASE/QUIT", 24, 128, muted);
+    int footerY = 118;
+    if (state.navActive)
+    {
+        // Unit-aware formatting so a moon (hundreds of thousands of km) and a
+        // planet (a few AU) are both legible in the same block.
+        constexpr double kAU  = 1.495978707e11;
+        constexpr double kDay = 86400.0;
+        constexpr double kYear = 365.25 * kDay;
+        auto fmtLength = [](char* out, size_t n, double m)
+        {
+            if (std::fabs(m) >= 0.01 * kAU)
+                std::snprintf(out, n, "%.4f AU", m / kAU);
+            else
+                std::snprintf(out, n, "%.0f km", m / 1000.0);
+        };
+
+        DrawRect(0, 118, kOverlayWidth, 1, line); // separator above the nav block
+        DrawTextLine("NAVIGATION", 16, 125, navAccent, true);
+
+        std::snprintf(buf, sizeof(buf), "VIEW %-10s   WARP %gx",
+                      state.cameraModeName, state.timeWarp);
+        DrawTextLine(buf, 16, 151, text);
+
+        char dist[32];
+        fmtLength(dist, sizeof(dist), state.focusDistance);
+        std::snprintf(buf, sizeof(buf), "FOCUS %-8s   RANGE %s",
+                      state.focusName, dist);
+        DrawTextLine(buf, 16, 171, text);
+
+        if (state.focusHasOrbit)
+        {
+            char sma[32];
+            fmtLength(sma, sizeof(sma), state.focusSemiMajorAxis);
+            std::snprintf(buf, sizeof(buf), "ORBIT  a %s   e %.4f",
+                          sma, state.focusEccentricity);
+            DrawTextLine(buf, 16, 191, text);
+
+            char per[32];
+            if (state.focusPeriodSeconds >= kYear)
+                std::snprintf(per, sizeof(per), "%.2f yr", state.focusPeriodSeconds / kYear);
+            else if (state.focusPeriodSeconds >= kDay)
+                std::snprintf(per, sizeof(per), "%.1f d", state.focusPeriodSeconds / kDay);
+            else
+                std::snprintf(per, sizeof(per), "%.0f s", state.focusPeriodSeconds);
+            std::snprintf(buf, sizeof(buf), "PERIOD %s", per);
+            DrawTextLine(buf, 16, 211, muted);
+        }
+        else
+        {
+            DrawTextLine("ORBIT  -  central body (frame origin)", 16, 191, muted);
+        }
+
+        footerY = 240;
+    }
+
+    DrawRect(14, footerY, kOverlayWidth - 28, 40, panel2);
+    DrawTextLine(state.navActive
+                     ? "F4 VIEW   F5 FOCUS   , . / WARP   F1 RENDER   F3 HIDE"
+                     : "F1 RENDER   F2 QUALITY   F3 OVERLAY   ESC RELEASE/QUIT",
+                 24, footerY + 10, muted);
 }
 
 void DebugOverlay::UploadTexture(D3D12Device& device)

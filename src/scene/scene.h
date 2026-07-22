@@ -137,6 +137,7 @@ public:
 
     // --- Access ---
     ecs::Registry&      GetRegistry()       { return m_registry; }
+    const ecs::Registry& GetRegistry() const { return m_registry; }
     ResourceManager&    GetResources()      { return m_resources; }
     render::PathTracer* GetPathTracer()     { return &m_pathTracer; }
     uint32_t            EntityCount() const { return m_registry.EntityCount(); }

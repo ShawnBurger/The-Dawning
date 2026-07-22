@@ -24,6 +24,22 @@ struct DebugOverlayState
     uint32_t entityCount = 0;
     RTQualityInfo rtQuality = {};
     core::Vec3d cameraPosition = {};
+
+    // -------------------------------------------------------------------------
+    // Navigation block — drawn only when a star system is active. Makes the
+    // simulation legible: which view/body the camera is on, the time-warp rate,
+    // and the focused body's live orbit. The string pointers are borrowed from
+    // static tables in app.cpp and outlive the copy, so no ownership is taken.
+    // -------------------------------------------------------------------------
+    bool         navActive = false;
+    const char*  cameraModeName = "";
+    double       timeWarp = 1.0;
+    const char*  focusName = "";
+    double       focusDistance = 0.0;    // metres, camera -> focused body centre
+    bool         focusHasOrbit = false;  // false for the star / bodies with no orbit
+    double       focusSemiMajorAxis = 0.0; // a (m); < 0 for hyperbolic
+    double       focusEccentricity = 0.0;  // e
+    double       focusPeriodSeconds = 0.0; // 0 when not a closed ellipse
 };
 
 class DebugOverlay
@@ -56,7 +72,10 @@ private:
     void UploadTexture(D3D12Device& device);
 
     static constexpr uint32_t kOverlayWidth = 520;
-    static constexpr uint32_t kOverlayHeight = 176;
+    // Tall enough for the navigation block. When navActive is false the lower
+    // region is left transparent (the panel background is drawn only as tall as
+    // the content), so the compact engine-only overlay is unchanged in look.
+    static constexpr uint32_t kOverlayHeight = 288;
 
     bool m_initialized = false;
     uint32_t m_uploadPitch = 0;

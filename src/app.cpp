@@ -2819,6 +2819,63 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     state.entityCount = m_scene.EntityCount();
     state.rtQuality = m_rtQualityInfo;
     state.cameraPosition = m_camera.Position();
+
+    // Navigation block — only meaningful once the reference star system is seeded.
+    if (m_options.starSystem)
+    {
+        state.navActive = true;
+
+        static const char* kModeNames[] = { "SHIP", "ORRERY", "NEAR-BODY", "FREE" };
+        const uint32_t modeIdx = static_cast<uint32_t>(m_cameraMode);
+        state.cameraModeName =
+            modeIdx < static_cast<uint32_t>(CameraMode::Count) ? kModeNames[modeIdx] : "?";
+        state.timeWarp = m_timer.GetTimeScale();
+
+        // The F5-selected focus body (near-body/orrery framing), defaulting to Earth.
+        const uint64_t focusId =
+            m_focusBodyId ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
+        const uint64_t localId = focusId - scene::kStarSystemBodyIdBase;
+        switch (localId)
+        {
+            case 1:  state.focusName = "SUN";   break;
+            case 10: state.focusName = "EARTH"; break;
+            case 11: state.focusName = "MOON";  break;
+            case 20: state.focusName = "MARS";  break;
+            default: state.focusName = "BODY";  break;
+        }
+
+        // Look the body up in the (const) registry the same way BuildOrbitTraceVertices
+        // does: distance is camera -> body centre, orbit comes from its OrbitState.
+        const auto& registry = m_scene.GetRegistry();
+        if (const auto* pool = registry.GetPool<ecs::GravitationalBody>())
+        {
+            for (uint32_t i = 0; i < pool->Count(); ++i)
+            {
+                if (pool->DataAt(i).bodyId != focusId)
+                    continue;
+                const ecs::Entity e = registry.EntityAtIndex(pool->EntityAt(i));
+                if (const auto* t = registry.TryGet<ecs::Transform>(e))
+                    state.focusDistance = (t->position - m_camera.Position()).Length();
+                if (const auto* os = registry.TryGet<ecs::OrbitState>(e))
+                {
+                    state.focusHasOrbit = true;
+                    state.focusSemiMajorAxis = os->elements.semiMajorAxis;
+                    state.focusEccentricity  = os->elements.eccentricity;
+                    // Closed-ellipse period T = 2*pi*sqrt(a^3/mu); undefined for a
+                    // hyperbola (a<0) or a missing primary mu, reported as 0.
+                    const double a = os->elements.semiMajorAxis;
+                    if (a > 0.0 && os->primaryMu > 0.0)
+                    {
+                        constexpr double kTwoPi = 6.283185307179586;
+                        state.focusPeriodSeconds =
+                            kTwoPi * std::sqrt(a * a * a / os->primaryMu);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     return state;
 }
 
