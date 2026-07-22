@@ -44,8 +44,9 @@ TimeStep Timer::Tick()
     m_totalTime += dt;
     m_frameCount++;
 
-    // Feed fixed timestep accumulator
-    m_accumulator += dt;
+    // Feed the fixed-step accumulator with this frame's WALL time, scaled by the
+    // time-acceleration factor (and capped against a spiral of death).
+    AdvanceTime(dt);
 
     // Smoothed FPS (update every 0.5 seconds)
     m_fpsAccum += dt;
@@ -81,6 +82,27 @@ bool Timer::SetFixedDt(double dt)
         return false;
     m_fixedDt = dt;
     return true;
+}
+
+bool Timer::SetTimeScale(double scale)
+{
+    if (!(scale > 0.0) || !std::isfinite(scale))
+        return false;
+    m_timeScale = scale;
+    return true;
+}
+
+void Timer::AdvanceTime(double realDt)
+{
+    if (!std::isfinite(realDt) || realDt < 0.0)
+        return;
+    m_accumulator += realDt * m_timeScale;
+    // Cap accumulated physics work per frame so a large scale (or long real frame)
+    // cannot demand unbounded steps and freeze the loop; excess wall time is
+    // dropped, so the sim runs at min(requested, cap)x rather than stalling.
+    const double maxAccum = static_cast<double>(kMaxStepsPerTick) * m_fixedDt;
+    if (m_accumulator > maxAccum)
+        m_accumulator = maxAccum;
 }
 
 } // namespace core
