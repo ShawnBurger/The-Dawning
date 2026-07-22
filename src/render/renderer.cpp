@@ -42,6 +42,18 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateBloomPipeline(device.Device())) return false;
     if (!CreateShadowResources(device.Device())) return false;
     if (!CreateShadowPSO(device.Device())) return false;
+    // Depth prepass + SSAO. Non-fatal: on failure the AO texture stays white (no
+    // occlusion) and the image is exactly the pre-SSAO result, so the engine still
+    // boots. CreateSSAOTargets needs the texture heap (AO SRV slot) and the device
+    // size, so it comes after CreateTextureHeap and CreateHDRTarget above.
+    if (!CreatePrepassPSO(device.Device()))
+        core::Log::Error("Depth-prepass PSO unavailable; SSAO disabled");
+    else if (!CreateSSAOPipeline(device.Device()))
+        core::Log::Error("SSAO pipeline unavailable; SSAO disabled");
+    else if (!CreateSSAOTargets(device,
+                                static_cast<uint32_t>(device.Width()),
+                                static_cast<uint32_t>(device.Height())))
+        core::Log::Error("SSAO targets unavailable; SSAO disabled");
     // Resources, RTVs and PSOs only - EnsureEnvironmentIBL below records the GPU
     // work, because it needs its own command list and Init has none open.
     if (!m_environmentIBL.Init(device.Device())) return false;
@@ -67,6 +79,11 @@ bool Renderer::Init(D3D12Device& device)
     if (!EnsureFrameStructuredBuffer(device, m_materialBuffer, kMinMaterialCapacity,
                                      sizeof(MaterialData), L"MaterialDataBuffer"))
         return false;
+    // Isolated per-draw transform buffer for the depth prepass. Floor-sized here so
+    // it always exists (BeginFrame's prepass bind is never skipped); grown per frame
+    // in BeginFrameResources. Non-fatal — the prepass simply no-ops without it.
+    EnsureFrameStructuredBuffer(device, m_prepassObjectBuffer, kMinObjectCapacity,
+                                sizeof(ObjectData), L"PrepassObjectBuffer");
 
     // Bake the environment cubemap. This opens its own command list, so it comes
     // after every resource that Init creates and before App opens one of its
@@ -180,6 +197,9 @@ void Renderer::Shutdown()
     // escape hatch.
     m_objectBuffer.Reset();
     m_materialBuffer.Reset();
+    m_prepassObjectBuffer.Reset();
+    m_prepassDepth.Reset();
+    m_ssaoTarget.Reset();
     for (auto& buffer : m_drawProbeBuffer) buffer.Reset();
     m_drawProbeZeroUpload.Reset();
     m_drawProbeReadback.Reset();
@@ -389,6 +409,12 @@ bool Renderer::ResizeHDRTarget(D3D12Device& device, uint32_t width, uint32_t hei
     for (uint32_t i = 0; i < kBloomTargetCount; ++i)
         if (m_bloomTarget[i])
             device.DeferredRelease(m_bloomTarget[i]);
+
+    // The SSAO prepass depth and AO target are full-screen, so they resize too.
+    // Non-fatal: on failure SSAO simply stops contributing (white AO) at the new
+    // size while the rest of the frame resizes normally.
+    if (m_ssaoTarget && !CreateSSAOTargets(device, width, height))
+        core::Log::Error("SSAO targets resize failed; SSAO disabled at new size");
 
     return CreateHDRTarget(device.Device(), width, height);
 }
@@ -1049,7 +1075,17 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         envRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         envRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[10] = {};
+        // SSAO AO texture (t0, space7), same isolation shape as shadow/env: its own
+        // register space, its own table, bound at a fixed reserved heap slot.
+        D3D12_DESCRIPTOR_RANGE1 aoRange = {};
+        aoRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        aoRange.NumDescriptors                    = 1;
+        aoRange.BaseShaderRegister                = 0;
+        aoRange.RegisterSpace                     = 7;
+        aoRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+        aoRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+        D3D12_ROOT_PARAMETER1 rootParams[11] = {};
 
         // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1177,6 +1213,15 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[9].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         rootParams[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 10: SSAO AO texture (t0, space7). PIXEL-only — the opaque pass's
+        // pixel shader samples it to occlude the IBL ambient. APPENDED so the
+        // ten existing parameters keep their indices and every GPU probe that
+        // reads them by index is unmoved.
+        rootParams[10].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[10].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[10].DescriptorTable.pDescriptorRanges   = &aoRange;
+        rootParams[10].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
@@ -1211,6 +1256,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         envRange.RegisterSpace                     = 6;
         envRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+        D3D12_DESCRIPTOR_RANGE aoRange = {};
+        aoRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        aoRange.NumDescriptors                    = 1;
+        aoRange.BaseShaderRegister                = 0;
+        aoRange.RegisterSpace                     = 7;
+        aoRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
         // MUST STAY IN LOCKSTEP WITH THE v1.1 BRANCH ABOVE. These are two
         // independent copies of the same layout and this one only runs when
         // CheckFeatureSupport reports no 1.1 support, so a divergence produces
@@ -1218,7 +1270,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // including both smoke modes - would ever catch. v1.0 has no
         // per-descriptor Flags member; volatile is the implicit default there,
         // which is what the v1.1 branch asks for explicitly.
-        D3D12_ROOT_PARAMETER rootParams[10] = {};
+        D3D12_ROOT_PARAMETER rootParams[11] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -1279,6 +1331,12 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[9].Descriptor.ShaderRegister = 1;
         rootParams[9].Descriptor.RegisterSpace  = 4;
         rootParams[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        // Slot 10: SSAO AO texture (t0, space7). PIXEL-only. Lockstep with v1.1.
+        rootParams[10].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[10].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[10].DescriptorTable.pDescriptorRanges   = &aoRange;
+        rootParams[10].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
@@ -1560,8 +1618,12 @@ bool Renderer::CreateConstantBuffers(ID3D12Device* device)
 
 bool Renderer::CreateTextureHeap(ID3D12Device* device)
 {
+    // kMaxRasterTextures material/reserved slots PLUS one extra top slot for the
+    // SSAO AO texture (kAoDescriptorIndex == kMaxRasterTextures). The material
+    // allocator's range and every existing reserved slot are unchanged; the heap
+    // just grows by one.
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = kMaxRasterTextures;
+    heapDesc.NumDescriptors = kMaxRasterTextures + 1;
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -1586,6 +1648,14 @@ bool Renderer::CreateTextureHeap(ID3D12Device* device)
     // raster side was the one depending on someone else being careful.
     for (uint32_t i = 0; i < kMaxRasterTextures; ++i)
         WriteNullTextureDescriptor(device, i);
+
+    // The reserved top slot for the SSAO AO texture (kAoDescriptorIndex ==
+    // kMaxRasterTextures) is past that loop's range and past WriteNullTextureDescriptor's
+    // guard, so initialise it here to a null SRV. Without this the slot is an
+    // UNINITIALISED shader-visible descriptor whenever SSAO creation fails or is
+    // absent, and the opaque pass binds and (via the iblParams.w gate) could sample
+    // it. CreateSSAOTargets overwrites this with the live AO SRV on success.
+    WriteAoFallbackDescriptor(device);
 
     // Slot 0 stays the null-SRV fallback, slot 1 the shadow map and slot 2 the
     // prefiltered environment cube, so allocation starts at 3 and the allocator
@@ -2544,6 +2614,14 @@ void Renderer::BeginFrameResources(D3D12Device& device, uint32_t maxDrawsHint,
     EnsureFrameStructuredBuffer(device, m_materialBuffer, materialsNeeded,
                                 sizeof(MaterialData), L"MaterialDataBuffer");
 
+    // The depth prepass draws each opaque caster once, into its OWN isolated object
+    // buffer, so it needs one draw count (not two) and never touches the shadow/main
+    // object buffer, its 2x sizing, or the shadow/main record-parity invariant.
+    if (m_prepassObjectBuffer.Valid())
+        EnsureFrameStructuredBuffer(device, m_prepassObjectBuffer, maxDrawsHint,
+                                    sizeof(ObjectData), L"PrepassObjectBuffer");
+    m_prepassCursor = 0;
+
     m_drawProbeEnabled = enableDrawProbe;
     m_drawProbeReadbackPending = false;
     m_iblProbeReadbackPending = false;
@@ -2707,7 +2785,12 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     perFrame.iblParams[1] = m_iblIntensity;
     perFrame.iblParams[2] =
         (m_environmentIBL.IsBuilt() && !m_iblDisabledThisFrame) ? 1.0f : 0.0f;
-    perFrame.iblParams[3] = 0.0f;
+    // Raster SSAO-active flag: basic_ps samples the AO texture and occludes the
+    // diffuse ambient only when this is set. Off when SSAO resources failed/are
+    // absent, so the image degrades to exactly the pre-SSAO result and the null
+    // placeholder AO descriptor is never read. (Distinct from the DXR path's use of
+    // the same iblParams.w slot as a probe-write gate — separate constant buffers.)
+    perFrame.iblParams[3] = SsaoActive() ? 1.0f : 0.0f;
 
     auto perFrameAddr = UploadCB(&perFrame, sizeof(perFrame));
     cmd->SetGraphicsRootConstantBufferView(1, perFrameAddr);
@@ -2754,6 +2837,16 @@ void Renderer::BeginFrame(D3D12Device& device, const Camera& camera)
     D3D12_GPU_DESCRIPTOR_HANDLE envGpu = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
     envGpu.ptr += static_cast<UINT64>(kEnvCubeDescriptorIndex) * m_textureDescSize;
     cmd->SetGraphicsRootDescriptorTable(8, envGpu);
+
+    // SSAO AO texture (slot 10), at the reserved top heap slot. ALWAYS a valid,
+    // non-dangling descriptor: WriteAoFallbackDescriptor seeds a null SRV there at
+    // heap creation and on any SSAO failure, and CreateSSAOTargets overwrites it with
+    // the live AO SRV on success. basic_ps only SAMPLES it when iblParams.w says SSAO
+    // is active, so the null placeholder's read value never reaches the image and a
+    // failed/absent SSAO degrades to exactly the pre-SSAO result.
+    D3D12_GPU_DESCRIPTOR_HANDLE aoGpu = m_textureHeap->GetGPUDescriptorHandleForHeapStart();
+    aoGpu.ptr += static_cast<UINT64>(kAoDescriptorIndex) * m_textureDescSize;
+    cmd->SetGraphicsRootDescriptorTable(10, aoGpu);
 }
 
 void Renderer::DrawSky(D3D12Device& device)
@@ -3678,6 +3771,409 @@ void Renderer::DrawMeshShadow(D3D12Device& device, const Mesh& mesh,
     cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
     cmd->IASetIndexBuffer(&mesh.ibView);
     cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+}
+
+// =============================================================================
+// Depth prepass + SSAO (raster ambient occlusion)
+// =============================================================================
+namespace
+{
+// Matches cbuffer SSAOConstants (b0) in ssao_ps.hlsl. 32 bytes; UploadCB rounds to 256.
+struct SSAOConstants
+{
+    float tanHalfFovY;
+    float aspect;
+    float nearZ;
+    float radius;
+    float screenSize[2];
+    float bias;
+    float intensity;
+};
+} // namespace
+
+void Renderer::WriteAoFallbackDescriptor(ID3D12Device* device)
+{
+    if (!device || !m_textureHeap) return;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Format                  = kAoFormat;
+    srv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels     = 1;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(kAoDescriptorIndex) * m_textureDescSize;
+    // Null resource: a legal, non-dangling SRV. Its read value (0) never reaches the
+    // image because basic_ps only samples the slot when iblParams.w says SSAO is live.
+    device->CreateShaderResourceView(nullptr, &srv, handle);
+}
+
+bool Renderer::CreatePrepassPSO(ID3D12Device* device)
+{
+    // basic_vs (positions + object transform), NO pixel shader: writes only camera
+    // depth into the prepass depth target. Reuses the main root signature so the
+    // object-buffer/CBPerPass binding machinery is identical to the opaque pass.
+    auto vs = CompileShaderFromFile(L"shaders/basic_vs.hlsl", "main", "vs_5_1");
+    if (!vs)
+    {
+        core::Log::Error("Failed to compile basic_vs for the depth prepass");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_rootSig.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.InputLayout = { kVertexLayout, kVertexLayoutCount };
+    pso.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode              = D3D12_CULL_MODE_BACK;
+    pso.RasterizerState.FrontCounterClockwise = FALSE;
+    pso.RasterizerState.DepthClipEnable       = TRUE;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+    // Reversed-Z, matching the main pass exactly so the prepass depth equals what
+    // the opaque pass would produce. No depth bias (that is a shadow-acne fix; the
+    // SSAO reconstruction wants true depth).
+    pso.DepthStencilState.DepthEnable    = TRUE;
+    pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    pso.DepthStencilState.DepthFunc      = render::kMainDepthCompare;
+    pso.DepthStencilState.StencilEnable  = FALSE;
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets      = 0;
+    pso.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    pso.SampleDesc            = { 1, 0 };
+    pso.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_prepassPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Depth-prepass PSO create failed: 0x%08X", hr);
+        return false;
+    }
+    m_prepassPSO->SetName(L"DepthPrepassPSO");
+    return true;
+}
+
+bool Renderer::CreateSSAOPipeline(ID3D12Device* device)
+{
+    auto vs = CompileShaderFromFile(L"shaders/tonemap_vs.hlsl", "main", "vs_5_1");
+    auto ps = CompileShaderFromFile(L"shaders/ssao_ps.hlsl", "main", "ps_5_1");
+    if (!vs || !ps)
+    {
+        core::Log::Error("Failed to compile SSAO shaders");
+        return false;
+    }
+
+    // Root sig: SRV table (depth, t0) + CBV (b0). No sampler — ssao_ps uses Load().
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors                    = 1;
+    srvRange.BaseShaderRegister                = 0;
+    srvRange.RegisterSpace                     = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = 0;
+
+    D3D12_ROOT_PARAMETER params[2] = {};
+    params[0].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[0].DescriptorTable.NumDescriptorRanges = 1;
+    params[0].DescriptorTable.pDescriptorRanges   = &srvRange;
+    params[0].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+    params[1].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    params[1].Descriptor.ShaderRegister = 0;
+    params[1].Descriptor.RegisterSpace  = 0;
+    params[1].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rs = {};
+    rs.NumParameters = 2;
+    rs.pParameters   = params;
+    rs.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    ComPtr<ID3DBlob> sig, err;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("SSAO root signature serialize failed: 0x%08X", hr);
+        return false;
+    }
+    hr = device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
+                                     IID_PPV_ARGS(&m_ssaoRootSig));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("SSAO CreateRootSignature failed: 0x%08X", hr);
+        return false;
+    }
+    m_ssaoRootSig->SetName(L"SSAORootSignature");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_ssaoRootSig.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    pso.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode        = D3D12_CULL_MODE_NONE;
+    pso.RasterizerState.DepthClipEnable = FALSE;
+    pso.DepthStencilState.DepthEnable   = FALSE;
+    pso.DepthStencilState.StencilEnable = FALSE;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets      = 1;
+    pso.RTVFormats[0]         = kAoFormat;
+    pso.SampleDesc            = { 1, 0 };
+    pso.SampleMask            = UINT_MAX;
+
+    hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_ssaoPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("SSAO PSO create failed: 0x%08X", hr);
+        return false;
+    }
+    m_ssaoPSO->SetName(L"SSAOPSO");
+    core::Log::Info("SSAO pipeline created (depth prepass + hemisphere AO)");
+    return true;
+}
+
+bool Renderer::CreateSSAOTargets(D3D12Device& device, uint32_t width, uint32_t height)
+{
+    if (width == 0 || height == 0)
+        return false;
+    ID3D12Device* dev = device.Device();
+
+    // On ANY failure below, leave a fully-consistent DISABLED state: null the two
+    // resources (so SsaoActive() is false -> iblParams.w == 0 -> basic_ps never
+    // samples the AO slot) AND re-point the reserved AO descriptor at the null
+    // fallback (so it is never left dangling at a DeferredRelease'd resource on a
+    // partial resize failure). This closes the resize-dangling and partial-failure
+    // findings.
+    auto fail = [&]() -> bool
+    {
+        m_prepassDepth.Reset();
+        m_ssaoTarget.Reset();
+        WriteAoFallbackDescriptor(dev);
+        m_ssaoWidth = 0;
+        m_ssaoHeight = 0;
+        return false;
+    };
+
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    // --- prepass depth (R32_TYPELESS: D32 DSV + R32 SRV) --------------------
+    D3D12_RESOURCE_DESC dd = {};
+    dd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    dd.Width            = width;
+    dd.Height           = height;
+    dd.DepthOrArraySize = 1;
+    dd.MipLevels        = 1;
+    dd.Format           = DXGI_FORMAT_R32_TYPELESS;
+    dd.SampleDesc       = { 1, 0 };
+    dd.Flags            = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    D3D12_CLEAR_VALUE dclear = {};
+    dclear.Format             = DXGI_FORMAT_D32_FLOAT;
+    dclear.DepthStencil.Depth = render::kMainDepthClear;
+    if (m_prepassDepth) device.DeferredRelease(m_prepassDepth);
+    HRESULT hr = dev->CreateCommittedResource(
+        &heap, D3D12_HEAP_FLAG_NONE, &dd, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &dclear, IID_PPV_ARGS(&m_prepassDepth));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("Prepass depth create failed: 0x%08X", hr);
+        return fail();
+    }
+    m_prepassDepth->SetName(L"PrepassDepth");
+    m_prepassIsDepthTarget = true;
+
+    if (!m_prepassDsvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC dh = {};
+        dh.NumDescriptors = 1;
+        dh.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&m_prepassDsvHeap))))
+            return fail();
+    }
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
+    dsv.Format        = DXGI_FORMAT_D32_FLOAT;
+    dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dev->CreateDepthStencilView(m_prepassDepth.Get(), &dsv,
+                                m_prepassDsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    if (!m_ssaoInputHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC sh = {};
+        sh.NumDescriptors = 1;
+        sh.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        sh.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        if (FAILED(dev->CreateDescriptorHeap(&sh, IID_PPV_ARGS(&m_ssaoInputHeap))))
+            return fail();
+    }
+    D3D12_SHADER_RESOURCE_VIEW_DESC dsrv = {};
+    dsrv.Format                  = DXGI_FORMAT_R32_FLOAT;
+    dsrv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    dsrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    dsrv.Texture2D.MipLevels     = 1;
+    dev->CreateShaderResourceView(m_prepassDepth.Get(), &dsrv,
+                                  m_ssaoInputHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // --- AO target (R8_UNORM: RTV + SRV published at kAoDescriptorIndex) -----
+    D3D12_RESOURCE_DESC ad = {};
+    ad.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    ad.Width            = width;
+    ad.Height           = height;
+    ad.DepthOrArraySize = 1;
+    ad.MipLevels        = 1;
+    ad.Format           = kAoFormat;
+    ad.SampleDesc       = { 1, 0 };
+    ad.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE aclear = {};
+    aclear.Format   = kAoFormat;
+    aclear.Color[0] = 1.0f; // white = fully open (no occlusion)
+    if (m_ssaoTarget) device.DeferredRelease(m_ssaoTarget);
+    hr = dev->CreateCommittedResource(
+        &heap, D3D12_HEAP_FLAG_NONE, &ad, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &aclear, IID_PPV_ARGS(&m_ssaoTarget));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("SSAO AO target create failed: 0x%08X", hr);
+        return fail();
+    }
+    m_ssaoTarget->SetName(L"SSAOTarget");
+    m_ssaoIsRenderTarget = false;
+
+    if (!m_ssaoRtvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC rh = {};
+        rh.NumDescriptors = 1;
+        rh.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        if (FAILED(dev->CreateDescriptorHeap(&rh, IID_PPV_ARGS(&m_ssaoRtvHeap))))
+            return fail();
+    }
+    D3D12_RENDER_TARGET_VIEW_DESC artv = {};
+    artv.Format        = kAoFormat;
+    artv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    dev->CreateRenderTargetView(m_ssaoTarget.Get(), &artv,
+                                m_ssaoRtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // Publish the AO SRV at the reserved top slot of the material heap.
+    D3D12_SHADER_RESOURCE_VIEW_DESC asrv = {};
+    asrv.Format                  = kAoFormat;
+    asrv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    asrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    asrv.Texture2D.MipLevels     = 1;
+    D3D12_CPU_DESCRIPTOR_HANDLE aoCpu = m_textureHeap->GetCPUDescriptorHandleForHeapStart();
+    aoCpu.ptr += static_cast<SIZE_T>(kAoDescriptorIndex) * m_textureDescSize;
+    dev->CreateShaderResourceView(m_ssaoTarget.Get(), &asrv, aoCpu);
+
+    m_ssaoWidth  = width;
+    m_ssaoHeight = height;
+    return true;
+}
+
+void Renderer::BeginDepthPrepass(D3D12Device& device, const core::Mat4x4& viewProj)
+{
+    if (!m_prepassDepth || !m_prepassPSO) return;
+    if (!RequireFrameResources("BeginDepthPrepass")) return;
+
+    auto* cmd = device.CmdList();
+    if (!m_prepassIsDepthTarget)
+    {
+        device.TransitionResource(m_prepassDepth.Get(),
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                  D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        m_prepassIsDepthTarget = true;
+    }
+
+    auto dsv = m_prepassDsvHeap->GetCPUDescriptorHandleForHeapStart();
+    cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, render::kMainDepthClear,
+                               0, 0, nullptr);
+    cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+
+    cmd->SetPipelineState(m_prepassPSO.Get());
+    cmd->SetGraphicsRootSignature(m_rootSig.Get());
+    if (m_prepassObjectBuffer.Valid())
+        cmd->SetGraphicsRootShaderResourceView(
+            0, m_prepassObjectBuffer.buffer[m_currentFrame]->GetGPUVirtualAddress());
+    CBPerPass perPass = {};
+    memcpy(perPass.viewProj, viewProj.Data(), sizeof(float) * 16);
+    cmd->SetGraphicsRootConstantBufferView(6, UploadCB(&perPass, sizeof(perPass)));
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+}
+
+void Renderer::DrawMeshDepth(D3D12Device& device, const Mesh& mesh,
+                             const core::Mat4x4& worldMatrix)
+{
+    if (!mesh.IsValid() || !m_prepassDepth || !m_prepassPSO) return;
+    if (!m_prepassObjectBuffer.mapped[m_currentFrame]) return;
+    if (m_prepassCursor >= m_prepassObjectBuffer.capacity) return; // silently cap
+
+    const uint32_t objectIndex = m_prepassCursor++;
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    ObjectData* dst =
+        reinterpret_cast<ObjectData*>(m_prepassObjectBuffer.mapped[m_currentFrame]) + objectIndex;
+    WriteObjectRecord(*dst, worldMatrix, worldInvTranspose, objectIndex);
+
+    auto* cmd = device.CmdList();
+    const uint32_t indices[3] = { objectIndex, 0u, 0u };
+    cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
+    cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
+    cmd->IASetIndexBuffer(&mesh.ibView);
+    cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+}
+
+void Renderer::EndDepthPrepass(D3D12Device& device)
+{
+    if (!m_prepassDepth) return;
+    if (m_prepassIsDepthTarget)
+    {
+        device.TransitionResource(m_prepassDepth.Get(),
+                                  D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_prepassIsDepthTarget = false;
+    }
+}
+
+void Renderer::RenderSSAO(D3D12Device& device, float nearPlane, float tanHalfFovY,
+                          float aspect)
+{
+    if (!m_ssaoTarget || !m_ssaoPSO || !m_prepassDepth) return;
+    auto* cmd = device.CmdList();
+
+    if (!m_ssaoIsRenderTarget)
+    {
+        device.TransitionResource(m_ssaoTarget.Get(),
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_ssaoIsRenderTarget = true;
+    }
+
+    auto rtv = m_ssaoRtvHeap->GetCPUDescriptorHandleForHeapStart();
+    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp = { 0.0f, 0.0f, static_cast<float>(m_ssaoWidth),
+                          static_cast<float>(m_ssaoHeight), 0.0f, 1.0f };
+    D3D12_RECT sc = { 0, 0, static_cast<LONG>(m_ssaoWidth), static_cast<LONG>(m_ssaoHeight) };
+    cmd->RSSetViewports(1, &vp);
+    cmd->RSSetScissorRects(1, &sc);
+
+    ID3D12DescriptorHeap* heaps[] = { m_ssaoInputHeap.Get() };
+    cmd->SetDescriptorHeaps(1, heaps);
+    cmd->SetPipelineState(m_ssaoPSO.Get());
+    cmd->SetGraphicsRootSignature(m_ssaoRootSig.Get());
+    cmd->SetGraphicsRootDescriptorTable(
+        0, m_ssaoInputHeap->GetGPUDescriptorHandleForHeapStart());
+
+    SSAOConstants c = {};
+    c.tanHalfFovY   = tanHalfFovY;
+    c.aspect        = aspect;
+    c.nearZ         = nearPlane;
+    c.radius        = 0.6f;   // view-space metres — self-limits on smooth/large bodies
+    c.screenSize[0] = static_cast<float>(m_ssaoWidth);
+    c.screenSize[1] = static_cast<float>(m_ssaoHeight);
+    c.bias          = 0.02f;
+    c.intensity     = 1.0f;
+    cmd->SetGraphicsRootConstantBufferView(1, UploadCB(&c, sizeof(c)));
+
+    cmd->IASetVertexBuffers(0, 0, nullptr);
+    cmd->IASetIndexBuffer(nullptr);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawInstanced(3, 1, 0, 0);
+
+    device.TransitionResource(m_ssaoTarget.Get(),
+                              D3D12_RESOURCE_STATE_RENDER_TARGET,
+                              D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_ssaoIsRenderTarget = false;
 }
 
 } // namespace render

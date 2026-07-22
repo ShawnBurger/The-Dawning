@@ -3144,6 +3144,31 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
             m_renderer.EndShadowPass(m_device);
         }
 
+        // Depth prepass + SSAO: render camera depth into a renderer-owned target and
+        // derive the ambient-occlusion factor the opaque pass samples. Runs after the
+        // shadow pass and before the scene pass (both rebind targets/viewport). Uses
+        // the SAME camera view-projection and camera-relative matrices as the opaque
+        // pass, so the prepass depth equals what that pass produces. Skipped if SSAO
+        // resources are unavailable (the AO texture then stays white = no occlusion).
+        if (m_renderer.SSAOAvailable())
+        {
+            const float w = static_cast<float>(m_device.Width());
+            const float h = static_cast<float>(m_device.Height());
+            D3D12_VIEWPORT ppVp = { 0.0f, 0.0f, w, h, 0.0f, 1.0f };
+            D3D12_RECT ppSc = { 0, 0, static_cast<LONG>(w), static_cast<LONG>(h) };
+            commandList->RSSetViewports(1, &ppVp);
+            commandList->RSSetScissorRects(1, &ppSc);
+
+            const float aspect = w / h;
+            m_renderer.BeginDepthPrepass(m_device, m_camera.ViewProjectionMatrix(aspect));
+            m_scene.RenderDepthPrepass(m_device, m_renderer, m_camera.Position());
+            m_renderer.EndDepthPrepass(m_device);
+
+            const float tanHalfFovY =
+                std::tan(m_camera.GetFOV() * 0.5f * 3.14159265358979f / 180.0f);
+            m_renderer.RenderSSAO(m_device, m_camera.GetNearZ(), tanHalfFovY, aspect);
+        }
+
         // Scene renders into the linear HDR target, not the back buffer. The
         // back buffer is not touched until ResolveToBackBuffer tone-maps into it,
         // which is also what transitions it out of PRESENT.

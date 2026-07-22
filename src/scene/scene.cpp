@@ -734,6 +734,33 @@ void Scene::RenderShadowCasters(render::D3D12Device& device,
     }
 }
 
+void Scene::RenderDepthPrepass(render::D3D12Device& device,
+                               render::Renderer& renderer,
+                               const core::Vec3d& cameraPosition)
+{
+    auto* meshPool = m_registry.GetPool<ecs::MeshInstance>();
+    if (!meshPool) return;
+
+    for (uint32_t i = 0; i < meshPool->Count(); i++)
+    {
+        uint32_t entityIdx = meshPool->EntityAt(i);
+        const auto& meshInst = meshPool->DataAt(i);
+
+        if (!meshInst.visible) continue;
+        if (!m_registry.HasByIndex<ecs::Transform>(entityIdx)) continue;
+        if (!m_registry.HasByIndex<ecs::Material>(entityIdx)) continue;
+
+        const auto& transform = m_registry.GetByIndex<ecs::Transform>(entityIdx);
+
+        MeshHandle handle(meshInst.meshHandle);
+        const render::Mesh* gpuMesh = m_resources.GetMesh(handle);
+        if (!gpuMesh || !gpuMesh->IsValid()) continue;
+
+        renderer.DrawMeshDepth(device, *gpuMesh,
+                               transform.ToCameraRelativeMatrix(cameraPosition, m_renderScale));
+    }
+}
+
 void Scene::RenderEntities(render::D3D12Device& device,
                            render::Renderer& renderer,
                            const core::Vec3d& cameraPosition)
