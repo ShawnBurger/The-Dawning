@@ -207,6 +207,7 @@ private:
     core::Vec3d m_terrainCamBody{ 0, 0, 0 };   // Surface camera pos, body space (framing)
     core::Vec3d m_terrainFocusBody{ 0, 0, 0 }; // look-at surface point, body space
     uint32_t    m_terrainStreamFrame = 0;   // increments each Surface frame (for LRU)
+    double      m_surfaceElapsed = 0.0;      // seconds in Surface mode, drives the descent
     // Stream the quadtree leaf set for the current camera each frame: reselect LOD,
     // generate+cache newly-visible patches (write-once upload meshes), draw the
     // resident visible set camera-relative.

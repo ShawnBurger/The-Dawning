@@ -2627,23 +2627,45 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
                 }
         if (found)
         {
-            // Framing was computed in body space at Init (m_terrainCamBody /
-            // m_terrainFocusBody). Place it against the body's CURRENT world
-            // position so the camera tracks the orbiting Moon.
+            m_surfaceElapsed = timeStep.totalTime;
+
+            // DESCEND: drive altitude down over the run so the streamer refines LOD
+            // as we approach, and drift forward across the surface. m_terrainFocusBody
+            // is the fixed look-at surface point; recompute the framing each frame.
+            const double R = m_terrainFocusBody.Length();
+            const core::Vec3d fdir{ m_terrainFocusBody.x / R, m_terrainFocusBody.y / R,
+                                    m_terrainFocusBody.z / R };
+            core::Vec3d tan{ fdir.y * 0.0 - fdir.z * 1.0, fdir.z * 0.0 - fdir.x * 0.0,
+                             fdir.x * 1.0 - fdir.y * 0.0 };
+            double tl = tan.Length();
+            if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
+            tan = { tan.x / tl, tan.y / tl, tan.z / tl };
+
+            const double tphase   = (m_surfaceElapsed < 3.0) ? (m_surfaceElapsed / 3.0) : 1.0;
+            const double altitude = 200000.0 + (30000.0 - 200000.0) * tphase; // 200km -> 30km
+            const double backDist = altitude * 1.3;
+            const double fwdDrift = 260000.0 * tphase;   // fly forward as we descend
+
+            m_terrainCamBody = { fdir.x * (R + altitude) - tan.x * backDist + tan.x * fwdDrift,
+                                 fdir.y * (R + altitude) - tan.y * backDist + tan.y * fwdDrift,
+                                 fdir.z * (R + altitude) - tan.z * backDist + tan.z * fwdDrift };
+            const core::Vec3d look{ m_terrainFocusBody.x + tan.x * fwdDrift,
+                                    m_terrainFocusBody.y + tan.y * fwdDrift,
+                                    m_terrainFocusBody.z + tan.z * fwdDrift };
+
             const core::Vec3d camPos{ bodyPos.x + m_terrainCamBody.x,
                                       bodyPos.y + m_terrainCamBody.y,
                                       bodyPos.z + m_terrainCamBody.z };
-            core::Vec3d fwdD{ m_terrainFocusBody.x - m_terrainCamBody.x,
-                              m_terrainFocusBody.y - m_terrainCamBody.y,
-                              m_terrainFocusBody.z - m_terrainCamBody.z };
+            core::Vec3d fwdD{ look.x - m_terrainCamBody.x, look.y - m_terrainCamBody.y,
+                              look.z - m_terrainCamBody.z };
             const double fl = fwdD.Length();
-            const double ol = m_terrainFocusBody.Length();
+            const double ul = m_terrainCamBody.Length();
             const core::Vec3f fwd{ static_cast<float>(fwdD.x / fl),
                                    static_cast<float>(fwdD.y / fl),
                                    static_cast<float>(fwdD.z / fl) };
-            const core::Vec3f upf{ static_cast<float>(m_terrainFocusBody.x / ol),
-                                   static_cast<float>(m_terrainFocusBody.y / ol),
-                                   static_cast<float>(m_terrainFocusBody.z / ol) };
+            const core::Vec3f upf{ static_cast<float>(m_terrainCamBody.x / ul),
+                                   static_cast<float>(m_terrainCamBody.y / ul),
+                                   static_cast<float>(m_terrainCamBody.z / ul) };
             m_chaseCameraInitialized = false;
             if (m_camera.InitBasis(camPos, fwd, upf))
                 return true;
@@ -3108,7 +3130,7 @@ void App::RenderTerrainPreview()
 
     terrain::QuadtreeConfig qc;
     qc.planetRadius = moonR; qc.amplitude = amplitude;
-    qc.pixelError = 8.0; qc.maxLevel = 6;
+    qc.pixelError = 9.0; qc.maxLevel = 7;
     std::vector<terrain::QuadPatch> patches;
     terrain::SelectQuadtreeLOD(qc, camBody, patches);
 
@@ -3164,6 +3186,17 @@ void App::RenderTerrainPreview()
                               bodyPos.z + it->second.originBody.z - camPos.z };
         const core::Mat4x4 world = core::Mat4x4::Translation(tD.ToFloat());
         m_renderer.DrawTerrain(m_device, it->second.mesh, world, pc);
+    }
+
+    // Evict patches not drawn for several frames — well past the GPU's in-flight
+    // window (kFrameCount), so dropping the Mesh (releasing its buffers) can never
+    // free memory the GPU is still reading. Bounds the cache as the camera descends.
+    for (auto it = m_terrainCache.begin(); it != m_terrainCache.end();)
+    {
+        if (it->second.lastSeen + 6u < m_terrainStreamFrame)
+            it = m_terrainCache.erase(it);
+        else
+            ++it;
     }
 }
 
@@ -3228,7 +3261,7 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     // streamed leaf set fills in during the frame (after this hint is taken), so
     // reserve a generous fixed allowance for the visible-hemisphere patch count.
     if (m_cameraMode == CameraMode::Surface)
-        maxDrawsHint += 768u;
+        maxDrawsHint += 1024u;
     const bool renderedPathTracing = m_usePathTracing && m_rtAvailable;
     const bool probeDrawRecords = m_verifyDrawRecordsThisFrame &&
                                   !renderedPathTracing;
