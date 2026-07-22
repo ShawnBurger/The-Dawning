@@ -2426,6 +2426,68 @@ are now integrated as well. The current order is:
 - Next action: the renderer-facing GPU phase stays deferred while Claude owns
   the active atmosphere lane.
 
+### WS-034: Production asset generation wave 1
+
+- Status: ACTIVE
+- Outcome: generate, inspect, and retain the first high-detail source-art wave
+  for a longitudinal production ship and modular cockpit, a boardable station
+  and modular interior, a modular hard-surface suit, and a modular weapon
+  family. Meshy output remains source art; gameplay topology and moving-part
+  authority remain authored data.
+- Primary: Codex
+- Reviewer: Codex adversarial manual audit after each geometry and material gate
+- Branch: `codex/production-assets-wave1`
+- Worktree:
+  `D:\The Dawning (new)\.agents\worktrees\codex-production-assets-wave1`
+- Base commit: `0085f96`
+- Owned paths: `assets/design/production_wave1/**`; new WS-034-only directories
+  under `assets/generated/**`; accepted WS-034 source masters under
+  `assets/source/production_wave1/**`; additive `tools/blender/**` review and
+  normalization scripts; focused Python asset-review tests; and
+  `docs/research/PRODUCTION_ASSET_WAVE1_2026-07-22.md`
+- Excluded paths: `CMakeLists.txt`, `src/app.*`, `src/render/**`, `src/scene/**`,
+  `shaders/**`, `src/sim/**`, existing Frontier Courier source/runtime files,
+  runtime catalog registration, collision/navigation cooking, atmosphere,
+  renderer lighting/shadows, and Claude-owned worktrees
+- Shared-file locks: WS-034 owns this coordination entry and additive files
+  only. It will not edit Claude's active atmosphere surface or replace the
+  Frontier Courier testing fixture. Runtime integration begins in a later
+  claimed lane after source acceptance.
+- Generation contract: use Meshy 6, GLB-only output, PBR maps, lighting removal,
+  and 4K base color only for accepted close-view hero candidates. Use reviewed
+  multi-view references for primary silhouettes; use bounded text-to-3D modules
+  for architecture and props. Exterior, interior shell, fixtures, and moving
+  parts are separate assets. The design authority declares dimensions, sockets,
+  clearances, pivots, material intent, and source-to-runtime disposition before
+  promotion.
+- Credit budget: up to 600 credits for wave 1 from the verified 9,927-credit
+  balance. Every invocation is dry-run first and content addressed. Geometry
+  previews or concepts are reviewed before texture/refine spend; failed and
+  rejected candidates retain manifests and reasons but do not enter Git LFS.
+- Initial families: a 52 x 18 x 11 m long-range expedition ship exterior and
+  cockpit architecture kit; a modular orbital station hub/docking exterior and
+  2.4 m-clear station corridor/airlock/operations kit; a human-scale modular EVA
+  armor set; and a shared visual-language rifle/sidearm family with separable
+  magazines, optics, controls, and service parts.
+- Acceptance gates: exact prompts, task IDs, request hashes, consumed credits,
+  downloaded hashes, and license/source disposition retained; GLB importer and
+  Blender inspection; bounds, orientation, manifold, disconnected-component,
+  triangle, material, texture, and PBR inventory reports; orthographic and
+  close-view renders; no generated logos or pseudo-text promoted; realistic
+  hard-surface hierarchy at macro/meso/micro scales; ship length greater than
+  beam greater than height; protected human clearances; and explicit accept,
+  hold, or reject decision per candidate.
+- Negative controls: one-piece ship-with-interior or station-with-interior
+  generations cannot become production authority; generated scale, openings,
+  collisions, walkability, pressure topology, pivots, or sockets cannot override
+  authored values; visually attractive but dimensionally or functionally
+  incoherent candidates are rejected without refinement.
+- Current checkpoint (2026-07-22): lane claimed from clean `origin/main`; live
+  Meshy balance verified at 9,927 credits; official API pricing and current
+  Meshy 6/PBR/de-lighting behavior rechecked before spend.
+- Next action: author the wave design authority and prompt manifest, dry-run the
+  exact requests, then launch and review the first geometry/concept batch.
+
 ## 20. Helper Commands
 
 Create a task worktree:
