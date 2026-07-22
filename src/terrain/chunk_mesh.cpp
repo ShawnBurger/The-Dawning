@@ -93,7 +93,8 @@ ChunkMesh GenerateChunk(const ChunkParams& p)
     }
 
     // Two triangles per quad, CW winding for the LH / CW-front convention.
-    mesh.indices.reserve(static_cast<size_t>(N - 1) * (N - 1) * 6);
+    mesh.indices.reserve(static_cast<size_t>(N - 1) * (N - 1) * 6 +
+                         static_cast<size_t>(4) * (N - 1) * 6);
     for (int j = 0; j < N - 1; ++j)
     {
         for (int i = 0; i < N - 1; ++i)
@@ -108,6 +109,77 @@ ChunkMesh GenerateChunk(const ChunkParams& p)
             mesh.indices.push_back(tl);
             mesh.indices.push_back(tr);
             mesh.indices.push_back(br);
+        }
+    }
+
+    // --- Skirt ring (crack-fill) ---------------------------------------------
+    // A vertical wall around the chunk perimeter, dropped radially inward (toward
+    // the planet centre) with the displacement skipped. Under reversed-Z
+    // (near=1/far=0, GREATER test) the inward-dropped skirt is FARTHER from an
+    // above-surface camera than the real surface, so it loses the depth compare
+    // and recedes behind the surface everywhere EXCEPT a LOD-boundary crack, where
+    // it fills the gap so space no longer shows through the seam. terrain_vs is a
+    // passthrough (verts are pre-displaced on the CPU), so this is a pure-CPU
+    // concept — no per-vertex GPU flag. The app.cpp objectDir/colour conversion is
+    // generic over vertex count, so the appended skirt verts get shaded like the
+    // border (their normalized world dir equals the border direction).
+    {
+        // Depth of the skirt wall: a fraction of the chunk's world edge length, so
+        // it scales with LOD level and comfortably covers the inter-level height
+        // discontinuity at the seam (which is bounded by the coarser neighbour's
+        // geometric error). Hidden by the depth test unless a crack exposes it.
+        const core::Vec3d cEdge =
+            SurfacePoint(FaceToDirection(p.face, p.u1, p.v0), p) -
+            SurfacePoint(FaceToDirection(p.face, p.u0, p.v0), p);
+        const double skirtDepth = cEdge.Length() * 0.10;
+
+        // The perimeter grid indices in a single closed loop: top L->R, right T->B,
+        // bottom R->L, left B->T (corners shared, not duplicated), so one winding
+        // rule faces the whole ring outward.
+        std::vector<uint16_t> loop;
+        loop.reserve(static_cast<size_t>(4) * (N - 1));
+        for (int i = 0; i < N; ++i)         loop.push_back(static_cast<uint16_t>(i));
+        for (int j = 1; j < N; ++j)         loop.push_back(static_cast<uint16_t>(j * N + (N - 1)));
+        for (int i = N - 2; i >= 0; --i)    loop.push_back(static_cast<uint16_t>((N - 1) * N + i));
+        for (int j = N - 2; j >= 1; --j)    loop.push_back(static_cast<uint16_t>(j * N));
+
+        // A dropped twin for each perimeter vertex, appended after the interior.
+        const uint16_t twinBase = static_cast<uint16_t>(mesh.vertices.size());
+        for (uint16_t gi : loop)
+        {
+            const ChunkVertex& bv = mesh.vertices[gi];
+            const core::Vec3d world{ mesh.origin.x + bv.position.x,
+                                     mesh.origin.y + bv.position.y,
+                                     mesh.origin.z + bv.position.z };
+            const double wl = world.Length();
+            const core::Vec3d dir = (wl > 0.0)
+                ? core::Vec3d{ world.x / wl, world.y / wl, world.z / wl }
+                : core::Vec3d{ 0, 0, 1 };
+            const double tr = wl - skirtDepth;
+            const core::Vec3d twinWorld{ dir.x * tr, dir.y * tr, dir.z * tr };
+            ChunkVertex tv;
+            tv.position = ToF(twinWorld - mesh.origin);
+            tv.normal   = bv.normal; // shade the crack sliver like the surface border
+            tv.uv       = bv.uv;
+            mesh.vertices.push_back(tv);
+        }
+
+        // Stitch a wall quad per perimeter segment (including the closing segment).
+        // Winding faces the wall radially OUTWARD from the chunk interior so it is
+        // front (CW) to a camera outside the surface — verified by capture.
+        const size_t loopN = loop.size();
+        for (size_t k = 0; k < loopN; ++k)
+        {
+            const uint16_t bPrev = loop[k];
+            const uint16_t bCur  = loop[(k + 1) % loopN];
+            const uint16_t tPrev = static_cast<uint16_t>(twinBase + k);
+            const uint16_t tCur  = static_cast<uint16_t>(twinBase + (k + 1) % loopN);
+            mesh.indices.push_back(bPrev);
+            mesh.indices.push_back(tCur);
+            mesh.indices.push_back(bCur);
+            mesh.indices.push_back(bPrev);
+            mesh.indices.push_back(tPrev);
+            mesh.indices.push_back(tCur);
         }
     }
 

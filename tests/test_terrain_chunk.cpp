@@ -73,8 +73,16 @@ TEST_CASE(ChunkMesh_VertexAndIndexCounts)
     terrain::ChunkParams p;
     p.gridN = 33;
     terrain::ChunkMesh m = terrain::GenerateChunk(p);
-    CHECK_EQ(m.vertices.size(), static_cast<size_t>(33 * 33));
-    CHECK_EQ(m.indices.size(),  static_cast<size_t>(32 * 32 * 6));
+    // N*N interior grid + a crack-fill skirt: a dropped twin for each of the
+    // 4*(N-1) perimeter vertices, and a wall quad (2 tris = 6 indices) per
+    // perimeter segment. The interior indices are unchanged (skirt verts are
+    // appended after the grid), so existing interior triangles are untouched.
+    const size_t N = 33;
+    const size_t perimeter   = 4 * (N - 1);
+    const size_t interiorVts = N * N;
+    const size_t interiorIdx = (N - 1) * (N - 1) * 6;
+    CHECK_EQ(m.vertices.size(), interiorVts + perimeter);
+    CHECK_EQ(m.indices.size(),  interiorIdx + perimeter * 6);
 }
 
 TEST_CASE(ChunkMesh_DisplacementMatchesSharedHeightField)
