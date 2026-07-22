@@ -13,10 +13,10 @@
     "verified_balance_at_claim": 9927,
     "wave_ceiling": 600,
     "planned_concept_credits": 45,
-    "planned_preview_credits": 160,
+    "planned_preview_credits": 220,
     "conditional_multiview_credits": 150,
-    "conditional_refine_credits": 80,
-    "contingency_credits": 165,
+    "conditional_refine_credits": 110,
+    "contingency_credits": 75,
     "refine_only_after_geometry_acceptance": true
   },
   "source_references": [
@@ -291,6 +291,39 @@
       "expected_credits": 20,
       "prompt": "One photorealistic modular orbital-station deck bay, exactly 2.4 m wide, 3.0 m long and 0.22 m thick. Flat load-bearing underside, framed removable non-slip walking panels, flush cargo tie-down sockets, narrow utility channels, sealed access covers, threshold-compatible edges, realistic panel gaps, fasteners and bevels. Clear uninterrupted 1.5 m central walking strip, isolated single object, top faces +Y. No walls, ceiling, furniture, loose cables, text, logo, stand, ground, or background."
       ,"texture_prompt": "De-lit station deck materials: dark graphite non-slip panels, zinc-gray structural frame, brushed steel tie-downs, restrained amber edge markings without symbols, localized foot and cargo wear, no baked lighting, pseudo-text, logos, broad dirt, or emissive glow."
+    },
+    {
+      "request_id": "preview.ship.longreach.centerline_correction",
+      "phase": "preview",
+      "name": "longreach_exterior_centerline_hull",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "exterior_centerline_hull",
+      "polycount": 180000,
+      "expected_credits": 20,
+      "prompt": "One isolated photorealistic centerline pressure hull for an expedition spacecraft, exactly 44 m long, 10 m wide and 8 m high; length is 4.4 times width. Long faceted cockpit nose, two-deck armored pressure body, dorsal docking-collar mount, port airlock recess, ventral cargo-ramp cut plane, axial keel, radiators, RCS bays and aft engine bulkhead. Uninterrupted longitudinal silhouette with clear panel hierarchy, forward faces +Z. No wings, drive pods, engines, weapons, landing gear, detached parts, text, logo, stand, ground, or background. Reject a short, wide, fighter, disk, or saucer shape."
+      ,"texture_prompt": "De-lit photorealistic expedition hull: cool white painted aluminum, exposed brushed titanium keel and service edges, dark carbon-composite access covers, charcoal ceramic heat shielding, restrained amber safety accents, subtle directional maintenance wear. No baked lighting, pseudo-text, logos, broad grime, glowing seams, or battle damage."
+    },
+    {
+      "request_id": "preview.ship.longreach.drive_pod_correction",
+      "phase": "preview",
+      "name": "longreach_exterior_drive_pod",
+      "asset_id": "ship.longreach_expedition_cutter_mk1",
+      "module_id": "exterior_drive_pod",
+      "polycount": 120000,
+      "expected_credits": 20,
+      "prompt": "One isolated photorealistic longitudinal spacecraft drive pod, 13 m long, 3.2 m wide and 3.0 m high. Armored forward mount, serviceable reactor and power casing, thermal-break structure, radiator channels, RCS cluster, gimbal housing and one large aft plasma nozzle. Clear structural mounting rail along the inboard side, layered aerospace construction and realistic bevels, forward faces +Z. One connected object only. No ship hull, second pod, wings, weapon, landing gear, loose pipes, text, logo, stand, ground, or background."
+      ,"texture_prompt": "De-lit photorealistic spacecraft drive hardware: dark carbon-composite casing, brushed titanium mounts, charcoal ceramic thermal panels, heat-stained nozzle alloy, restrained amber service latches, localized thermal and maintenance wear. No baked lighting, pseudo-text, logos, glowing seams, broad grime, or battle damage."
+    },
+    {
+      "request_id": "preview.weapon.helix.carbine_correction",
+      "phase": "preview",
+      "name": "helix_service_carbine_full_length",
+      "asset_id": "weapon.helix_carbine_mk1",
+      "module_id": "carbine_full_assembly_source",
+      "polycount": 180000,
+      "expected_credits": 20,
+      "prompt": "One isolated photorealistic full-length shoulder-fired service carbine, 0.86 m long and at most 0.27 m high; length is at least 3.2 times height. Long barrel and receiver, shoulder stock well behind the pistol grip, removable box magazine ahead of the trigger, low-profile optic, charging handle, selector, trigger guard, heat shield, sling points and service latches. Restrained near-future engineering, long axis +Z. No person, hands, ammunition, bipod, floating parts, text, logo, stand, ground, or background. Reject a pistol, sidearm, stockless gun, compact SMG or PDW silhouette."
+      ,"texture_prompt": "De-lit photorealistic service carbine: dark phosphate steel barrel and controls, graphite anodized aluminum receiver, charcoal fiber-reinforced polymer grip and stock, heat-stained barrel shroud, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked lighting, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage."
     }
   ]
 }

@@ -1,0 +1,97 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T15:04:35.477210+00:00",
+  "request_hash": "2801326d633773b3fc371dd720437b060860b4abd6e854a475e4f1330124b328",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "18fa89b3c9d4a22cf6dbf23d68cbc76829ac609f43265c9b910a167b96c8b21c",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8a47-96a2-7a34-84cc-8ec9b86b708b",
+    "input_images": [],
+    "asset_id": "equipment.argent_eva_mk1",
+    "module_id": "full_suit_concept",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit photorealistic EVA suit: off-white matte ceramic-composite shells, charcoal woven pressure garment, brushed titanium joint hardware, clear neutral visor, dark life-support pack, restrained rescue-orange latches and pull points, localized hand and knee wear. No baked lighting, pseudo-text, logos, glowing strips, broad grime, or battle damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 200000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8a56-6345-719d-908f-03ca920c3311",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784732347823,
+      "started_at": 1784732347877,
+      "finished_at": 1784732657757,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "57203519cd0ada097be8f505ce73dcc91018181443847341dba0e77820529a89",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "9d5264bd44adfb3c75917dbd28ec2bd63176e7c024f35207605aa9f37739e2b5",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "6baffdbcb07ceaf2ec928fb1ab40481d788792f4b6e1343508ba278eafb92a26",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "4115f95864cd4c5bf7a9082b88b97f2494834dfaf22655df65e7a4a37461f1fe",
+      "metallic_0": "663a9ba0c2a63bb5a6ea7b7203faf9890c47d9d934ae75f7abe817c3d46fd346",
+      "roughness_0": "2450de484d6f635b93cfa5f57f3e3df4d77f3d2bb6c44a79396ea1cc7a9c2b42",
+      "normal_0": "3f3eed2ccf34a5e1148fce1f0de3b99aea6a971d80f401b3d31429b526f32ad8",
+      "emission_0": "8a8f9a04dbe4b7c23c4d4dc581c488567cd8f14453da2819b81f4405988dacf0"
+    }
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 133538,
+    "triangles": 200191,
+    "materials": 1,
+    "importer_textures": 4,
+    "geometric_components": 2,
+    "largest_component_triangle_fraction": 0.6078,
+    "source_bounds_size": [1.898241, 1.605099, 0.455711]
+  },
+  "art_review": {
+    "status": "accepted_geometry_only_after_component_separation",
+    "strengths": [
+      "primary T-pose suit preserves layered hard shells, pressure garment and joint gaps",
+      "front and rear construction detail is suitable for measured modular cleanup",
+      "PBR bundle includes de-lit 4K base color plus metallic, roughness, normal and emission maps"
+    ],
+    "required_cleanup": [
+      "delete the disconnected side-view duplicate before any source promotion",
+      "separate helmet, pack and named limb shells around an authored production skeleton",
+      "verify visor thickness, joint sweep, suited envelope and corridor clearance",
+      "replace generated wearer anatomy and pseudo-markings"
+    ]
+  },
+  "consumed_credits": 30
+}

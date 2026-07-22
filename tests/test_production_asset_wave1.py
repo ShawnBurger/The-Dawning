@@ -29,13 +29,13 @@ class ProductionAssetWaveOneTests(unittest.TestCase):
         previews = [request for request in requests if request["phase"] == "preview"]
 
         self.assertEqual(len(concepts), 5)
-        self.assertEqual(len(previews), 8)
+        self.assertEqual(len(previews), 11)
         self.assertEqual(sum(request["expected_credits"] for request in concepts), 45)
-        self.assertEqual(sum(request["expected_credits"] for request in previews), 160)
+        self.assertEqual(sum(request["expected_credits"] for request in previews), 220)
 
         policy = self.plan["credit_policy"]
         self.assertEqual(policy["planned_concept_credits"], 45)
-        self.assertEqual(policy["planned_preview_credits"], 160)
+        self.assertEqual(policy["planned_preview_credits"], 220)
         self.assertEqual(
             policy["planned_concept_credits"]
             + policy["planned_preview_credits"]

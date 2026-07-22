@@ -36,10 +36,10 @@ families while preserving review gates:
 | Stage | Count | Cost each | Maximum |
 | --- | ---: | ---: | ---: |
 | GPT Image 2 multi-view concept | 5 | 9 | 45 |
-| Meshy 6 text geometry preview | 8 | 20 | 160 |
+| Meshy 6 text geometry preview | 11 | 20 | 220 |
 | Conditional Meshy 6 textured multi-view | 5 | 30 | 150 |
-| Conditional accepted-preview refinement | 8 | 10 | 80 |
-| Corrective contingency | - | - | 165 |
+| Conditional accepted-preview refinement | 11 | 10 | 110 |
+| Corrective contingency | - | - | 75 |
 | **Wave ceiling** | | | **600** |
 
 The verified starting account balance is 9,927 credits. The ceiling is a guard,

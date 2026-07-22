@@ -1,0 +1,96 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T15:11:01.667884+00:00",
+  "request_hash": "f0b3dc1d7c8be1c0525eaac7de0fa83bab13d967826fe44ed2902b8307a53d4d",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "843c93b6a833944828afdc463a7732d623731096b3f0c3617c210a789b442756",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8a49-ab0a-7eef-a965-5bddbbcfd0f5",
+    "input_images": [],
+    "asset_id": "weapon.helix_sidearm_mk1",
+    "module_id": "sidearm_concept",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit photorealistic sealed-duty sidearm: nitrided steel barrel and controls, graphite anodized upper receiver, charcoal textured polymer grip, brushed takedown hardware, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked highlights, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 140000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8a5e-1f71-7de1-92f7-9cda321cf446",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784732854801,
+      "started_at": 1784732854898,
+      "finished_at": 1784733059377,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "7c2c74c178c3f595fb8cd628c57df12ca229f25e4977bb1e8917f2ba21e307a3",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "a7d8b6bd3b3e6fc41f8f3bb080ae1905eddc660cc85ac9b7e90ae8b8f9371528",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "132eeecc63cdbfb5aca60b8eba619985a56e677112d20beb21a2cf948d2f7709",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "b0eb7752cfdc757839670987d1d004a4c05fc332311c37cdbca167292db8190d",
+      "metallic_0": "7cea919b3ee68f75b8b22d869aa53c0d86398b55dc617a0cb067781ac7982424",
+      "roughness_0": "db42e1b50e1081ec484e2924e8933d63173c8a8f36af7bedc5f85a9164c12d9e",
+      "normal_0": "4b93a50940c093dce2111f9830d73ae9110617dcc5aea76b773b848a2fd7a70c",
+      "emission_0": "3f4512d5d52e0fa189e220fe68535af084655216e33310992241c12566b78d68"
+    }
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 90050,
+    "triangles": 138719,
+    "materials": 1,
+    "importer_textures": 4,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.899116, 1.585921, 0.402238]
+  },
+  "art_review": {
+    "status": "accepted_for_blender_cleanup",
+    "strengths": [
+      "single connected sidearm preserves coherent bore, grip, trigger guard and sight relationship",
+      "upper receiver and frame have enough hard-surface depth for first-person cleanup",
+      "PBR bundle includes de-lit 4K base color plus metallic, roughness, normal and emission maps"
+    ],
+    "required_cleanup": [
+      "normalize to the authored 0.31 m envelope and verify gloved-hand ergonomics",
+      "separate upper receiver, frame, barrel group, magazine, trigger, selector and sight",
+      "replace generic real-world cues and generated markings with original Helix details"
+    ]
+  },
+  "consumed_credits": 30
+}

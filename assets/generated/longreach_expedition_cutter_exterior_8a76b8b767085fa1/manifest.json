@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T14:55:47.693233+00:00",
+  "request_hash": "8a76b8b767085fa1d468221b6d27bda5b3e6d7acdc434db2635fc0851c994c65",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "4da3ab1c3f5518b8866fdfd27d87685ecdd39c4bad727ab89a75d1aaebb85c47",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8a45-82c8-780e-8db5-e821ee1e9606",
+    "input_images": [],
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "exterior_hull_concept",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit photorealistic expedition spacecraft: cool white painted aluminum, exposed brushed titanium keel and service edges, dark carbon-composite drive pods, charcoal ceramic heat shielding, restrained amber safety accents, subtle directional maintenance wear and thermal discoloration. No baked shadows or highlights, pseudo-text, logos, broad random grime, glowing seams, or battle damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 250000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8a4f-41b9-709b-9212-67e89044dffa",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731880539,
+      "started_at": 1784731880562,
+      "finished_at": 1784732137651,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "206ce79171ded05d086b0c6841d4e8d6373635c3f3f7fe29e46d4b0f3abe96b5",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "ec3d4d4202c3046059513b384439f4d24af6c4f1efbec47f802870b90df83f6c",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "be423bdcac1cef9dfe787066e1140ddbc7a5e1a7dbbd4f5f6432700cff8ff209",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "8050e4540fd016cd719d06ed7cfc01eaf0d88e5b6dd788dd9435715239ae7824",
+      "metallic_0": "0732033b0a806a9a75b121be6a289396203d70818cc2111c866f5a6a8b222eac",
+      "roughness_0": "0034e37f80eee691fdf18135b462dd29e2365e6b1dbe775e3890f2365c19fb8f",
+      "normal_0": "48c3f6f8bbe519c1f4376e59c71ee10d47805880850b3ee9622fc1439389e91c",
+      "emission_0": "0232aa56f8949572c82537870a3acbf9bd97d556a535d10c489014258dc4a9c9"
+    }
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 172154,
+    "triangles": 242569,
+    "materials": 1,
+    "importer_textures": 4,
+    "geometric_components": 4,
+    "largest_component_triangle_fraction": 0.7428,
+    "source_bounds_size": [1.8994, 1.098205, 1.621889]
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "retained_as": "multiview_proportion_negative_control",
+    "reasons": [
+      "reconstruction collapsed the approved 2.89:1 length-to-width concept to about 1.17:1",
+      "pressure hull reads as a short shuttle rather than the authored expedition cutter",
+      "four detached major components require an assembly plan that this monolithic request did not provide"
+    ],
+    "corrective_action": "generate an isolated 4.4:1 centerline hull and a separate drive-pod module"
+  },
+  "consumed_credits": 30
+}

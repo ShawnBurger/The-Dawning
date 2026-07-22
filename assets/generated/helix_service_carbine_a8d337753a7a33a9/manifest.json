@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T15:07:28.436006+00:00",
+  "request_hash": "a8d337753a7a33a9350f045aee75acb0223ba2cd62c883ad22f28e58b9500589",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "f33883808b0987d7b3c96e3f35440e0082fe0762f558b56f7c40d5941ca090d5",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8a48-9f32-7acd-a538-08286fbd9aed",
+    "input_images": [],
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_concept",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit photorealistic service carbine: dark phosphate steel barrel and controls, graphite anodized aluminum receiver, charcoal fiber-reinforced polymer grip and stock, heat-stained barrel shroud, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked highlights, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 180000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8a5b-7bb6-7d49-bb17-3fb5b449909c",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784732681818,
+      "started_at": 1784732681911,
+      "finished_at": 1784732842711,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "2937cdedca09651351eb00e1aae98d936e5de436d09a7d5c2cd39edd8f116e52",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "1f3fd2ec20001ea254abca73ef2a6e7bbcaf3e2e18956dd0a9f071b71ab7540f",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "4cb1cf943f5dbc799025d9286ec18d21a16c0a045e47496131532950756647f9",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "d2e956580de1f6e34f80858c3ff1a3bd065c8d03347afb316ae2e51c996c2f1f",
+      "metallic_0": "b117e3171138c59ae64d789e5bf9e12b4984138f101dd43694a90e11ce29ac34",
+      "roughness_0": "1ce4f8eeb5e2bf1abfe3b89a0739a1bae9137f2d7da910362d89f25ec290ee0f",
+      "normal_0": "6b6682b2654aaeb898a504ce98e1a66945c678311a5a9321e86303c69a3c159f",
+      "emission_0": "d97457f3d70203cabab97008117d2abb3e700fd9aa957b6089276982fbff5478"
+    }
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 121204,
+    "triangles": 178367,
+    "materials": 1,
+    "importer_textures": 4,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.84969, 1.898853, 0.607889]
+  },
+  "art_review": {
+    "status": "rejected_for_production",
+    "retained_as": "weapon_role_negative_control",
+    "reasons": [
+      "reconstruction lost the shoulder stock and full-length rifle proportion",
+      "result reads as a large pistol or compact PDW rather than a service carbine",
+      "box magazine and serviceable major-part boundaries are not preserved"
+    ],
+    "corrective_action": "generate a direct full-length carbine with a hard 3.2:1 length-to-height rule"
+  },
+  "consumed_credits": 30
+}

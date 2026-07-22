@@ -1,0 +1,96 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/multi-image-to-3d",
+  "generated_at_utc": "2026-07-22T14:59:00.832728+00:00",
+  "request_hash": "39d95dad50e97d550efd896650694d5792f7098a8e38bd011aaa607500e7f1e5",
+  "stage": "multiview_textured",
+  "parameters": {
+    "concept_request_hash": "9d1e6e2a6330c32d8a10609a1cded7f6a7bb3c9ef9783bc600d1c4802a36f943",
+    "input_mode": "concept_task",
+    "input_task_id": "019f8a46-8cb1-79e7-b744-8c2fc50d24d0",
+    "input_images": [],
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "exterior_core_concept",
+    "ai_model": "meshy-6",
+    "should_texture": true,
+    "enable_pbr": true,
+    "hd_texture": true,
+    "texture_prompt": "De-lit photorealistic orbital infrastructure: zinc-gray structural alloy, off-white replaceable pressure panels, dark thermal blankets and radiator roots, brushed steel docking rings, restrained amber wayfinding accents, localized service wear and thruster staining. No baked lighting, pseudo-text, logos, universal rust, glowing seams, ships, or battle damage.",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 300000,
+    "decimation_mode": null,
+    "save_pre_remeshed_model": true,
+    "image_enhancement": false,
+    "remove_lighting": true,
+    "auto_size": false,
+    "origin_at": null,
+    "target_formats": [
+      "glb"
+    ],
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "generation": {
+      "id": "019f8a53-6e9f-7dd8-b2c6-5347747c0c21",
+      "type": "multi-image-to-3d",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784732153976,
+      "started_at": 1784732153993,
+      "finished_at": 1784732322786,
+      "consumed_credits": 30
+    }
+  },
+  "files": {
+    "input_images": [],
+    "input_image_sha256": {},
+    "model": "model.glb",
+    "model_sha256": "c1c56f40d8344d154d80541800faae189593ed7473a8a513220c1d738a4b29aa",
+    "master_pre_remesh": "master_pre_remesh.glb",
+    "master_pre_remesh_sha256": "e6688a2effc0ed8c0a8eda5c24e3e907d9d8c5ed617d7feab91b934227651962",
+    "thumbnail": "thumbnail.png",
+    "thumbnail_sha256": "cbace31409d277360210b42cc1d09809040bafbd28ecf3d3de09e781d178b1db",
+    "textures": {
+      "base_color_0": "base_color_0.png",
+      "metallic_0": "metallic_0.png",
+      "roughness_0": "roughness_0.png",
+      "normal_0": "normal_0.png",
+      "emission_0": "emission_0.png"
+    },
+    "texture_sha256": {
+      "base_color_0": "a880cb77ce6b1155ea25b87f04b5183d883fc930d24000f974006cb5e6a7e7e0",
+      "metallic_0": "59e25aab0d5dd7d58c5b2118c3969d4ff7b73352017e97606dd97f6220e17df5",
+      "roughness_0": "cc541ea0c24ccf7f9c406cf8106f39a36177db494a4c242b06cae1022644cf35",
+      "normal_0": "65d6fabf87b7073cc3467446b6ed049345646ef050c5baf96578eb4f2c153671",
+      "emission_0": "2dfc84e7625b3f5511f5e220ac2fa6642067a76c5a2f533f2dea03d08fa349ef"
+    }
+  },
+  "validation": {
+    "importer": "TheDawningAssetInspector",
+    "status": "passed",
+    "primitives": 1,
+    "vertices": 270707,
+    "triangles": 307711,
+    "materials": 1,
+    "importer_textures": 4,
+    "geometric_components": 1,
+    "largest_component_triangle_fraction": 1.0,
+    "source_bounds_size": [1.345361, 1.892441, 1.345776]
+  },
+  "art_review": {
+    "status": "accepted_for_blender_cleanup",
+    "strengths": [
+      "single connected modular station core with coherent radial arms and axial tower",
+      "dense pressure, truss, docking and service detail survives orthographic review",
+      "PBR bundle includes de-lit 4K base color plus metallic, roughness, normal and emission maps"
+    ],
+    "required_cleanup": [
+      "normalize to the authored 180 x 128 x 52 m envelope without changing relative proportions",
+      "separate docking collars, radiator roots, cargo interfaces and future moving systems by stable ID",
+      "remove pseudo-panels and replace markings before source promotion"
+    ]
+  },
+  "consumed_credits": 30
+}
