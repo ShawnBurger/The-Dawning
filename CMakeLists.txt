@@ -33,6 +33,16 @@ set(CORE_SOURCES
     src/core/planet_height.cpp
 )
 
+# Chunked-LOD planetary terrain (cube-sphere quadtree, procedural heightfield).
+set(TERRAIN_SOURCES
+    src/terrain/cube_sphere.cpp
+    src/terrain/chunk_mesh.cpp
+)
+set(TERRAIN_HEADERS
+    src/terrain/cube_sphere.h
+    src/terrain/chunk_mesh.h
+)
+
 set(CORE_HEADERS
     src/core/types.h
     src/core/log.h
@@ -274,6 +284,7 @@ set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_math.cpp
     tests/test_planet_height.cpp
+    tests/test_terrain_chunk.cpp
     tests/test_job_system.cpp
     tests/test_log.cpp
     tests/test_ecs.cpp
@@ -346,6 +357,8 @@ add_executable(TheDawningV3 WIN32
     ${APP_HEADERS}
     ${CORE_SOURCES}
     ${CORE_HEADERS}
+    ${TERRAIN_SOURCES}
+    ${TERRAIN_HEADERS}
     ${ASSET_SOURCES}
     ${ASSET_HEADERS}
     ${RENDER_SOURCES}
@@ -603,6 +616,12 @@ add_executable(TheDawningTests
     # twin. Its match to the HLSL is a separate startup GPU value-agreement probe.
     src/core/planet_height.h
     src/core/planet_height.cpp
+    # Chunked-LOD terrain geometry: cube-sphere mapping + chunk mesh generation.
+    # GPU-free (core types + planet_height); tests/test_terrain_chunk.cpp drives it.
+    src/terrain/cube_sphere.h
+    src/terrain/cube_sphere.cpp
+    src/terrain/chunk_mesh.h
+    src/terrain/chunk_mesh.cpp
     ${ECS_HEADERS}
     ${SHIP_SOURCES}
     ${SHIP_HEADERS}
