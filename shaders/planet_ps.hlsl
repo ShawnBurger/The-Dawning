@@ -194,24 +194,67 @@ float4 main(PSInput input) : SV_TARGET
         surfaceColor = lerp(ocean, landColor, landMask);
     }
 
+    // --- Cloud layer (rotates over the fixed surface) -----------------------
+    // A separate noise field on a Y-rotated copy of the surface direction, so the
+    // cloud deck drifts independently of the continents. Computed here so its cast
+    // shadow can darken the surface before lighting, and its own lit colour can
+    // composite over the shaded result afterwards. cloud.x == 0 (Mars/Moon) skips it.
+    float cloudDensity = 0.0;
+    float cloudShadow  = 0.0;
+    if (cloud.x > 0.001)
+    {
+        float ca = sunDir.w;                     // pre-wrapped rotation angle
+        float cc = cos(ca), sc = sin(ca);
+        float3 cDir = float3(N.x * cc - N.z * sc, N.y, N.x * sc + N.z * cc);
+        float3 cSeed = seedO * 3.7 + 12.3;
+
+        float cov = 0.62 * (Fbm5(cDir * 2.6 + cSeed) * 0.5 + 0.5) +
+                    0.38 * (Fbm3(cDir * 7.3 + cSeed) * 0.5 + 0.5);
+        float thresh = 1.0 - cloud.x;
+        cloudDensity = smoothstep(thresh, thresh + max(cloud.y, 0.001), cov);
+
+        // Cast shadow: the coverage a short way toward the sun, so cloud shadows
+        // fall on the surface offset from the clouds themselves.
+        float3 sDir = normalize(cDir + L * 0.035);
+        float scov = 0.62 * (Fbm5(sDir * 2.6 + cSeed) * 0.5 + 0.5) +
+                     0.38 * (Fbm3(sDir * 7.3 + cSeed) * 0.5 + 0.5);
+        cloudShadow = smoothstep(thresh, thresh + max(cloud.y, 0.001), scov);
+    }
+
+    // Cloud shadow darkens the surface it does not itself cover.
+    surfaceColor *= 1.0 - 0.45 * cloudShadow * (1.0 - cloudDensity);
+
     // --- Lighting -----------------------------------------------------------
     float ndl     = dot(Nw, L);
     // Lambert with a soft terminator; airless Moon gets a crisp one.
     float termLo  = (type == 2) ? -0.02 : -0.12;
     float termHi  = (type == 2) ?  0.02 :  0.10;
     float dayGate = smoothstep(termLo, termHi, ndl);
-    float diffuse = saturate(ndl) * dayGate + 0.0;
+    float diffuse = saturate(ndl) * dayGate;
 
     float3 col = surfaceColor * (sunColor.rgb * sunColor.w * diffuse + ambient.rgb);
 
-    // --- Ocean sun-glint (Earth day-side water only) -----------------------
+    // --- Ocean sun-glint (Earth day-side water, not under cloud) ------------
     if (hasOcean)
     {
         float oceanMask = 1.0 - landMask;
         float3 R = reflect(-L, Nw);
         float  spec = pow(saturate(dot(R, V)), max(ambient.w, 1.0));
         float  fres = 0.02 + 0.98 * pow(saturate(1.0 - dot(Nw, V)), 5.0);
-        col += sunColor.rgb * sunColor.w * spec * fres * oceanMask * dayGate;
+        col += sunColor.rgb * sunColor.w * spec * fres * oceanMask * dayGate *
+               (1.0 - cloudDensity);
+    }
+
+    // --- Composite lit clouds over the surface ------------------------------
+    if (cloud.x > 0.001)
+    {
+        // Bright on the day side, a soft wrap so the terminator clouds catch the
+        // golden light rather than going abruptly black.
+        float cloudLit = saturate(ndl) * 0.9 + 0.1;
+        float3 cloudCol = cloud.w * sunColor.rgb * cloudLit;
+        // Night-side clouds stay faintly visible (earthshine) but do not glow.
+        float cloudOpacity = cloudDensity * (0.12 + 0.88 * dayGate);
+        col = lerp(col, cloudCol, saturate(cloudOpacity));
     }
 
     return float4(col, 1.0);

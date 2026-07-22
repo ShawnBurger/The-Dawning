@@ -335,17 +335,23 @@ PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
 // Build the per-body root-CBV payload. sunDir is the direction from the body TO
 // the star, computed in double before narrowing (RULE 1): the star holds the
 // frame origin, so it is normalize(-bodyPos). Sunlight is a fixed warm white.
+// sunDir.w carries the cloud rotation ANGLE (radians), wrapped to [0, 2pi) in
+// double so it stays float-exact regardless of how far the sim clock has run.
 render::Renderer::PlanetConstants BuildPlanetConstants(const PlanetSurfaceParams& ps,
                                                        const ecs::Transform& transform,
                                                        double renderScale,
-                                                       float timeSeconds)
+                                                       double coordinateTime)
 {
     const core::Vec3d starPos{ 0.0, 0.0, 0.0 };
     const core::Vec3f sunDir = (starPos - transform.position).Normalized().ToFloat();
 
+    constexpr double kTwoPi = 6.283185307179586;
+    const float cloudAngle = static_cast<float>(
+        std::fmod(coordinateTime * ps.cloudRotSpeed, kTwoPi));
+
     render::Renderer::PlanetConstants c = {};
     c.sunDir[0] = sunDir.x; c.sunDir[1] = sunDir.y; c.sunDir[2] = sunDir.z;
-    c.sunDir[3] = timeSeconds;
+    c.sunDir[3] = cloudAngle;
     c.sunColor[0] = 1.0f; c.sunColor[1] = 0.97f; c.sunColor[2] = 0.92f;
     c.sunColor[3] = 1.30f; // sun intensity
     c.params0[0] = static_cast<float>(ps.type);
@@ -973,7 +979,7 @@ void Scene::RenderEntities(render::D3D12Device& device,
                 if (ps.valid)
                 {
                     const render::Renderer::PlanetConstants pc =
-                        BuildPlanetConstants(ps, transform, m_renderScale, 0.0f);
+                        BuildPlanetConstants(ps, transform, m_renderScale, m_coordinateTime);
                     renderer.DrawPlanet(device, *gpuMesh, worldMatrix,
                                         material.albedo, material.roughness,
                                         material.metallic, pc);
