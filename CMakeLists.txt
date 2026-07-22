@@ -112,6 +112,7 @@ set(SHADER_FILES
     shaders/space_ps.hlsl
     shaders/planet_vs.hlsl
     shaders/planet_ps.hlsl
+    shaders/planet_noise.hlsli
     shaders/overlay_vs.hlsl
     shaders/overlay_ps.hlsl
     shaders/bloom_vs.hlsl
