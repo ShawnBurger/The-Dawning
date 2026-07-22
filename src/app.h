@@ -41,9 +41,11 @@ struct AppOptions
     // mode (e.g. --smoke --smoke-capture --star-system --camera-mode=nearbody).
     bool starSystem = false;
     int  startCameraMode = 0; // matches App::CameraMode ordinal; 0 = ShipChase
-    // Near-body focus target, as an original (un-offset) local id: 10 Earth,
-    // 11 Moon, 20 Mars, 1 Sun. --focus-body=<id>. Default Earth.
-    uint64_t focusLocalId = 10;
+    // Focus target, as an original (un-offset) local id: 10 Earth, 11 Moon, 20 Mars,
+    // 1 Sun. --focus-body=<id>. 0 = unset (near-body defaults to Earth; the terrain
+    // Surface preview defaults to the Moon, whose local-scale craters read best up
+    // close — Earth-scale continents need near-surface detail octaves, a follow-on).
+    uint64_t focusLocalId = 0;
     std::string runtimeContentId = "reference_ship";
     double smokeSeconds = 4.0;
     double smokeRTDelaySeconds = 0.25;

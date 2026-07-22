@@ -3,6 +3,7 @@
 #include "terrain/cube_sphere.h"
 #include "terrain/chunk_mesh.h"
 #include "terrain/planet_quadtree.h"
+#include "core/planet_height.h"
 
 #include "core/input.h"
 #include "core/log.h"
@@ -34,6 +35,41 @@ constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
 // which live at kStarSystemBodyIdBase + local id (the star's builder id is also 1,
 // hence the offset). Used to look the ship up for its live osculating orbit.
 constexpr uint64_t kPlayerShipBodyId = 1;
+
+// Per-body terrain configuration (mirrors PlanetParamsFor + the true radii). type:
+// 0 Earth-like, 1 Mars-like, 2 Moon-like, 3 generic. amplitude is exaggerated for a
+// readable single-body descent demo.
+struct TerrainBodyCfg
+{
+    double      radius;
+    float       amplitude, seed, seaLevel, coastWidth;
+    int         type;
+    core::Vec3f landLow, landHigh, deep, shallow, ice, ambient;
+    float       iceLat, depthScale;
+};
+
+TerrainBodyCfg ConfigForTerrainBody(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 10: return { 6.371e6, 26000.0f, 11.0f, 0.52f, 0.02f, 0,   // Earth
+                          {0.090f,0.230f,0.100f}, {0.320f,0.280f,0.220f},
+                          {0.015f,0.050f,0.140f}, {0.050f,0.220f,0.320f},
+                          {0.850f,0.880f,0.920f}, {0.015f,0.020f,0.030f}, 0.80f, 0.25f };
+        case 20: return { 3.3895e6, 22000.0f, 22.0f, 1.0f, 0.0f, 1,    // Mars
+                          {0.420f,0.200f,0.110f}, {0.620f,0.360f,0.230f},
+                          {0,0,0}, {0,0,0},
+                          {0.900f,0.900f,0.920f}, {0.020f,0.012f,0.008f}, 0.82f, 0.0f };
+        case 11: return { 1.7374e6, 16000.0f, 33.0f, 1.0f, 0.0f, 2,    // Moon
+                          {0.045f,0.045f,0.050f}, {0.400f,0.400f,0.420f},
+                          {0,0,0}, {0,0,0},
+                          {0,0,0}, {0.010f,0.010f,0.012f}, 2.0f, 0.0f };
+        default: return { 2.5e6, 18000.0f, 7.0f, 1.0f, 0.0f, 3,        // generic
+                          {0.300f,0.300f,0.320f}, {0.500f,0.500f,0.520f},
+                          {0,0,0}, {0,0,0},
+                          {0.800f,0.820f,0.850f}, {0.014f,0.014f,0.016f}, 2.0f, 0.0f };
+    }
+}
 
 // Display name for a seeded body by its LOCAL (un-offset) id. Shared by the HUD's
 // focus block and the ship-orbit block's primary label.
@@ -314,30 +350,6 @@ bool App::InitializeScene()
         sphereData.vertices.data(), static_cast<uint32_t>(sphereData.vertices.size()),
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
-
-    // Chunked-LOD terrain preview (the Moon): only the FRAMING is fixed here; the
-    // leaf patches are STREAMED per frame in RenderTerrainPreview (reselect LOD for
-    // the live camera, generate+cache newly-visible write-once upload meshes). The
-    // camera pose is body-space (independent of the Moon's world position).
-    if (m_options.starSystem && m_options.startCameraMode == 5) // Surface mode only
-    {
-        const double moonR = 1.7374e6;
-        m_terrainBodyId = scene::kStarSystemBodyIdBase + 11;
-
-        const core::Vec3d focusDir = terrain::FaceToDirection(terrain::CubeFace::PosZ, 0.2, 0.1);
-        m_terrainFocusBody = { focusDir.x * moonR, focusDir.y * moonR, focusDir.z * moonR };
-        core::Vec3d tan{ focusDir.y * 0.0 - focusDir.z * 1.0,
-                         focusDir.z * 0.0 - focusDir.x * 0.0,
-                         focusDir.x * 1.0 - focusDir.y * 0.0 };
-        double tl = tan.Length();
-        if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
-        tan = { tan.x / tl, tan.y / tl, tan.z / tl };
-        const double altitude = 120000.0, backDist = 170000.0;
-        m_terrainCamBody = { m_terrainFocusBody.x + focusDir.x * altitude - tan.x * backDist,
-                             m_terrainFocusBody.y + focusDir.y * altitude - tan.y * backDist,
-                             m_terrainFocusBody.z + focusDir.z * altitude - tan.z * backDist };
-        m_terrainBuilt = true;
-    }
 
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
@@ -834,9 +846,54 @@ bool App::InitializeScene()
             ? CameraMode::Surface   // 5 is overloaded (4 is ship-in-system → chase)
             : static_cast<CameraMode>(m_options.startCameraMode);
         if (m_options.startCameraMode == 2) // near-body: focus the requested body (default Earth)
-            m_focusBodyId = scene::kStarSystemBodyIdBase + m_options.focusLocalId;
-        if (m_cameraMode == CameraMode::Surface) // terrain preview sits on the Moon
-            m_focusBodyId = scene::kStarSystemBodyIdBase + 11;
+            m_focusBodyId = scene::kStarSystemBodyIdBase +
+                            (m_options.focusLocalId ? m_options.focusLocalId : 10);
+        if (m_cameraMode == CameraMode::Surface) // terrain preview (default Moon)
+        {
+            const uint64_t sfLocal = m_options.focusLocalId ? m_options.focusLocalId : 11;
+            m_focusBodyId   = scene::kStarSystemBodyIdBase + sfLocal;
+            m_terrainBodyId = m_focusBodyId;
+            const TerrainBodyCfg cfg = ConfigForTerrainBody(sfLocal);
+
+            // Frame a LIT LAND point with relief (Earth is ~70% ocean, so a fixed
+            // point is usually dark flat water). Search the sphere with the CPU height
+            // twin for the best-scoring direction: land elevation weighted by how
+            // sunward it faces (the star sits at the frame origin).
+            core::Vec3d bodyPos;
+            auto& reg = m_scene.GetRegistry();
+            if (auto* pool = reg.GetPool<ecs::GravitationalBody>())
+                for (uint32_t i = 0; i < pool->Count(); ++i)
+                    if (pool->DataAt(i).bodyId == m_terrainBodyId)
+                    {
+                        const ecs::Entity e = reg.EntityAtIndex(pool->EntityAt(i));
+                        if (const auto* t = reg.TryGet<ecs::Transform>(e)) bodyPos = t->position;
+                        break;
+                    }
+            const core::Vec3d sunDir = (core::Vec3d{ 0.0, 0.0, 0.0 } - bodyPos).Normalized();
+            core::Vec3d best{ 0.0, 0.0, 1.0 };
+            double bestScore = -1.0;
+            const int N = 700;
+            const double golden = 2.399963229728653; // pi*(3-sqrt(5))
+            for (int i = 0; i < N; ++i)
+            {
+                const double y   = 1.0 - (i + 0.5) * 2.0 / N;
+                const double rad = std::sqrt((std::max)(0.0, 1.0 - y * y));
+                const double phi = i * golden;
+                const core::Vec3d d{ std::cos(phi) * rad, y, std::sin(phi) * rad };
+                const float elev = core::PlanetHeight(
+                    core::Vec3f{ static_cast<float>(d.x), static_cast<float>(d.y),
+                                 static_cast<float>(d.z) },
+                    cfg.type, cfg.seed, cfg.seaLevel, cfg.coastWidth);
+                const double lit = d.x * sunDir.x + d.y * sunDir.y + d.z * sunDir.z;
+                const double score = static_cast<double>(elev) * ((lit > 0.25) ? lit : 0.0);
+                if (score > bestScore) { bestScore = score; best = d; }
+            }
+            m_terrainFocusBody = { best.x * cfg.radius, best.y * cfg.radius, best.z * cfg.radius };
+            m_terrainCamBody   = { best.x * (cfg.radius + 200000.0),
+                                   best.y * (cfg.radius + 200000.0),
+                                   best.z * (cfg.radius + 200000.0) };
+            m_terrainBuilt = true;
+        }
 
         // Teleport the playable ship onto a live orbit about Earth for EVERY
         // star-system run (any camera mode), so it shares the system's frame, feels
@@ -2641,10 +2698,16 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
             if (tl < 1e-6) { tan = { 1.0, 0.0, 0.0 }; tl = 1.0; }
             tan = { tan.x / tl, tan.y / tl, tan.z / tl };
 
+            // Altitude range scales with the body: descend from ~6% of the radius
+            // down to just above the (exaggerated) peaks, so the camera never flies
+            // into terrain.
+            const TerrainBodyCfg cfg = ConfigForTerrainBody(m_terrainBodyId - scene::kStarSystemBodyIdBase);
+            const double startAlt = R * 0.06;
+            const double endAlt   = cfg.amplitude * 2.0 + 15000.0;
             const double tphase   = (m_surfaceElapsed < 3.0) ? (m_surfaceElapsed / 3.0) : 1.0;
-            const double altitude = 200000.0 + (30000.0 - 200000.0) * tphase; // 200km -> 30km
+            const double altitude = startAlt + (endAlt - startAlt) * tphase;
             const double backDist = altitude * 1.3;
-            const double fwdDrift = 260000.0 * tphase;   // fly forward as we descend
+            const double fwdDrift = R * 0.03 * tphase;   // fly forward as we descend
 
             m_terrainCamBody = { fdir.x * (R + altitude) - tan.x * backDist + tan.x * fwdDrift,
                                  fdir.y * (R + altitude) - tan.y * backDist + tan.y * fwdDrift,
@@ -3103,20 +3166,28 @@ void App::RenderTerrainPreview()
     if (!found) return;
 
     ++m_terrainStreamFrame;
-    const double moonR = 1.7374e6;
-    const double amplitude = 16000.0;
+    const TerrainBodyCfg cfg = ConfigForTerrainBody(m_terrainBodyId - scene::kStarSystemBodyIdBase);
+    const double bodyR    = cfg.radius;
+    const double amplitude = cfg.amplitude;
 
-    // Moon surface params (mirrors PlanetParamsFor(11)); sunDir toward the star at
-    // the frame origin, computed in double before narrowing (RULE 1).
+    // Surface params (from the body config); sunDir toward the star at the frame
+    // origin, computed in double before narrowing (RULE 1). These match the sphere's
+    // planet_ps colours so the terrain shades identically.
     render::Renderer::PlanetConstants pc = {};
     const core::Vec3f sunDir = (core::Vec3d{ 0.0, 0.0, 0.0 } - bodyPos).Normalized().ToFloat();
     pc.sunDir[0] = sunDir.x; pc.sunDir[1] = sunDir.y; pc.sunDir[2] = sunDir.z;
     pc.sunColor[0] = 1.0f; pc.sunColor[1] = 0.97f; pc.sunColor[2] = 0.92f; pc.sunColor[3] = 1.3f;
-    pc.params0[0] = 2.0f; pc.params0[1] = 1.0f; pc.params0[2] = 33.0f; pc.params0[3] = 1.0f;
-    pc.landLow[0]  = 0.045f; pc.landLow[1]  = 0.045f; pc.landLow[2]  = 0.050f;
-    pc.landHigh[0] = 0.400f; pc.landHigh[1] = 0.400f; pc.landHigh[2] = 0.420f; pc.landHigh[3] = 0.98f;
-    pc.iceColor[3] = 2.0f; // no ice cap
-    pc.ambient[0] = 0.010f; pc.ambient[1] = 0.010f; pc.ambient[2] = 0.012f;
+    pc.params0[0] = static_cast<float>(cfg.type); pc.params0[1] = cfg.seaLevel;
+    pc.params0[2] = cfg.seed; pc.params0[3] = 1.0f;
+    pc.deepColor[0]    = cfg.deep.x;    pc.deepColor[1]    = cfg.deep.y;    pc.deepColor[2]    = cfg.deep.z;
+    pc.deepColor[3]    = cfg.depthScale;
+    pc.shallowColor[0] = cfg.shallow.x; pc.shallowColor[1] = cfg.shallow.y; pc.shallowColor[2] = cfg.shallow.z;
+    pc.shallowColor[3] = cfg.coastWidth;
+    pc.landLow[0]  = cfg.landLow.x;  pc.landLow[1]  = cfg.landLow.y;  pc.landLow[2]  = cfg.landLow.z;
+    pc.landHigh[0] = cfg.landHigh.x; pc.landHigh[1] = cfg.landHigh.y; pc.landHigh[2] = cfg.landHigh.z;
+    pc.landHigh[3] = 0.95f;
+    pc.iceColor[0] = cfg.ice.x; pc.iceColor[1] = cfg.ice.y; pc.iceColor[2] = cfg.ice.z; pc.iceColor[3] = cfg.iceLat;
+    pc.ambient[0] = cfg.ambient.x; pc.ambient[1] = cfg.ambient.y; pc.ambient[2] = cfg.ambient.z;
 
     // Reselect the LOD for the LIVE camera-relative-to-body position, so the patch
     // set adapts as the camera moves over the surface.
@@ -3129,7 +3200,7 @@ void App::RenderTerrainPreview()
         : core::Vec3d{ 0, 0, 1 };
 
     terrain::QuadtreeConfig qc;
-    qc.planetRadius = moonR; qc.amplitude = amplitude;
+    qc.planetRadius = bodyR; qc.amplitude = amplitude;
     qc.pixelError = 9.0; qc.maxLevel = 7;
     std::vector<terrain::QuadPatch> patches;
     terrain::SelectQuadtreeLOD(qc, camBody, patches);
@@ -3150,8 +3221,8 @@ void App::RenderTerrainPreview()
             terrain::ChunkParams tp;
             tp.face = qp.face; tp.u0 = qp.u0; tp.u1 = qp.u1; tp.v0 = qp.v0; tp.v1 = qp.v1;
             tp.gridN = 33;
-            tp.planetRadius = moonR; tp.amplitudeMeters = amplitude;
-            tp.type = 2; tp.seed = 33.0f; tp.seaLevel = 1.0f; tp.coastWidth = 0.0f;
+            tp.planetRadius = bodyR; tp.amplitudeMeters = amplitude;
+            tp.type = cfg.type; tp.seed = cfg.seed; tp.seaLevel = cfg.seaLevel; tp.coastWidth = cfg.coastWidth;
             terrain::ChunkMesh chunk = terrain::GenerateChunk(tp);
 
             std::vector<render::Vertex> tv(chunk.vertices.size());
