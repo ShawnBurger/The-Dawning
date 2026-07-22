@@ -253,6 +253,123 @@ AtmosphereParams AtmosphereParamsFor(uint64_t localId)
         default: return { false, 0.0f, { 0.0f, 0.0f, 0.0f }, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     }
 }
+
+// -----------------------------------------------------------------------------
+// Procedural planet-surface parameters, keyed by the body's ORIGINAL (un-offset)
+// localId — the twin of AtmosphereParamsFor/VisualFor. The surface is fully
+// procedural (no texture assets); these constants tune the analytic layer stack
+// in planet_ps.hlsl. type: 0 Earth-like, 1 Mars-like, 2 Moon-like, 3 generic.
+// valid=false leaves a body on the standard PBR DrawMesh path (e.g. the star).
+// -----------------------------------------------------------------------------
+struct PlanetSurfaceParams
+{
+    bool  valid;
+    int   type;
+    float seaLevel;
+    float deep[3];     float depthScale;
+    float shallow[3];  float coastWidth;
+    float landLow[3];  float oceanRough;
+    float landHigh[3]; float landRough;
+    float ice[3];      float iceLatitude;
+    float cloudCoverage, cloudSoftness, cloudRotSpeed, cloudBrightness;
+    float night[3];    float nightIntensity;
+    float ambient[3];  float glintShininess;
+    float seed;
+};
+
+PlanetSurfaceParams PlanetParamsFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        // Earth: ~70% ocean, green/brown continents, polar ice, drifting clouds,
+        // warm night-side city lights, Fresnel ocean glint.
+        case 10: return { true, 0, 0.52f,
+                          { 0.015f, 0.050f, 0.140f }, 0.25f,
+                          { 0.050f, 0.220f, 0.320f }, 0.020f,
+                          { 0.090f, 0.230f, 0.100f }, 0.05f,
+                          { 0.320f, 0.280f, 0.220f }, 0.90f,
+                          { 0.850f, 0.880f, 0.920f }, 0.80f,
+                          0.48f, 0.12f, 0.006f, 1.10f,
+                          { 1.000f, 0.820f, 0.500f }, 1.00f,
+                          { 0.015f, 0.020f, 0.030f }, 220.0f,
+                          11.0f };
+        // Moon: dark maria vs bright highlands, dense craters, no ocean/atmosphere/
+        // clouds/lights, sharp terminator (type 2).
+        case 11: return { true, 2, 1.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.045f, 0.045f, 0.050f }, 0.0f,
+                          { 0.400f, 0.400f, 0.420f }, 0.98f,
+                          { 0.0f, 0.0f, 0.0f }, 2.0f,
+                          0.0f, 0.0f, 0.0f, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.010f, 0.010f, 0.012f }, 0.0f,
+                          33.0f };
+        // Mars: rust/oxide dry land everywhere (no ocean), CO2 polar caps, craters,
+        // no night lights.
+        case 20: return { true, 1, 1.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.420f, 0.200f, 0.110f }, 0.0f,
+                          { 0.620f, 0.360f, 0.230f }, 0.95f,
+                          { 0.900f, 0.900f, 0.920f }, 0.82f,
+                          0.0f, 0.0f, 0.0f, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.020f, 0.012f, 0.008f }, 0.0f,
+                          22.0f };
+        // Generic rocky body — neutral, no ocean/clouds/lights. Safe fallback so a
+        // larger seeded system still renders every body.
+        default: return { true, 3, 1.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.300f, 0.300f, 0.320f }, 0.0f,
+                          { 0.500f, 0.500f, 0.520f }, 0.90f,
+                          { 0.800f, 0.820f, 0.850f }, 0.85f,
+                          0.0f, 0.0f, 0.0f, 0.0f,
+                          { 0.0f, 0.0f, 0.0f }, 0.0f,
+                          { 0.014f, 0.014f, 0.016f }, 0.0f,
+                          7.0f };
+    }
+}
+
+// Build the per-body root-CBV payload. sunDir is the direction from the body TO
+// the star, computed in double before narrowing (RULE 1): the star holds the
+// frame origin, so it is normalize(-bodyPos). Sunlight is a fixed warm white.
+render::Renderer::PlanetConstants BuildPlanetConstants(const PlanetSurfaceParams& ps,
+                                                       const ecs::Transform& transform,
+                                                       double renderScale,
+                                                       float timeSeconds)
+{
+    const core::Vec3d starPos{ 0.0, 0.0, 0.0 };
+    const core::Vec3f sunDir = (starPos - transform.position).Normalized().ToFloat();
+
+    render::Renderer::PlanetConstants c = {};
+    c.sunDir[0] = sunDir.x; c.sunDir[1] = sunDir.y; c.sunDir[2] = sunDir.z;
+    c.sunDir[3] = timeSeconds;
+    c.sunColor[0] = 1.0f; c.sunColor[1] = 0.97f; c.sunColor[2] = 0.92f;
+    c.sunColor[3] = 1.30f; // sun intensity
+    c.params0[0] = static_cast<float>(ps.type);
+    c.params0[1] = ps.seaLevel;
+    c.params0[2] = ps.seed;
+    c.params0[3] = static_cast<float>(renderScale);
+    c.deepColor[0] = ps.deep[0]; c.deepColor[1] = ps.deep[1]; c.deepColor[2] = ps.deep[2];
+    c.deepColor[3] = ps.depthScale;
+    c.shallowColor[0] = ps.shallow[0]; c.shallowColor[1] = ps.shallow[1]; c.shallowColor[2] = ps.shallow[2];
+    c.shallowColor[3] = ps.coastWidth;
+    c.landLow[0] = ps.landLow[0]; c.landLow[1] = ps.landLow[1]; c.landLow[2] = ps.landLow[2];
+    c.landLow[3] = ps.oceanRough;
+    c.landHigh[0] = ps.landHigh[0]; c.landHigh[1] = ps.landHigh[1]; c.landHigh[2] = ps.landHigh[2];
+    c.landHigh[3] = ps.landRough;
+    c.iceColor[0] = ps.ice[0]; c.iceColor[1] = ps.ice[1]; c.iceColor[2] = ps.ice[2];
+    c.iceColor[3] = ps.iceLatitude;
+    c.cloud[0] = ps.cloudCoverage; c.cloud[1] = ps.cloudSoftness;
+    c.cloud[2] = ps.cloudRotSpeed; c.cloud[3] = ps.cloudBrightness;
+    c.night[0] = ps.night[0]; c.night[1] = ps.night[1]; c.night[2] = ps.night[2];
+    c.night[3] = ps.nightIntensity;
+    c.ambient[0] = ps.ambient[0]; c.ambient[1] = ps.ambient[1]; c.ambient[2] = ps.ambient[2];
+    c.ambient[3] = ps.glintShininess;
+    return c;
+}
 } // namespace
 
 std::vector<render::Renderer::LineVertex>
@@ -838,6 +955,32 @@ void Scene::RenderEntities(render::D3D12Device& device,
 
         const core::Mat4x4 worldMatrix =
             transform.ToCameraRelativeMatrix(cameraPosition, m_renderScale);
+
+        // Route seeded celestial bodies (not the central star, which has no
+        // OrbitState) to the procedural planet-surface shader, but only at true
+        // scale — in the compressed orrery (K ~ 1e-9) a body is a sub-pixel disc
+        // where per-pixel surface noise is pointless, so those stay on DrawMesh.
+        // Same gate RenderAtmospheres uses, so surface and atmosphere appear
+        // together. Everything else keeps the standard PBR path.
+        if (m_renderScale >= 0.5 &&
+            m_registry.HasByIndex<ecs::GravitationalBody>(entityIdx) &&
+            m_registry.HasByIndex<ecs::OrbitState>(entityIdx))
+        {
+            const auto& g = m_registry.GetByIndex<ecs::GravitationalBody>(entityIdx);
+            if (g.bodyId >= kStarSystemBodyIdBase)
+            {
+                const PlanetSurfaceParams ps = PlanetParamsFor(g.bodyId - kStarSystemBodyIdBase);
+                if (ps.valid)
+                {
+                    const render::Renderer::PlanetConstants pc =
+                        BuildPlanetConstants(ps, transform, m_renderScale, 0.0f);
+                    renderer.DrawPlanet(device, *gpuMesh, worldMatrix,
+                                        material.albedo, material.roughness,
+                                        material.metallic, pc);
+                    continue;
+                }
+            }
+        }
 
         // Issue draw call
         renderer.DrawMesh(device, *gpuMesh, worldMatrix,

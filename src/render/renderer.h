@@ -507,6 +507,39 @@ public:
     void DrawAtmosphere(D3D12Device& device, const Mesh& mesh,
                         const AtmosphereConstants& constants);
 
+    // Per-body surface parameters (matches cbuffer CBPlanet in planet_ps.hlsl —
+    // 11 float4 rows, 176 bytes). sunDir is camera-relative-derived (RULE 1: the
+    // direction to the star is computed in double, then narrowed). Colours are
+    // linear. The planet surface is fully procedural (no texture assets), keyed by
+    // body type in params0.x.
+    struct PlanetConstants
+    {
+        float sunDir[4];       // xyz world sun direction, w = time seconds
+        float sunColor[4];     // rgb light colour,        w = sun intensity
+        float params0[4];      // x type(0=Earth,1=Mars,2=Moon,3=generic) y seaLevel z seed w renderScale
+        float deepColor[4];    // rgb deep ocean,    w = depthScale
+        float shallowColor[4]; // rgb shallow ocean, w = coastWidth
+        float landLow[4];      // rgb lowland/base,  w = oceanRoughness
+        float landHigh[4];     // rgb highland/rock, w = landRoughness
+        float iceColor[4];     // rgb ice/cap,       w = iceLatitude
+        float cloud[4];        // x coverage y softness z rotSpeed w brightness
+        float night[4];        // rgb city light,    w = night intensity
+        float ambient[4];      // rgb ambient/earthshine floor, w = glint shininess
+    };
+
+    // Draw one seeded celestial body's SURFACE through the procedural planet
+    // shader (planet_vs/planet_ps) instead of DrawMesh, so basic_ps.hlsl and its
+    // IBL consumption probe stay byte-identical. Opaque, writes reversed-Z depth,
+    // shares m_rootSig (the per-body params ride the appended root CBV b5). Restores
+    // MainPSO() on exit so an interleaved DrawMesh is unaffected. Runs in the
+    // RenderEntities slot, BEFORE the atmosphere shell composites over it.
+    void DrawPlanet(D3D12Device& device, const Mesh& mesh,
+                    const core::Mat4x4& worldMatrix,
+                    const core::Color& albedo,
+                    float roughness,
+                    float metallic,
+                    const PlanetConstants& planet);
+
     // Post-process tuning. Exposure was a constant baked into
     // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
     // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
@@ -812,6 +845,13 @@ private:
     ComPtr<ID3D12RootSignature> m_atmoRootSig;
     ComPtr<ID3D12PipelineState> m_atmoPSO;
     bool CreateAtmospherePipeline(ID3D12Device* device);
+
+    // Procedural planet-surface pipeline. Shares m_rootSig (the per-body params
+    // ride the appended root CBV b5); only the PSO differs from the main opaque
+    // pass — planet_vs/planet_ps, reversed-Z GREATER with depth WRITE, cull BACK,
+    // HDR target. No separate root signature.
+    ComPtr<ID3D12PipelineState> m_planetPSO;
+    bool CreatePlanetPSO(ID3D12Device* device);
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
     // slots in the texture table, so the tone-map pass stays independent of

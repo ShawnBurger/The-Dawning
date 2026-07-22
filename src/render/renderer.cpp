@@ -30,6 +30,7 @@ bool Renderer::Init(D3D12Device& device)
     if (!CreateLinePipeline(device.Device()))  return false;
     if (!CreateBillboardPipeline(device.Device())) return false;
     if (!CreateAtmospherePipeline(device.Device())) return false;
+    if (!CreatePlanetPSO(device.Device()))     return false;
     if (!CreateConstantBuffers(device.Device())) return false;
     // The shaders always carry the smoke probe binding, even though normal
     // frames branch around every write. Keep a one-record UAV bound so the root
@@ -231,6 +232,7 @@ void Renderer::Shutdown()
     m_textureHeap.Reset();
     m_skyPSO.Reset();
     m_spacePSO.Reset();
+    m_planetPSO.Reset();
     m_pso.Reset();
     m_psoDrawProbe.Reset();
     m_rootSig.Reset();
@@ -1088,7 +1090,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         aoRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
         aoRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER1 rootParams[11] = {};
+        D3D12_ROOT_PARAMETER1 rootParams[12] = {};
 
         // Slot 0: per-object StructuredBuffer (t0, space2) — bound once per pass
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1225,6 +1227,18 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[10].DescriptorTable.pDescriptorRanges   = &aoRange;
         rootParams[10].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 11: per-body procedural planet parameters (b5). PIXEL-only — only
+        // planet_ps declares b5, and no other shader (basic_ps/basic_vs/sky/space)
+        // references it, so their bytecode is unchanged and they simply never bind
+        // this slot. APPENDED so slots 0..10 keep their indices and every GPU probe
+        // that reads them by index is unmoved. This is the fifth such append (draw
+        // probe 6/7, IBL 8/9, SSAO 10, now planet 11) and follows the same rule.
+        rootParams[11].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[11].Descriptor.ShaderRegister = 5;
+        rootParams[11].Descriptor.RegisterSpace  = 0;
+        rootParams[11].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+        rootParams[11].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC vrsDesc = {};
         vrsDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_1;
         vrsDesc.Desc_1_1.NumParameters     = _countof(rootParams);
@@ -1273,7 +1287,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         // including both smoke modes - would ever catch. v1.0 has no
         // per-descriptor Flags member; volatile is the implicit default there,
         // which is what the v1.1 branch asks for explicitly.
-        D3D12_ROOT_PARAMETER rootParams[11] = {};
+        D3D12_ROOT_PARAMETER rootParams[12] = {};
 
         rootParams[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         rootParams[0].Descriptor.ShaderRegister = 0;
@@ -1341,6 +1355,13 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
         rootParams[10].DescriptorTable.pDescriptorRanges   = &aoRange;
         rootParams[10].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // Slot 11: per-body procedural planet parameters (b5). PIXEL-only. Lockstep
+        // with v1.1. v1.0 has no per-descriptor Flags; volatile is the default.
+        rootParams[11].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[11].Descriptor.ShaderRegister = 5;
+        rootParams[11].Descriptor.RegisterSpace  = 0;
+        rootParams[11].ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
         rsDesc.NumParameters     = _countof(rootParams);
         rsDesc.pParameters       = rootParams;
@@ -1368,7 +1389,7 @@ bool Renderer::CreateRootSignature(ID3D12Device* device)
     }
 
     m_rootSig->SetName(L"MainRootSignature");
-    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 2 root CBVs + draw constants + 2 probe UAVs + texture table + shadow table + env cube table, 3 static samplers, 18 DWORDs)",
+    core::Log::Infof("Root signature created (v%s, 2 root SRVs + 3 root CBVs (b1/b4/b5) + draw constants + 2 probe UAVs + texture table + shadow table + env cube table + AO table, 3 static samplers, 21 DWORDs)",
                      featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0");
     return true;
 }
@@ -2292,6 +2313,146 @@ void Renderer::DrawAtmosphere(D3D12Device& device, const Mesh& mesh,
     cmd->IASetIndexBuffer(&mesh.ibView);
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+}
+
+// =============================================================================
+// CreatePlanetPSO — procedural celestial-body surface pipeline
+// =============================================================================
+// Shares m_rootSig with the main opaque pass (the per-body params ride the
+// appended root CBV b5); only the pixel shader and vertex shader differ. Same
+// opaque state as CreatePSO — reversed-Z GREATER with depth WRITE, CW back-face
+// cull, HDR target — so a planet occludes and is occluded exactly like any other
+// mesh, and the atmosphere shell composites over it.
+bool Renderer::CreatePlanetPSO(ID3D12Device* device)
+{
+    auto vsBytecode = CompileShaderFromFile(L"shaders/planet_vs.hlsl", "main", "vs_5_1");
+    auto psBytecode = CompileShaderFromFile(L"shaders/planet_ps.hlsl", "main", "ps_5_1");
+    if (!vsBytecode || !psBytecode)
+    {
+        core::Log::Error("Failed to compile shaders for planet PSO");
+        return false;
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_rootSig.Get();
+    psoDesc.VS = { vsBytecode->GetBufferPointer(), vsBytecode->GetBufferSize() };
+    psoDesc.PS = { psBytecode->GetBufferPointer(), psBytecode->GetBufferSize() };
+
+    psoDesc.InputLayout.pInputElementDescs = kVertexLayout;
+    psoDesc.InputLayout.NumElements        = kVertexLayoutCount;
+
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_BACK;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE; // CW = front face (LH)
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    psoDesc.DepthStencilState.DepthEnable    = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc      = render::kMainDepthCompare; // reversed-Z GREATER
+    psoDesc.DepthStencilState.StencilEnable  = FALSE;
+
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = kHDRFormat;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_planetPSO));
+    if (FAILED(hr))
+    {
+        core::Log::Errorf("CreateGraphicsPipelineState (planet) failed: 0x%08X", hr);
+        return false;
+    }
+    m_planetPSO->SetName(L"PlanetSurfacePSO");
+    core::Log::Info("Planet PSO created (procedural surface, depth on, CW back-face cull)");
+    return true;
+}
+
+// =============================================================================
+// DrawPlanet — a seeded body's surface through the procedural planet shader
+// =============================================================================
+// Mirrors DrawMesh's object/material record allocation (planet_vs reads the world
+// matrix from objectBuffer[objectIndex] exactly as basic_vs does), then binds the
+// per-body params at root CBV b5, swaps to m_planetPSO, draws, and restores
+// MainPSO() so an interleaved DrawMesh is unaffected (the DrawSky/DrawSpace
+// pattern). basic_ps/basic_vs/MaterialData/ObjectData are all untouched.
+void Renderer::DrawPlanet(D3D12Device& device, const Mesh& mesh,
+                          const core::Mat4x4& worldMatrix,
+                          const core::Color& albedo,
+                          float roughness, float metallic,
+                          const PlanetConstants& planet)
+{
+    if (!mesh.IsValid() || !m_planetPSO) return;
+    if (!RequireFrameResources("DrawPlanet")) return;
+
+    auto* cmd = device.CmdList();
+
+    const bool buffersMapped = m_objectBuffer.mapped[m_currentFrame] &&
+                               m_materialBuffer.mapped[m_currentFrame];
+    uint32_t objectIndex = 0;
+    const bool objectOk = buffersMapped &&
+                          m_objectCursor.Allocate(m_objectBuffer.capacity, objectIndex);
+    const uint32_t materialIndex = m_materialCursor;
+    if (!objectOk || materialIndex >= m_materialBuffer.capacity)
+    {
+        if (!m_drawOverflowLogged)
+        {
+            core::Log::Errorf(
+                "Per-draw record overflow (planet): object %u/%u, material %u/%u. Draw skipped.",
+                m_objectCursor.Next(), m_objectBuffer.capacity,
+                materialIndex, m_materialBuffer.capacity);
+            m_drawOverflowLogged = true;
+        }
+        return;
+    }
+
+    // Per-body params ride a root CBV (b5); bail before recording anything if the
+    // ring is exhausted, so the draw is cleanly skipped rather than binding GPU
+    // address zero (the same discipline UploadCB documents).
+    const D3D12_GPU_VIRTUAL_ADDRESS planetVA = UploadCB(&planet, sizeof(planet));
+    if (planetVA == 0)
+        return; // CB ring overflow (already logged)
+
+    const core::Mat4x4 worldInvTranspose = core::Mat4x4::InverseTranspose3x3(worldMatrix);
+    ObjectData* objectDst =
+        reinterpret_cast<ObjectData*>(m_objectBuffer.mapped[m_currentFrame]) + objectIndex;
+    WriteObjectRecord(*objectDst, worldMatrix, worldInvTranspose, objectIndex);
+    if (m_objectCursor.Next() > m_objectPeak) m_objectPeak = m_objectCursor.Next();
+
+    // A material record is written for record-parity with DrawMesh even though
+    // planet_ps reads its colours from b5, not materialBuffer — the seeded
+    // albedo/roughness ride along so a later increment can reuse them if wanted.
+    MaterialData material = {};
+    material.albedo[0] = albedo.r;
+    material.albedo[1] = albedo.g;
+    material.albedo[2] = albedo.b;
+    material.albedo[3] = albedo.a;
+    material.roughness = roughness;
+    material.metallic  = metallic;
+    material.recordId  = materialIndex;
+    *(reinterpret_cast<MaterialData*>(m_materialBuffer.mapped[m_currentFrame]) +
+      materialIndex) = material;
+    ++m_materialCursor;
+    if (m_materialCursor > m_materialPeak) m_materialPeak = m_materialCursor;
+
+    // probeEnabled forced 0: planet_vs declares no draw-record UAV and bodies are
+    // never in the probe frame (the demo scene seeds none), so this pass is
+    // deliberately outside that verification.
+    const uint32_t indices[3] = { objectIndex, materialIndex, 0u };
+    cmd->SetGraphicsRoot32BitConstants(5, 3, indices, 0);
+    cmd->SetGraphicsRootConstantBufferView(11, planetVA);
+
+    cmd->SetPipelineState(m_planetPSO.Get());
+    cmd->IASetVertexBuffers(0, 1, &mesh.vbView);
+    cmd->IASetIndexBuffer(&mesh.ibView);
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+    // Restore the main opaque PSO so a following DrawMesh is unaffected.
+    cmd->SetPipelineState(MainPSO());
 }
 
 // =============================================================================
