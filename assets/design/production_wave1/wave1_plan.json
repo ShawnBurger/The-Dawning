@@ -123,7 +123,14 @@
       "image_model": "gpt-image-2",
       "pose_mode": null,
       "expected_credits": 9,
-      "prompt": "Original photorealistic multiview concept of a 52 m long, 18 m wide, 11 m high expedition spacecraft, clearly longer than wide. Six-crew pressurized cutter with armored axial keel, compact wedge nose, two tucked aft drive pods, dorsal docking collar, port airlock, ventral cargo ramp, radiators, RCS clusters, landing gear bays, layered titanium and carbon-composite panels. Grounded spacecraft engineering, not an aircraft. Consistent orthographic proportions, neutral studio light, no text, logo, stand, ground, weapons, detached parts, or background clutter."
+      "prompt": "Original photorealistic multiview concept of a 52 m long, 18 m wide, 11 m high expedition spacecraft, clearly longer than wide. Six-crew pressurized cutter with armored axial keel, compact wedge nose, two tucked aft drive pods, dorsal docking collar, port airlock, ventral cargo ramp, radiators, RCS clusters, landing gear bays, layered titanium and carbon-composite panels. Grounded spacecraft engineering, not an aircraft. Consistent orthographic proportions, neutral studio light, no text, logo, stand, ground, weapons, detached parts, or background clutter.",
+      "reconstruction": {
+        "polycount": 250000,
+        "remesh": true,
+        "hd_texture": true,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit photorealistic expedition spacecraft: cool white painted aluminum, exposed brushed titanium keel and service edges, dark carbon-composite drive pods, charcoal ceramic heat shielding, restrained amber safety accents, subtle directional maintenance wear and thermal discoloration. No baked shadows or highlights, pseudo-text, logos, broad random grime, glowing seams, or battle damage."
+      }
     },
     {
       "request_id": "concept.station.meridian.exterior",
@@ -134,7 +141,14 @@
       "image_model": "gpt-image-2",
       "pose_mode": null,
       "expected_credits": 9,
-      "prompt": "Original photorealistic multiview concept of a modular orbital trade and repair station, 180 m axial spine, 128 m across docking arms, 52 m high. Armored central transfer hub, four radial docking collars, two larger ship berths, cargo truss, tanks, service umbilicals, radiator roots, observation and traffic-control module. Believable pressure volumes and construction access, modular rather than monolithic, no gravity fantasy. Consistent orthographic geometry, neutral space-light studio, no ships, people, text, logos, weapons, planet, or background clutter."
+      "prompt": "Original photorealistic multiview concept of a modular orbital trade and repair station, 180 m axial spine, 128 m across docking arms, 52 m high. Armored central transfer hub, four radial docking collars, two larger ship berths, cargo truss, tanks, service umbilicals, radiator roots, observation and traffic-control module. Believable pressure volumes and construction access, modular rather than monolithic, no gravity fantasy. Consistent orthographic geometry, neutral space-light studio, no ships, people, text, logos, weapons, planet, or background clutter.",
+      "reconstruction": {
+        "polycount": 300000,
+        "remesh": true,
+        "hd_texture": true,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit photorealistic orbital infrastructure: zinc-gray structural alloy, off-white replaceable pressure panels, dark thermal blankets and radiator roots, brushed steel docking rings, restrained amber wayfinding accents, localized service wear and thruster staining. No baked lighting, pseudo-text, logos, universal rust, glowing seams, ships, or battle damage."
+      }
     },
     {
       "request_id": "concept.armor.argent.full_suit",
@@ -145,7 +159,14 @@
       "image_model": "gpt-image-2",
       "pose_mode": "t-pose",
       "expected_credits": 9,
-      "prompt": "Photorealistic original full-body hard-surface EVA suit on one neutral adult human in a strict T-pose. Functional pressure garment under modular ceramic-composite helmet, collar, torso, shoulder, forearm, pelvis, thigh, shin and boot shells; compact life-support pack; sealed joints with believable flex gaps; clear laminated visor; tool mounts and rescue hardware. Industrial near-future engineering, not superhero armor, slim enough for ship corridors. Symmetric neutral lighting, no weapon, cape, text, logo, stand, or background clutter."
+      "prompt": "Photorealistic original full-body hard-surface EVA suit on one neutral adult human in a strict T-pose. Functional pressure garment under modular ceramic-composite helmet, collar, torso, shoulder, forearm, pelvis, thigh, shin and boot shells; compact life-support pack; sealed joints with believable flex gaps; clear laminated visor; tool mounts and rescue hardware. Industrial near-future engineering, not superhero armor, slim enough for ship corridors. Symmetric neutral lighting, no weapon, cape, text, logo, stand, or background clutter.",
+      "reconstruction": {
+        "polycount": 200000,
+        "remesh": true,
+        "hd_texture": true,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit photorealistic EVA suit: off-white matte ceramic-composite shells, charcoal woven pressure garment, brushed titanium joint hardware, clear neutral visor, dark life-support pack, restrained rescue-orange latches and pull points, localized hand and knee wear. No baked lighting, pseudo-text, logos, glowing strips, broad grime, or battle damage."
+      }
     },
     {
       "request_id": "concept.weapon.helix.carbine",
@@ -156,7 +177,14 @@
       "image_model": "gpt-image-2",
       "pose_mode": null,
       "expected_credits": 9,
-      "prompt": "Original photorealistic near-future vacuum-capable service carbine, 86 cm long, physically plausible compact receiver and barrel, folding adjustable stock, removable box magazine, low-profile optic, charging handle, selector, trigger guard, heat shielding, sling points and tool-less service latches. Functional layered metal and reinforced polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter."
+      "prompt": "Original photorealistic near-future vacuum-capable service carbine, 86 cm long, physically plausible compact receiver and barrel, folding adjustable stock, removable box magazine, low-profile optic, charging handle, selector, trigger guard, heat shielding, sling points and tool-less service latches. Functional layered metal and reinforced polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter.",
+      "reconstruction": {
+        "polycount": 180000,
+        "remesh": true,
+        "hd_texture": true,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit photorealistic service carbine: dark phosphate steel barrel and controls, graphite anodized aluminum receiver, charcoal fiber-reinforced polymer grip and stock, heat-stained barrel shroud, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked highlights, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage."
+      }
     },
     {
       "request_id": "concept.weapon.helix.sidearm",
@@ -167,7 +195,14 @@
       "image_model": "gpt-image-2",
       "pose_mode": null,
       "expected_credits": 9,
-      "prompt": "Original photorealistic sealed-duty near-future sidearm, 31 cm long, plausible bore axis, compact upper receiver and barrel group, removable grip magazine, protected trigger, ambidextrous selector, low-profile sight module, service takedown seams and gloved-hand ergonomics. Functional metal and textured polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter."
+      "prompt": "Original photorealistic sealed-duty near-future sidearm, 31 cm long, plausible bore axis, compact upper receiver and barrel group, removable grip magazine, protected trigger, ambidextrous selector, low-profile sight module, service takedown seams and gloved-hand ergonomics. Functional metal and textured polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter.",
+      "reconstruction": {
+        "polycount": 140000,
+        "remesh": true,
+        "hd_texture": true,
+        "expected_credits": 30,
+        "texture_prompt": "De-lit photorealistic sealed-duty sidearm: nitrided steel barrel and controls, graphite anodized upper receiver, charcoal textured polymer grip, brushed takedown hardware, low-glare optical glass, restrained amber witness accents, localized handling wear. No baked highlights, pseudo-text, logos, glowing parts, camouflage, broad grime, or damage."
+      }
     },
     {
       "request_id": "preview.ship.longreach.cockpit_frame",

@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T14:44:02.589159+00:00",
+  "request_hash": "18fa89b3c9d4a22cf6dbf23d68cbc76829ac609f43265c9b910a167b96c8b21c",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Photorealistic original full-body hard-surface EVA suit on one neutral adult human in a strict T-pose. Functional pressure garment under modular ceramic-composite helmet, collar, torso, shoulder, forearm, pelvis, thigh, shin and boot shells; compact life-support pack; sealed joints with believable flex gaps; clear laminated visor; tool mounts and rescue hardware. Industrial near-future engineering, not superhero armor, slim enough for ship corridors. Symmetric neutral lighting, no weapon, cape, text, logo, stand, or background clutter.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": "t-pose",
+    "asset_id": "equipment.argent_eva_mk1",
+    "module_id": "full_suit_concept",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8a47-96a2-7a34-84cc-8ec9b86b708b",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731376991,
+      "started_at": 1784731377355,
+      "finished_at": 1784731425585,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "3673f0e1b14a7fa9de07cf73a7e4eb12182af73fa5524e396d89ecd11040d0d8",
+      "view_1.png": "1086903fe207d0be6f1f15be16307c9428c5ed95c9447b699d6e589b73e46338",
+      "view_2.png": "a72c5a01cecf720d1e048244fcb31ccaa283251ac22a42c96ba0e7e9535c0bb4"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T14:48:00Z",
+    "strengths": [
+      "front, side and rear views describe one consistent T-pose suit",
+      "pressure garment, rigid shell layers, helmet and life-support pack are readable",
+      "neck, shoulder, elbow, hip and knee gaps provide a credible cleanup starting point"
+    ],
+    "conditions": [
+      "production suit is separated into named shell modules around an authored skeleton",
+      "visor thickness, pressure seals, joint clearance and corridor envelope are measured in Blender",
+      "generated wearer anatomy is reference only and cannot become the production character body"
+    ]
+  },
+  "consumed_credits": 9
+}

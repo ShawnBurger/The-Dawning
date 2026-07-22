@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T14:46:19.390382+00:00",
+  "request_hash": "843c93b6a833944828afdc463a7732d623731096b3f0c3617c210a789b442756",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Original photorealistic sealed-duty near-future sidearm, 31 cm long, plausible bore axis, compact upper receiver and barrel group, removable grip magazine, protected trigger, ambidextrous selector, low-profile sight module, service takedown seams and gloved-hand ergonomics. Functional metal and textured polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "weapon.helix_sidearm_mk1",
+    "module_id": "sidearm_concept",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8a49-ab0a-7eef-a965-5bddbbcfd0f5",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731513720,
+      "started_at": 1784731513745,
+      "finished_at": 1784731563319,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "042746fe63af87b1602b93ec5811831dd3a9975103bf90b504811ec319d72faf",
+      "view_1.png": "cdbb5774a8d2b21ba0ab2b09184122535c8ae7d899634eb94b152892426d3e2e",
+      "view_2.png": "25bc2b713fb51a047e53f53c7728b96f157a1188aab32670425702872f1aab23"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T14:48:00Z",
+    "strengths": [
+      "front, rear and side views preserve a coherent bore, grip and sight relationship",
+      "upper receiver, frame, magazine, trigger and selector boundaries remain readable",
+      "compact sealed-duty silhouette fits the shared Helix material language"
+    ],
+    "conditions": [
+      "upper receiver, frame, barrel group, magazine, trigger, selector and sight become separate rigid parts",
+      "authored 0.31 m envelope, grip ergonomics, sight line and muzzle axis remain authoritative",
+      "generic real-world weapon cues and generated markings are revised during original-detail cleanup"
+    ]
+  },
+  "consumed_credits": 9
+}

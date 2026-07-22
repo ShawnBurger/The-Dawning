@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T14:42:54.853342+00:00",
+  "request_hash": "9d1e6e2a6330c32d8a10609a1cded7f6a7bb3c9ef9783bc600d1c4802a36f943",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Original photorealistic multiview concept of a modular orbital trade and repair station, 180 m axial spine, 128 m across docking arms, 52 m high. Armored central transfer hub, four radial docking collars, two larger ship berths, cargo truss, tanks, service umbilicals, radiator roots, observation and traffic-control module. Believable pressure volumes and construction access, modular rather than monolithic, no gravity fantasy. Consistent orthographic geometry, neutral space-light studio, no ships, people, text, logos, weapons, planet, or background clutter.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "station.meridian_exchange_mk1",
+    "module_id": "exterior_core_concept",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8a46-8cb1-79e7-b744-8c2fc50d24d0",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731309229,
+      "started_at": 1784731309297,
+      "finished_at": 1784731363757,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "0af015de6a47a5fc865ba91666b6de9d3697d546521975ede64db26089a53d79",
+      "view_1.png": "09195d01a1fc3fa1af138594783638fa8a0f15e94e4119135ba490f974c3586d",
+      "view_2.png": "6b25711a5592f5f103844940ff5c0ab430d3191d72a82268282623f003b9e53c"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T14:48:00Z",
+    "strengths": [
+      "central transfer hub, axial service spine and radial docking arms remain coherent across views",
+      "pressure modules and exposed construction systems read as assembled infrastructure",
+      "silhouette is distinct from a ship and leaves clear future rigid-part boundaries"
+    ],
+    "conditions": [
+      "authored 180 x 128 x 52 m envelope and docking interfaces remain authoritative",
+      "radiators, arrays, elevators and any rotating habitat remain separate future meshes",
+      "docking collars, cargo paths and service umbilical sockets are re-authored in Blender"
+    ]
+  },
+  "consumed_credits": 9
+}

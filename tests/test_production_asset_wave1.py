@@ -102,6 +102,7 @@ class ProductionAssetWaveOneTests(unittest.TestCase):
         for request in self.plan["requests"]:
             with self.subTest(request=request["request_id"]):
                 if request["phase"] == "concept":
+                    reconstruction = request["reconstruction"]
                     params = MESHY.build_concept_params(
                         request["prompt"],
                         image_model=request["image_model"],
@@ -114,6 +115,17 @@ class ProductionAssetWaveOneTests(unittest.TestCase):
                     self.assertEqual(
                         MESHY.estimated_concept_credits(request["image_model"]),
                         request["expected_credits"],
+                    )
+                    self.assertTrue(reconstruction["remesh"])
+                    self.assertTrue(reconstruction["hd_texture"])
+                    self.assertGreaterEqual(reconstruction["polycount"], 100000)
+                    self.assertLessEqual(reconstruction["polycount"], 300000)
+                    self.assertLessEqual(
+                        len(reconstruction["texture_prompt"]), MESHY.MAX_PROMPT_CHARS
+                    )
+                    self.assertEqual(
+                        MESHY.estimated_multiview_credits("meshy-6"),
+                        reconstruction["expected_credits"],
                     )
                     continue
 

@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T14:41:46.774040+00:00",
+  "request_hash": "4da3ab1c3f5518b8866fdfd27d87685ecdd39c4bad727ab89a75d1aaebb85c47",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Original photorealistic multiview concept of a 52 m long, 18 m wide, 11 m high expedition spacecraft, clearly longer than wide. Six-crew pressurized cutter with armored axial keel, compact wedge nose, two tucked aft drive pods, dorsal docking collar, port airlock, ventral cargo ramp, radiators, RCS clusters, landing gear bays, layered titanium and carbon-composite panels. Grounded spacecraft engineering, not an aircraft. Consistent orthographic proportions, neutral studio light, no text, logo, stand, ground, weapons, detached parts, or background clutter.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "ship.longreach_expedition_cutter_mk1",
+    "module_id": "exterior_hull_concept",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8a45-82c8-780e-8db5-e821ee1e9606",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731241143,
+      "started_at": 1784731241264,
+      "finished_at": 1784731288053,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "06cd2e601a2ed1997ed7fb1724986812e14053fda378cda2ea0b8dd265d8c309",
+      "view_1.png": "554da64d754f038756797fff3c9f91655f6c615db0505d1d2c04f49e6c51909d",
+      "view_2.png": "ad1dd4d11dd37420f93b99c1b81ea21f4a5131979514627a5dce80d25ceb927c"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T14:48:00Z",
+    "strengths": [
+      "longitudinal pressure-spacecraft silhouette is clear in side and end views",
+      "axial hull and four-nozzle aft drive mass agree across views",
+      "surface hierarchy supports later service-panel and thermal-system cleanup"
+    ],
+    "conditions": [
+      "authored 52 x 18 x 11 m envelope remains authoritative",
+      "airlock, cargo ramp, docking collar, landing gear and RCS sockets are re-authored",
+      "image-edge fragments and generated pseudo-panels are removed during Blender cleanup"
+    ]
+  },
+  "consumed_credits": 9
+}

@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "provider": "Meshy",
+  "endpoint": "/openapi/v1/text-to-image",
+  "generated_at_utc": "2026-07-22T14:45:11.269601+00:00",
+  "request_hash": "f33883808b0987d7b3c96e3f35440e0082fe0762f558b56f7c40d5941ca090d5",
+  "stage": "concept",
+  "parameters": {
+    "prompt": "Original photorealistic near-future vacuum-capable service carbine, 86 cm long, physically plausible compact receiver and barrel, folding adjustable stock, removable box magazine, low-profile optic, charging handle, selector, trigger guard, heat shielding, sling points and tool-less service latches. Functional layered metal and reinforced polymer, restrained science fiction, readable separate rigid parts. Consistent orthographic side, top, front and three-quarter views, neutral studio light, no person, hands, ammunition, text, logos, stand, or background clutter.",
+    "image_model": "gpt-image-2",
+    "generate_multi_view": true,
+    "pose_mode": null,
+    "asset_id": "weapon.helix_carbine_mk1",
+    "module_id": "carbine_concept",
+    "pipeline_version": 2
+  },
+  "tasks": {
+    "concept": {
+      "id": "019f8a48-9f32-7acd-a538-08286fbd9aed",
+      "type": "text-to-image",
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "created_at": 1784731445689,
+      "started_at": 1784731445737,
+      "finished_at": 1784731494393,
+      "consumed_credits": 9
+    }
+  },
+  "files": {
+    "images": [
+      "view_0.png",
+      "view_1.png",
+      "view_2.png"
+    ],
+    "image_sha256": {
+      "view_0.png": "9727f9a5e38687c11ee264c25a6d6886f869e437743ca30cd2c9f036675b9bcd",
+      "view_1.png": "d5c6f7aee47bad90c99ff2dcd79d18729c78786007406d75d6182171e66a1f4a",
+      "view_2.png": "b59e6d864edcd02951e97230289723b910b9b3ce3dedc2e80217a846c258f208"
+    }
+  },
+  "art_review": {
+    "status": "approved_for_reconstruction",
+    "reviewed_at_utc": "2026-07-22T14:48:00Z",
+    "strengths": [
+      "front, rear and side profiles agree on receiver, bore, stock and grip placement",
+      "magazine, optic, controls and service seams are visually separable",
+      "restrained hard-surface treatment supports close first-person cleanup"
+    ],
+    "conditions": [
+      "receiver, barrel group, stock, magazine, optic, charging handle and controls become separate rigid parts",
+      "authored 0.86 m envelope, grip reach, sight line and muzzle axis remain authoritative",
+      "generated control markings and mechanically ambiguous cavities are replaced"
+    ]
+  },
+  "consumed_credits": 9
+}
