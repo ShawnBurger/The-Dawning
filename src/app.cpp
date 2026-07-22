@@ -27,6 +27,25 @@ namespace
 constexpr const char* kSmokeCaptureFile = "smoke_capture.ppm";
 constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
 
+// The player ship's GravitationalBody id. Distinct from the seeded celestial bodies,
+// which live at kStarSystemBodyIdBase + local id (the star's builder id is also 1,
+// hence the offset). Used to look the ship up for its live osculating orbit.
+constexpr uint64_t kPlayerShipBodyId = 1;
+
+// Display name for a seeded body by its LOCAL (un-offset) id. Shared by the HUD's
+// focus block and the ship-orbit block's primary label.
+const char* SeededBodyName(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 1:  return "SUN";
+        case 10: return "EARTH";
+        case 11: return "MOON";
+        case 20: return "MARS";
+        default: return "BODY";
+    }
+}
+
 uint64_t SmokeFrameForTime(double seconds)
 {
     return static_cast<uint64_t>(std::ceil(seconds / kSmokeFixedDeltaSeconds));
@@ -122,7 +141,12 @@ bool FileExists(const char* path)
 void SetWorkingDirectoryToExecutable()
 {
     char exePath[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    const DWORD n = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) // 0 = failed; >= MAX_PATH = truncated (maybe unterminated)
+    {
+        core::Log::Warn("Could not resolve executable path; leaving working directory");
+        return;
+    }
     char* lastSlash = std::strrchr(exePath, '\\');
     if (lastSlash)
         *lastSlash = '\0';
@@ -607,7 +631,7 @@ bool App::InitializeScene()
     registry.Assign<ecs::SpatialFrame>(
         m_playerShip, ecs::SpatialFrame{ m_scene.ActiveFrame() });
     ecs::GravitationalBody playerGravity;
-    playerGravity.bodyId = 1;
+    playerGravity.bodyId = kPlayerShipBodyId;
     playerGravity.radius = 2.2;
     playerGravity.isSource = false;
     playerGravity.owner = ecs::OrbitOwner::ForceIntegrated;
@@ -774,14 +798,15 @@ bool App::InitializeScene()
         if (m_options.startCameraMode == 2) // near-body defaults to Earth
             m_focusBodyId = scene::kStarSystemBodyIdBase + 10;
 
-        // Mode 3 (fly the ship in the real system): teleport the playable ship to
-        // just above Earth with Earth's orbital velocity, so it shares the star
-        // system's frame and feels multi-body gravity (SOI live). The existing
-        // chase camera then frames the ship against a true-scale planet.
-        if (m_options.startCameraMode == 4)
+        // Teleport the playable ship onto a live orbit about Earth for EVERY
+        // star-system run (any camera mode), so it shares the system's frame, feels
+        // multi-body gravity (SOI live), and can be framed by the near-body map view
+        // as well as flown in the chase camera. The ship is a small object 1 AU out,
+        // so it costs the orrery / distant views nothing visible.
         {
             auto& reg = m_scene.GetRegistry();
-            core::Vec3d earthPos, earthVel; double earthRadius = 0.0; bool found = false;
+            core::Vec3d earthPos, earthVel; double earthRadius = 0.0, earthMu = 0.0;
+            bool found = false;
             if (auto* pool = reg.GetPool<ecs::GravitationalBody>())
                 for (uint32_t i = 0; i < pool->Count(); ++i)
                     if (pool->DataAt(i).bodyId == scene::kStarSystemBodyIdBase + 10)
@@ -790,6 +815,7 @@ bool App::InitializeScene()
                         earthPos = reg.Get<ecs::Transform>(e).position;
                         earthVel = reg.Get<ecs::RigidBody>(e).linearVelocity;
                         earthRadius = pool->DataAt(i).radius;
+                        earthMu = pool->DataAt(i).mu;
                         found = true;
                         break;
                     }
@@ -799,15 +825,36 @@ bool App::InitializeScene()
                 // In front of Earth (−Z) and slightly up, so the ship's default
                 // +Z forward — and the chase camera behind it — look toward Earth,
                 // which then fills the background beyond the ship.
-                t.position = earthPos +
-                    core::Vec3d{ 0.0, earthRadius * 0.35, -earthRadius * 4.0 };
+                const core::Vec3d offset{ 0.0, earthRadius * 0.35, -earthRadius * 4.0 };
+                t.position = earthPos + offset;
                 if (auto* rb = reg.TryGet<ecs::RigidBody>(m_playerShip))
                 {
-                    rb->linearVelocity = earthVel; // co-orbital with Earth
+                    // Put the ship on a CIRCULAR orbit about Earth rather than
+                    // co-moving with it: v = Earth's velocity + the local circular
+                    // speed sqrt(mu/r) perpendicular to the radius, so it coasts on a
+                    // closed orbit the player can then reshape with the engines. A
+                    // co-orbital ship (v == earthVel) has zero velocity relative to
+                    // Earth and simply falls straight in.
+                    const double r = offset.Length();
+                    core::Vec3d perp = offset.Cross(core::Vec3d{ 0.0, 1.0, 0.0 });
+                    if (perp.Length() < 1e-6) // radius nearly parallel to world up
+                        perp = offset.Cross(core::Vec3d{ 1.0, 0.0, 0.0 });
+                    const double vCirc = (earthMu > 0.0 && r > 0.0)
+                        ? std::sqrt(earthMu / r) : 0.0;
+                    rb->linearVelocity = earthVel + perp.Normalized() * vCirc;
                     rb->prevPosition = t.position;
+                    // Newtonian flight: with the assist OFF, zero stick means zero
+                    // force, so the ship coasts on its orbit. Coupled assist brakes
+                    // world velocity toward zero and would fight the orbit.
+                    if (auto* fc = reg.TryGet<ecs::FlightControl>(m_playerShip))
+                        fc->mode = ecs::FlightMode::Decoupled;
+                    m_shipInSystem = true; // the ship now has a real orbit to surface
+
+                    core::Log::Infof(
+                        "Ship spawned on a circular orbit about Earth: alt %.0f km, "
+                        "v_circular %.1f m/s (Newtonian flight)",
+                        (r - earthRadius) / 1000.0, vCirc);
                 }
-                core::Log::Infof("Ship spawned above Earth for solar flight (alt %.0f km)",
-                                 earthRadius / 1000.0);
             }
         }
     }
@@ -1393,8 +1440,8 @@ int App::RunMainLoop()
         if (input.KeyPressed(VK_OEM_2))
             m_timer.SetTimeScale(1.0);
 
-        // F5 cycles which seeded body the near-body view frames (Sun, Earth,
-        // Moon, Mars). Harmless in other modes.
+        // F5 cycles which seeded body the near-body view frames (Earth, Moon,
+        // Mars, Sun — see kFocusCycle below). Harmless in other modes.
         if (input.KeyPressed(VK_F5))
         {
             static const uint64_t kFocusCycle[] = { 10, 11, 20, 1 }; // Earth, Moon, Mars, Sun
@@ -1407,6 +1454,14 @@ int App::RunMainLoop()
             m_chaseCameraInitialized = false;
             core::Log::Infof("Near-body focus: bodyId %llu",
                              static_cast<unsigned long long>(m_focusBodyId));
+        }
+
+        // M toggles the maneuver-node preview: the orbit a prograde burn would give.
+        if (input.KeyPressed('M'))
+        {
+            m_showManeuverPreview = !m_showManeuverPreview;
+            core::Log::Infof("Maneuver preview: %s",
+                             m_showManeuverPreview ? "on" : "off");
         }
 
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
@@ -1474,6 +1529,7 @@ int App::RunMainLoop()
                     core::Log::Error("Smoke mode failed: path tracing unavailable");
                     m_exitCode = 2;
                     m_running = false;
+                    break; // exit now so RenderFrame can't overwrite exit code 2
                 }
             }
 
@@ -2479,8 +2535,27 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
         }
         if (found)
         {
+            // If the ship is orbiting THIS body, pull the camera back to frame its
+            // whole orbit — a KSP-style map view where the trace and the apsis markers
+            // are legible — rather than hugging the planet. Stand off ~1.6x the
+            // orbit's apoapsis so the full ellipse fits the 70-degree FOV; otherwise
+            // the usual 3-radii body framing.
+            double standoffRadii = 3.0;
+            if (m_shipInSystem && bodyRadius > 0.0)
+            {
+                const scene::OsculatingOrbit shipOrbit =
+                    m_scene.DeriveOsculatingOrbit(kPlayerShipBodyId);
+                if (shipOrbit.valid && shipOrbit.primaryBodyId == focus)
+                {
+                    const double reach = (shipOrbit.apoapsis > 0.0)
+                        ? shipOrbit.apoapsis : shipOrbit.altitude;
+                    const double framed = 1.6 * reach / bodyRadius;
+                    if (framed > standoffRadii)
+                        standoffRadii = framed;
+                }
+            }
             const gameplay::ChaseCameraPose pose =
-                gameplay::BuildNearBodyCameraPose(bodyPos, bodyRadius);
+                gameplay::BuildNearBodyCameraPose(bodyPos, bodyRadius, standoffRadii);
             m_chaseCameraInitialized = false; // fixed standoff, no chase smoothing
             m_camera.Init(pose.position, pose.yawDegrees, pose.pitchDegrees);
             return true;
@@ -2491,10 +2566,11 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
         m_options.smoke && !m_options.starSystem && !m_smokeCameraTarget.IsNull()
             ? m_smokeCameraTarget   // default smoke probe; NOT when flying the star system
             : m_playerShip;
-    if (m_cameraMode == CameraMode::ShipChase &&
-        registry.TryGet<ecs::Transform>(chaseTarget))
+    const ecs::Transform* ship = (m_cameraMode == CameraMode::ShipChase)
+        ? registry.TryGet<ecs::Transform>(chaseTarget)
+        : nullptr;
+    if (ship)
     {
-        const auto* ship = registry.TryGet<ecs::Transform>(chaseTarget);
         if (m_options.smoke && !m_options.starSystem &&
             !IsReferenceRuntimeContent())
         {
@@ -2812,6 +2888,73 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
     state.entityCount = m_scene.EntityCount();
     state.rtQuality = m_rtQualityInfo;
     state.cameraPosition = m_camera.Position();
+
+    // Navigation block — only meaningful once the reference star system is seeded.
+    if (m_options.starSystem)
+    {
+        state.navActive = true;
+
+        static const char* kModeNames[] = { "SHIP", "ORRERY", "NEAR-BODY", "FREE" };
+        const uint32_t modeIdx = static_cast<uint32_t>(m_cameraMode);
+        state.cameraModeName =
+            modeIdx < static_cast<uint32_t>(CameraMode::Count) ? kModeNames[modeIdx] : "?";
+        state.timeWarp = m_timer.GetTimeScale();
+
+        // The F5-selected focus body (near-body/orrery framing), defaulting to Earth.
+        const uint64_t focusId =
+            m_focusBodyId ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
+        const uint64_t localId = focusId - scene::kStarSystemBodyIdBase;
+        state.focusName = SeededBodyName(localId);
+
+        // Look the body up in the (const) registry the same way BuildOrbitTraceVertices
+        // does: distance is camera -> body centre, orbit comes from its OrbitState.
+        const auto& registry = m_scene.GetRegistry();
+        if (const auto* pool = registry.GetPool<ecs::GravitationalBody>())
+        {
+            for (uint32_t i = 0; i < pool->Count(); ++i)
+            {
+                if (pool->DataAt(i).bodyId != focusId)
+                    continue;
+                const ecs::Entity e = registry.EntityAtIndex(pool->EntityAt(i));
+                if (const auto* t = registry.TryGet<ecs::Transform>(e))
+                    state.focusDistance = (t->position - m_camera.Position()).Length();
+                if (const auto* os = registry.TryGet<ecs::OrbitState>(e))
+                {
+                    state.focusHasOrbit = true;
+                    state.focusSemiMajorAxis = os->elements.semiMajorAxis;
+                    state.focusEccentricity  = os->elements.eccentricity;
+                    // Closed-ellipse period T = 2*pi*sqrt(a^3/mu); undefined for a
+                    // hyperbola (a<0) or a missing primary mu, reported as 0.
+                    const double a = os->elements.semiMajorAxis;
+                    if (a > 0.0 && os->primaryMu > 0.0)
+                    {
+                        constexpr double kTwoPi = 6.283185307179586;
+                        state.focusPeriodSeconds =
+                            kTwoPi * std::sqrt(a * a * a / os->primaryMu);
+                    }
+                }
+                break;
+            }
+        }
+
+        // Ship-orbit sub-block: the player ship's own live osculating orbit (computed
+        // once per frame into m_shipOrbit), shown only once it has been flown into the
+        // system. This is the orbital-agency readout.
+        if (m_shipInSystem && m_shipOrbit.valid)
+        {
+            state.shipOrbitActive   = true;
+            state.shipPrimaryName   =
+                SeededBodyName(m_shipOrbit.primaryBodyId - scene::kStarSystemBodyIdBase);
+            state.shipAltitude      = m_shipOrbit.altitude;
+            state.shipSpeed         = m_shipOrbit.speed;
+            state.shipSemiMajorAxis = m_shipOrbit.elements.semiMajorAxis;
+            state.shipEccentricity  = m_shipOrbit.elements.eccentricity;
+            state.shipPeriapsis     = m_shipOrbit.periapsis;
+            state.shipApoapsis      = m_shipOrbit.apoapsis;
+            state.shipPeriodSeconds = m_shipOrbit.period;
+        }
+    }
+
     return state;
 }
 
@@ -2824,6 +2967,11 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
     }
     auto* commandList = m_device.CmdList();
     m_renderer.ReclaimTextureDescriptors(m_device);
+
+    // Refresh the ship's live osculating orbit once per frame (only if it was flown
+    // into the system). Both the navigation HUD and the orbit-trace overlay read it.
+    m_shipOrbit = m_shipInSystem ? m_scene.DeriveOsculatingOrbit(kPlayerShipBodyId)
+                                 : scene::OsculatingOrbit{};
 
     // Advance the renderer's per-frame slot BEFORE any pass records anything,
     // and unconditionally - above the raster/path-tracing branch. The shadow
@@ -3019,6 +3167,107 @@ bool App::RenderFrame(const core::TimeStep& timeStep)
         m_renderer.BeginFrame(m_device, m_camera);
         m_renderer.DrawSky(m_device);
         m_scene.RenderEntities(m_device, m_renderer, m_camera.Position());
+
+        // Orbit-trace overlay: in the orrery/map view, draw each seeded body's
+        // Keplerian orbit as translucent lines over the raster scene. Raster-only
+        // (the line pass writes the HDR raster target); path tracing has no
+        // rasterized geometry to overlay, so it is skipped there.
+        if (m_cameraMode == CameraMode::Orrery && !m_usePathTracing)
+        {
+            const uint64_t focusId = m_focusBodyId
+                ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
+            const std::vector<render::Renderer::LineVertex> orbitVerts =
+                m_scene.BuildOrbitTraceVertices(m_camera.Position(), focusId);
+            if (!orbitVerts.empty())
+            {
+                const float aspect = static_cast<float>(m_device.Width()) /
+                                     static_cast<float>(m_device.Height());
+                m_renderer.DrawLines(m_device, orbitVerts.data(),
+                                     static_cast<uint32_t>(orbitVerts.size()),
+                                     m_camera.ViewProjectionMatrix(aspect));
+            }
+        }
+
+        // Body-marker overlay: in the true-scale views (near-body / ship / free) a
+        // distant planet or the star is sub-pixel, so draw each seeded body as a
+        // constant-pixel dot at its real depth. Reversed-Z tested, so the body the
+        // camera sits on hides its own center marker while far bodies stay visible.
+        // Raster-only for the same reason the orbit lines are (the pass writes the
+        // HDR raster target). The orrery already draws exaggerated body spheres, so
+        // it is excluded to avoid doubling a marker onto a marker.
+        if (m_cameraMode != CameraMode::Orrery && !m_usePathTracing)
+        {
+            const std::vector<render::Renderer::BillboardVertex> markerVerts =
+                m_scene.BuildBodyMarkerVertices(m_camera.Position());
+            if (!markerVerts.empty())
+            {
+                const float w = static_cast<float>(m_device.Width());
+                const float h = static_cast<float>(m_device.Height());
+                m_renderer.DrawBillboards(m_device, markerVerts.data(),
+                                          static_cast<uint32_t>(markerVerts.size()),
+                                          m_camera.ViewProjectionMatrix(w / h), w, h);
+            }
+        }
+
+        // Ship-orbit trace: the player ship's own predicted path (green), through the
+        // same reversed-Z line pass as the body orbits. K self-scales it — sub-pixel
+        // and invisible in the compressed orrery, framed nicely around the primary in
+        // the near-body / ship views. Raster-only, and only once the ship is flying
+        // an orbit in the system.
+        if (m_shipOrbit.valid && !m_usePathTracing)
+        {
+            const std::vector<render::Renderer::LineVertex> shipVerts =
+                m_scene.BuildDerivedOrbitTraceVertices(
+                    m_camera.Position(), m_shipOrbit, 0.30f, 1.00f, 0.55f, 0.85f);
+            if (!shipVerts.empty())
+            {
+                const float aspect = static_cast<float>(m_device.Width()) /
+                                     static_cast<float>(m_device.Height());
+                m_renderer.DrawLines(m_device, shipVerts.data(),
+                                     static_cast<uint32_t>(shipVerts.size()),
+                                     m_camera.ViewProjectionMatrix(aspect));
+            }
+        }
+
+        // Apsis markers: periapsis (cyan) / apoapsis (magenta) billboards on the
+        // ship's orbit and the focused body's orbit — the KSP-style map markers.
+        // Constant-pixel like the body markers; self-scales with K, so useful in the
+        // orrery (focus apsides) and the ship/near-body views (ship apsides) alike.
+        if (!m_usePathTracing)
+        {
+            const uint64_t focusId = m_focusBodyId
+                ? m_focusBodyId : (scene::kStarSystemBodyIdBase + 10);
+            const std::vector<render::Renderer::BillboardVertex> apsisVerts =
+                m_scene.BuildApsisMarkerVertices(m_camera.Position(), m_shipOrbit, focusId);
+            if (!apsisVerts.empty())
+            {
+                const float w = static_cast<float>(m_device.Width());
+                const float h = static_cast<float>(m_device.Height());
+                m_renderer.DrawBillboards(m_device, apsisVerts.data(),
+                                          static_cast<uint32_t>(apsisVerts.size()),
+                                          m_camera.ViewProjectionMatrix(w / h), w, h);
+            }
+        }
+
+        // Maneuver-node preview: when toggled (M), overlay in amber the orbit a
+        // prograde burn would produce, so the player can plan before committing. The
+        // preview delta-v scales with the current speed so it reads on any orbit.
+        if (m_showManeuverPreview && m_shipOrbit.valid && !m_usePathTracing)
+        {
+            const scene::OsculatingOrbit preview =
+                m_scene.PreviewProgradeBurn(m_shipOrbit, 0.15 * m_shipOrbit.speed);
+            const std::vector<render::Renderer::LineVertex> previewVerts =
+                m_scene.BuildDerivedOrbitTraceVertices(
+                    m_camera.Position(), preview, 1.00f, 0.70f, 0.15f, 0.90f);
+            if (!previewVerts.empty())
+            {
+                const float aspect = static_cast<float>(m_device.Width()) /
+                                     static_cast<float>(m_device.Height());
+                m_renderer.DrawLines(m_device, previewVerts.data(),
+                                     static_cast<uint32_t>(previewVerts.size()),
+                                     m_camera.ViewProjectionMatrix(aspect));
+            }
+        }
 
         // Tone-map the linear scene into the back buffer. Post-process passes
         // (bloom, exposure, TAA) belong between the line above and this one,

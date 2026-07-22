@@ -24,6 +24,35 @@ struct DebugOverlayState
     uint32_t entityCount = 0;
     RTQualityInfo rtQuality = {};
     core::Vec3d cameraPosition = {};
+
+    // -------------------------------------------------------------------------
+    // Navigation block — drawn only when a star system is active. Makes the
+    // simulation legible: which view/body the camera is on, the time-warp rate,
+    // and the focused body's live orbit. The string pointers are borrowed from
+    // static tables in app.cpp and outlive the copy, so no ownership is taken.
+    // -------------------------------------------------------------------------
+    bool         navActive = false;
+    const char*  cameraModeName = "";
+    double       timeWarp = 1.0;
+    const char*  focusName = "";
+    double       focusDistance = 0.0;    // metres, camera -> focused body centre
+    bool         focusHasOrbit = false;  // false for the star / bodies with no orbit
+    double       focusSemiMajorAxis = 0.0; // a (m); < 0 for hyperbolic
+    double       focusEccentricity = 0.0;  // e
+    double       focusPeriodSeconds = 0.0; // 0 when not a closed ellipse
+
+    // Ship orbit sub-block — the player ship's OWN live osculating orbit about its
+    // SOI primary, shown when it has been flown into the system. This is the
+    // orbital-agency readout: a prograde burn visibly raises the apoapsis here.
+    bool         shipOrbitActive = false;
+    const char*  shipPrimaryName = "";
+    double       shipAltitude = 0.0;      // range from primary centre (m)
+    double       shipSpeed = 0.0;         // speed relative to primary (m/s)
+    double       shipSemiMajorAxis = 0.0; // a (m)
+    double       shipEccentricity = 0.0;  // e
+    double       shipPeriapsis = 0.0;     // r_min (m from primary centre)
+    double       shipApoapsis = 0.0;      // r_max (m); 0 if not elliptic
+    double       shipPeriodSeconds = 0.0; // 0 if not a closed ellipse
 };
 
 class DebugOverlay
@@ -56,7 +85,11 @@ private:
     void UploadTexture(D3D12Device& device);
 
     static constexpr uint32_t kOverlayWidth = 520;
-    static constexpr uint32_t kOverlayHeight = 176;
+    // Tall enough for the navigation block plus the optional ship-orbit sub-block.
+    // When navActive is false (or the ship block is absent) the lower region is left
+    // transparent (the panel background is drawn only as tall as the content), so the
+    // compact engine-only overlay is unchanged in look.
+    static constexpr uint32_t kOverlayHeight = 320;
 
     bool m_initialized = false;
     uint32_t m_uploadPitch = 0;

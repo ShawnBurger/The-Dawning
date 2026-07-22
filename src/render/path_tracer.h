@@ -266,8 +266,8 @@ private:
     bool                   m_iblProbeReadbackPending = false;
 
     // Per-frame constant buffer (upload heap, persistently mapped)
-    ComPtr<ID3D12Resource> m_constantBuffer[3]; // One per frame in flight
-    uint8_t* m_cbMapped[3] = {};
+    ComPtr<ID3D12Resource> m_constantBuffer[kFrameCount]; // One per frame in flight
+    uint8_t* m_cbMapped[kFrameCount] = {};
 
     FrameUploadBuffer m_materialBuffers;
     FrameUploadBuffer m_instanceDataBuffers;

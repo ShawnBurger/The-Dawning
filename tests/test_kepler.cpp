@@ -268,6 +268,42 @@ TEST_CASE(Kepler_EllipticClosesOverOnePeriod)
     CHECK(VecDiff(s0.velocity, s1.velocity) < 1e-5);
 }
 
+// Solar-scale ellipse: a ~ 1 AU, eccentric, propagated over large arcs. No other
+// test covers a heliocentric orbit — every case above is LEO scale (a ~ 2e7). It
+// also exercises the universal-variable conic classification at solar scale, where
+// the discriminant MUST be the scale-free ratio alpha*r0 (= r0/a): an absolute
+// 1/length threshold classifies this ellipse (alpha ~ 7e-12) as near-parabolic and
+// seeds it generically. (Newton's capped iteration converges from either seed at
+// the eccentricities tested, so this pins CLASSIFICATION + solar-scale agreement,
+// not a convergence failure.)
+TEST_CASE(Kepler_UniversalMatchesElementPropagation_SolarScaleEccentric)
+{
+    constexpr double kSunMu = 1.32712440018e20; // m^3/s^2
+    ecs::OrbitalElements el;
+    el.semiMajorAxis    = 1.5e11; // ~1 AU
+    el.eccentricity     = 0.97;
+    el.inclination      = 0.4;
+    el.longitudeAscNode = 1.2;
+    el.argPeriapsis     = 0.6;
+    el.trueAnomaly      = 0.2;
+
+    const double period = 2.0 * kPi * std::sqrt(std::pow(el.semiMajorAxis, 3) / kSunMu);
+    const StateVector s0 = sim::ElementsToState(el, kSunMu);
+    for (double frac : { 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99 })
+    {
+        const double dt = frac * period;
+        bool ok = false;
+        const StateVector su = sim::PropagateUniversal(s0, kSunMu, dt, &ok);
+        CHECK(ok); // the seed fix is what keeps this converging at solar scale
+        const ecs::OrbitalElements el2 = sim::PropagateElements(el, kSunMu, dt);
+        const StateVector se = sim::ElementsToState(el2, kSunMu);
+        // Universal vs analytic element propagation agree to ~1e-7 relative over a
+        // 1.5e11 m orbit.
+        CHECK(VecDiff(su.position, se.position) < 5.0e4);
+        CHECK(VecDiff(su.velocity, se.velocity) < 0.05);
+    }
+}
+
 // Near-parabolic / hyperbolic propagation through periapsis stays finite and
 // conserves specific energy and specific angular momentum (the universal-variable
 // robustness the e->1 region demands). This is the (e->1, M->0) critical region at

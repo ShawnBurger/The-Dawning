@@ -388,6 +388,13 @@ MeshData GeneratePlane(float width, float depth, uint32_t subdivX, uint32_t subd
     if (subdivZ < 1) subdivZ = 1;
     if (subdivX > 512) subdivX = 512;
     if (subdivZ > 512) subdivZ = 512;
+    // Indices are 16-bit, so the vertex grid (subdivX+1)*(subdivZ+1) must stay
+    // under 65536 or the index expressions below silently truncate into garbage
+    // triangles. Reduce the larger axis until the grid fits, degrading gracefully.
+    while (static_cast<uint32_t>(subdivX + 1) * static_cast<uint32_t>(subdivZ + 1) > 65536u)
+    {
+        if (subdivX >= subdivZ) --subdivX; else --subdivZ;
+    }
     if (width <= 0.0f) width = 1.0f;
     if (depth <= 0.0f) depth = 1.0f;
 

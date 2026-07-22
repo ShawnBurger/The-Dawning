@@ -5,7 +5,7 @@
 // Manages BLAS (per-mesh) and TLAS (per-scene, rebuilt every frame).
 //
 // BLAS: built from existing Mesh vertex/index buffers with PREFER_FAST_TRACE
-//       + ALLOW_COMPACTION for static geometry.
+//       (opaque geometry). Compaction is not implemented.
 // TLAS: rebuilt every frame from instance descriptors (moving objects).
 //
 // Based on NVIDIA RTX best practices and the DXR functional spec.

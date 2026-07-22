@@ -7,10 +7,16 @@
 #include "../ecs/systems.h"
 #include "../sim/star_system.h"
 #include "../sim/system_instantiate.h"
+#include "../sim/orbit_trace.h"
+#include "../sim/soi_transition.h"  // ResolvePrimaryFor
+#include "../sim/kepler.h"          // StateVector, StateToElements
 #include "../core/log.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
+#include <vector>
 
 namespace scene
 {
@@ -157,7 +163,8 @@ void Scene::ApplyStarSystemRenderMode(bool orrery)
             // Render each body at a fixed marker size in RENDER units: the K in
             // ToCameraRelativeMatrix multiplies scale, so scale = markerUnits /
             // (meshRadius * K) yields `markerUnits` on screen regardless of K.
-            // Sun larger (~7 units), planets floored to ~2 so they stay visible.
+            // Sun larger (~14 units at r=6.96e8), every planet floored to the 7-unit
+            // minimum so it stays visible (radius/5e7 < 7 for all reference planets).
             const double markerUnits = (std::max)(7.0, g.radius / 5.0e7);
             s = static_cast<float>(markerUnits /
                 (static_cast<double>(m_bodyMeshRadius) * m_renderScale));
@@ -168,6 +175,377 @@ void Scene::ApplyStarSystemRenderMode(bool orrery)
         }
         t->scale = { s, s, s };
     }
+}
+
+namespace
+{
+struct OrbitColor { float r, g, b, a; };
+
+// Trace color keyed by the body's ORIGINAL (un-offset) id, roughly matching each
+// body's own material. Alpha < 1 so the reversed-Z-depth-tested lines read as a
+// translucent overlay on the sky.
+OrbitColor OrbitColorFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 10: return { 0.35f, 0.55f, 1.00f, 0.75f }; // Earth — blue
+        case 11: return { 0.70f, 0.70f, 0.75f, 0.55f }; // Moon — grey
+        case 20: return { 1.00f, 0.50f, 0.35f, 0.75f }; // Mars — orange
+        default: return { 0.80f, 0.85f, 0.90f, 0.65f };
+    }
+}
+
+// Marker color and on-screen DIAMETER (pixels) keyed by the body's ORIGINAL
+// (un-offset) id. Roughly tracks each body's own material; the star reads warm and
+// largest, the moon smallest, so the map is legible at a glance. Alpha < 1 so a
+// marker over a body's own true-scale disc reads as an overlay rather than paint.
+struct MarkerStyle { float r, g, b, a; float sizePx; };
+MarkerStyle MarkerStyleFor(uint64_t localId)
+{
+    switch (localId)
+    {
+        case 1:  return { 1.00f, 0.93f, 0.70f, 0.95f, 18.0f }; // Sun — warm, largest
+        case 10: return { 0.40f, 0.60f, 1.00f, 0.90f, 10.0f }; // Earth — blue
+        case 11: return { 0.75f, 0.75f, 0.80f, 0.85f,  6.0f }; // Moon — grey, smallest
+        case 20: return { 1.00f, 0.50f, 0.35f, 0.90f,  9.0f }; // Mars — orange
+        default: return { 0.85f, 0.90f, 0.95f, 0.85f,  8.0f };
+    }
+}
+
+// The four corners of a marker quad in [-1, 1], as two triangles (six vertices).
+// Culling is off, so winding is irrelevant; billboard_ps.hlsl reads |corner| as the
+// normalized radius, so the corners must stay within the unit square's circumscribed
+// disc reach for the circular falloff to cover the whole quad.
+constexpr float kBillboardCorners[6][2] = {
+    { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f },
+    { -1.0f, -1.0f }, { 1.0f,  1.0f }, { -1.0f, 1.0f },
+};
+} // namespace
+
+std::vector<render::Renderer::LineVertex>
+Scene::BuildOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                               uint64_t focusBodyId) const
+{
+    std::vector<render::Renderer::LineVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return verts;
+
+    // World position of every gravity body by bodyId. The star sits at the frame
+    // origin, so a body's frame-local Transform.position is its world position.
+    std::unordered_map<uint64_t, core::Vec3d> posById;
+    posById.reserve(gravPool->Count() * 2u);
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        if (const auto* t = m_registry.TryGet<ecs::Transform>(e))
+            posById[gravPool->DataAt(i).bodyId] = t->position;
+    }
+
+    const double K = m_renderScale;
+    constexpr uint32_t kSegments = 128u;
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // seeded celestial bodies only
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* os = m_registry.TryGet<ecs::OrbitState>(e);
+        if (!os)
+            continue; // the star has no orbit
+        const auto primary = posById.find(os->primaryBodyId);
+        if (primary == posById.end())
+            continue;
+        const core::Vec3d primaryPos = primary->second;
+
+        const std::vector<core::Vec3d> local =
+            sim::SampleOrbitPath(os->elements, os->primaryMu, kSegments);
+        if (local.size() < 2u)
+            continue;
+
+        OrbitColor c = OrbitColorFor(g.bodyId - kStarSystemBodyIdBase);
+        if (g.bodyId == focusBodyId)
+        {
+            // The focused body's orbit reads brighter and fully opaque, so the map
+            // shows at a glance which body the view is tracking.
+            c.r = 0.6f + 0.4f * c.r;
+            c.g = 0.6f + 0.4f * c.g;
+            c.b = 0.6f + 0.4f * c.b;
+            c.a = 1.0f;
+        }
+        // (worldPt - camera) subtracted in DOUBLE first, then scaled by K, then
+        // narrowed (RULE 1) — the same discipline the entity matrices use.
+        auto toRender = [&](const core::Vec3d& localPt) -> core::Vec3f
+        {
+            return ((primaryPos + localPt - cameraPosition) * K).ToFloat();
+        };
+        verts.reserve(verts.size() + (local.size() - 1u) * 2u);
+        for (size_t k = 0; k + 1u < local.size(); ++k)
+        {
+            const core::Vec3f a = toRender(local[k]);
+            const core::Vec3f b = toRender(local[k + 1u]);
+            verts.push_back({ { a.x, a.y, a.z }, { c.r, c.g, c.b, c.a } });
+            verts.push_back({ { b.x, b.y, b.z }, { c.r, c.g, c.b, c.a } });
+        }
+    }
+    return verts;
+}
+
+std::vector<render::Renderer::BillboardVertex>
+Scene::BuildBodyMarkerVertices(const core::Vec3d& cameraPosition) const
+{
+    std::vector<render::Renderer::BillboardVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return verts;
+
+    const double K = m_renderScale;
+
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        const ecs::GravitationalBody& g = gravPool->DataAt(i);
+        if (g.bodyId < kStarSystemBodyIdBase)
+            continue; // seeded celestial bodies only (the star included: it has no
+                      // orbit but is the marker that matters most)
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t = m_registry.TryGet<ecs::Transform>(e);
+        if (!t)
+            continue;
+
+        // (worldPos - camera) in DOUBLE, then scaled by K, then narrowed (RULE 1),
+        // exactly as the orbit lines and entity matrices do. The star sits at the
+        // frame origin, so a body's frame-local position is its world position.
+        const core::Vec3f center =
+            ((t->position - cameraPosition) * K).ToFloat();
+
+        const MarkerStyle m = MarkerStyleFor(g.bodyId - kStarSystemBodyIdBase);
+        for (const auto& corner : kBillboardCorners)
+        {
+            verts.push_back({ { center.x, center.y, center.z },
+                              { m.r, m.g, m.b, m.a },
+                              m.sizePx,
+                              { corner[0], corner[1] } });
+        }
+    }
+    return verts;
+}
+
+OsculatingOrbit Scene::DeriveOsculatingOrbit(uint64_t bodyId) const
+{
+    OsculatingOrbit out;
+    if (!m_starSystemActive)
+        return out;
+
+    auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>();
+    if (!gravPool)
+        return out;
+
+    // Live Cartesian state of the queried body: position in Transform, velocity in
+    // RigidBody (the ship keeps its velocity there — it has no OrbitState of its own).
+    core::Vec3d bodyPos, bodyVel;
+    bool found = false;
+    for (uint32_t i = 0; i < gravPool->Count(); ++i)
+    {
+        if (gravPool->DataAt(i).bodyId != bodyId)
+            continue;
+        const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+        const auto* t  = m_registry.TryGet<ecs::Transform>(e);
+        const auto* rb = m_registry.TryGet<ecs::RigidBody>(e);
+        if (!t || !rb)
+            return out;
+        bodyPos = t->position;
+        bodyVel = rb->linearVelocity;
+        found = true;
+        break;
+    }
+    if (!found)
+        return out;
+
+    const sim::ResolvedPrimary primary =
+        sim::ResolvePrimaryFor(m_registry, bodyPos, bodyId);
+    if (!primary.found || primary.mu <= 0.0)
+        return out;
+
+    // Primary-relative state -> osculating elements (the inverse of ElementsToState).
+    const sim::StateVector rel{ bodyPos - primary.position,
+                                bodyVel - primary.velocity };
+    const double r = rel.position.Length();
+    if (r <= 0.0)
+        return out;
+    const ecs::OrbitalElements el = sim::StateToElements(rel, primary.mu);
+    if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+        el.eccentricity < 0.0)
+        return out; // parabolic / radial / otherwise degenerate fit
+
+    out.valid         = true;
+    out.primaryBodyId = primary.bodyId;
+    out.primaryPos    = primary.position;
+    out.primaryMu     = primary.mu;
+    out.elements      = el;
+    out.altitude      = r;
+    out.speed         = rel.velocity.Length();
+
+    const double a = el.semiMajorAxis;
+    const double e = el.eccentricity;
+    out.periapsis = a * (1.0 - e); // positive for both ellipse (a>0) and hyperbola (a<0,e>1)
+    if (a > 0.0 && e < 1.0)
+    {
+        out.apoapsis = a * (1.0 + e);
+        constexpr double kTwoPi = 6.283185307179586;
+        out.period = kTwoPi * std::sqrt(a * a * a / primary.mu);
+    }
+    return out;
+}
+
+OsculatingOrbit Scene::PreviewProgradeBurn(const OsculatingOrbit& base,
+                                           double deltaV) const
+{
+    OsculatingOrbit out;
+    if (!base.valid || base.primaryMu <= 0.0)
+        return out;
+
+    // Elements -> primary-relative state, add deltaV along the velocity, -> elements.
+    sim::StateVector s = sim::ElementsToState(base.elements, base.primaryMu);
+    const double vmag = s.velocity.Length();
+    if (vmag <= 0.0)
+        return out;
+    s.velocity = s.velocity + s.velocity * (deltaV / vmag);
+
+    const ecs::OrbitalElements el = sim::StateToElements(s, base.primaryMu);
+    if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+        el.eccentricity < 0.0)
+        return out;
+
+    out.valid         = true;
+    out.primaryBodyId = base.primaryBodyId;
+    out.primaryPos    = base.primaryPos;
+    out.primaryMu     = base.primaryMu;
+    out.elements      = el;
+    out.altitude      = s.position.Length();
+    out.speed         = s.velocity.Length();
+    const double a = el.semiMajorAxis;
+    const double e = el.eccentricity;
+    out.periapsis = a * (1.0 - e);
+    if (a > 0.0 && e < 1.0)
+    {
+        out.apoapsis = a * (1.0 + e);
+        constexpr double kTwoPi = 6.283185307179586;
+        out.period = kTwoPi * std::sqrt(a * a * a / base.primaryMu);
+    }
+    return out;
+}
+
+std::vector<render::Renderer::LineVertex>
+Scene::BuildDerivedOrbitTraceVertices(const core::Vec3d& cameraPosition,
+                                      const OsculatingOrbit& orbit,
+                                      float r, float g, float b, float a) const
+{
+    std::vector<render::Renderer::LineVertex> verts;
+    if (!orbit.valid)
+        return verts;
+
+    const std::vector<core::Vec3d> local =
+        sim::SampleOrbitPath(orbit.elements, orbit.primaryMu, 192u);
+    if (local.size() < 2u)
+        return verts;
+
+    const double K = m_renderScale;
+    // Same RULE-1 discipline as BuildOrbitTraceVertices: subtract the camera in
+    // double, then scale by K, then narrow.
+    auto toRender = [&](const core::Vec3d& localPt) -> core::Vec3f
+    {
+        return ((orbit.primaryPos + localPt - cameraPosition) * K).ToFloat();
+    };
+    verts.reserve((local.size() - 1u) * 2u);
+    for (size_t k = 0; k + 1u < local.size(); ++k)
+    {
+        const core::Vec3f p0 = toRender(local[k]);
+        const core::Vec3f p1 = toRender(local[k + 1u]);
+        verts.push_back({ { p0.x, p0.y, p0.z }, { r, g, b, a } });
+        verts.push_back({ { p1.x, p1.y, p1.z }, { r, g, b, a } });
+    }
+    return verts;
+}
+
+std::vector<render::Renderer::BillboardVertex>
+Scene::BuildApsisMarkerVertices(const core::Vec3d& cameraPosition,
+                                const OsculatingOrbit& shipOrbit,
+                                uint64_t focusBodyId) const
+{
+    std::vector<render::Renderer::BillboardVertex> verts;
+    if (!m_starSystemActive)
+        return verts;
+
+    const double K = m_renderScale;
+    constexpr float kPeColor[4] = { 0.25f, 0.95f, 1.00f, 0.95f }; // periapsis — cyan
+    constexpr float kApColor[4] = { 1.00f, 0.45f, 0.85f, 0.95f }; // apoapsis — magenta
+    constexpr float kApsisSizePx = 9.0f;
+
+    auto emitMarker = [&](const core::Vec3d& worldPos, const float col[4])
+    {
+        const core::Vec3f center = ((worldPos - cameraPosition) * K).ToFloat();
+        for (const auto& corner : kBillboardCorners)
+            verts.push_back({ { center.x, center.y, center.z },
+                              { col[0], col[1], col[2], col[3] },
+                              kApsisSizePx, { corner[0], corner[1] } });
+    };
+
+    // Periapsis (true anomaly 0) and apoapsis (pi) of one orbit about primaryPos,
+    // found by evaluating the shipped ElementsToState at those anomalies — the same
+    // propagator the trace samples, so the markers land exactly on the drawn ellipse.
+    auto emitApsides = [&](const ecs::OrbitalElements& el, double mu,
+                           const core::Vec3d& primaryPos)
+    {
+        if (!std::isfinite(el.semiMajorAxis) || !std::isfinite(el.eccentricity) ||
+            mu <= 0.0)
+            return;
+        ecs::OrbitalElements peEl = el;
+        peEl.trueAnomaly = 0.0;
+        emitMarker(primaryPos + sim::ElementsToState(peEl, mu).position, kPeColor);
+        if (el.eccentricity < 1.0) // apoapsis exists only for a closed ellipse
+        {
+            ecs::OrbitalElements apEl = el;
+            apEl.trueAnomaly = 3.14159265358979323846;
+            emitMarker(primaryPos + sim::ElementsToState(apEl, mu).position, kApColor);
+        }
+    };
+
+    if (shipOrbit.valid)
+        emitApsides(shipOrbit.elements, shipOrbit.primaryMu, shipOrbit.primaryPos);
+
+    // The focused body's apsides on its own orbit — look up its primary's world pos.
+    if (auto* gravPool = m_registry.GetPool<ecs::GravitationalBody>())
+    {
+        std::unordered_map<uint64_t, core::Vec3d> posById;
+        posById.reserve(gravPool->Count() * 2u);
+        for (uint32_t i = 0; i < gravPool->Count(); ++i)
+        {
+            const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+            if (const auto* t = m_registry.TryGet<ecs::Transform>(e))
+                posById[gravPool->DataAt(i).bodyId] = t->position;
+        }
+        for (uint32_t i = 0; i < gravPool->Count(); ++i)
+        {
+            if (gravPool->DataAt(i).bodyId != focusBodyId)
+                continue;
+            const ecs::Entity e = m_registry.EntityAtIndex(gravPool->EntityAt(i));
+            if (const auto* os = m_registry.TryGet<ecs::OrbitState>(e))
+            {
+                const auto pit = posById.find(os->primaryBodyId);
+                if (pit != posById.end())
+                    emitApsides(os->elements, os->primaryMu, pit->second);
+            }
+            break;
+        }
+    }
+    return verts;
 }
 
 void Scene::DestroyEntity(ecs::Entity entity)

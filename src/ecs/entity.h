@@ -34,7 +34,7 @@ struct Entity
     Entity() = default;
     explicit Entity(uint32_t rawId) : id(rawId) {}
     Entity(uint32_t index, uint32_t generation)
-        : id((generation << kIndexBits) | (index & kIndexMask)) {}
+        : id(((generation & kGenMask) << kIndexBits) | (index & kIndexMask)) {}
 
     uint32_t Index() const      { return id & kIndexMask; }
     uint32_t Generation() const { return (id >> kIndexBits) & kGenMask; }

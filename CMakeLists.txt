@@ -101,6 +101,7 @@ set(RENDER_HEADERS
     src/render/rt_texture_lod.h
     src/render/path_tracer.h
     src/render/environment_ibl.h
+    src/render/render_constants.h
 )
 
 set(SHADER_FILES
@@ -116,6 +117,10 @@ set(SHADER_FILES
     shaders/bloom_common.hlsli
     shaders/tonemap_vs.hlsl
     shaders/tonemap_ps.hlsl
+    shaders/line_vs.hlsl
+    shaders/line_ps.hlsl
+    shaders/billboard_vs.hlsl
+    shaders/billboard_ps.hlsl
     shaders/path_trace.hlsl
     shaders/gpu_draw_records.hlsli
     shaders/brdf_common.hlsli
@@ -134,6 +139,7 @@ set(ECS_HEADERS
     src/ecs/component_pool.h
     src/ecs/components.h
     src/ecs/registry.h
+    src/ecs/systems.h
 )
 
 # Platform- and GPU-free gameplay policies. These consume custom engine
@@ -160,6 +166,7 @@ set(SIM_SOURCES
     src/sim/physics_system.cpp
     src/sim/reference_frame.cpp
     src/sim/kepler.cpp
+    src/sim/orbit_trace.cpp
     src/sim/nbody.cpp
     src/sim/relativity.cpp
     src/sim/relativity_system.cpp
@@ -189,6 +196,7 @@ set(SIM_HEADERS
     src/sim/physics_system.h
     src/sim/reference_frame.h
     src/sim/kepler.h
+    src/sim/orbit_trace.h
     src/sim/nbody.h
     src/sim/relativity.h
     src/sim/relativity_system.h
@@ -238,6 +246,7 @@ set(SCENE_HEADERS
     src/scene/resource_manager.h
     src/scene/scene.h
     src/scene/star_system_seed.h
+    src/scene/model_loader.h
 )
 
 set(TEST_SOURCES
@@ -275,6 +284,7 @@ set(TEST_SOURCES
     tests/test_physics_system.cpp
     tests/test_reference_frame.cpp
     tests/test_kepler.cpp
+    tests/test_orbit_trace.cpp
     tests/test_nbody.cpp
     tests/test_relativity.cpp
     tests/test_relativity_system.cpp
@@ -294,6 +304,7 @@ set(TEST_SOURCES
     tests/test_system_instantiate.cpp
     tests/test_star_system_seed.cpp
     tests/test_soi_transition.cpp
+    tests/test_orbital_agency.cpp
     tests/test_simulation_system.cpp
     tests/test_snapshot_system.cpp
     tests/test_timer.cpp
@@ -495,6 +506,12 @@ if(MSVC)
         /WX
         /permissive-
     )
+
+    target_compile_options(TheDawningAssemblyInspector PRIVATE
+        /W4
+        /WX
+        /permissive-
+    )
 endif()
 
 # =============================================================================
@@ -646,6 +663,10 @@ add_executable(TheDawningTests
     # Do NOT add anything here that pulls in a D3D12 or render header.
     src/sim/kepler.cpp
     src/sim/kepler.h
+    # Orbit polyline sampling for the map/orrery view. GPU-free: builds on the
+    # shipped ElementsToState. tests/test_orbit_trace.cpp drives it.
+    src/sim/orbit_trace.cpp
+    src/sim/orbit_trace.h
     src/sim/nbody.cpp
     src/sim/nbody.h
     # SIM STAGE 2 relativistic dynamics + time dilation. GPU-free on the same

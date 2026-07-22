@@ -352,7 +352,9 @@ double DragCoefficientAtMach(double cd0, double mach)
     // Transonic wave-drag bump: a Gaussian centred on M=1, so the peak is exactly
     // at M=1 and it is C-infinity (no force discontinuity).
     const double bump = 1.0 * std::exp(-((M - 1.0) * (M - 1.0)) / (2.0 * 0.15 * 0.15));
-    // Supersonic falloff toward a hypersonic plateau at ~0.9*cd0 above the bump.
+    // Supersonic falloff: `plateau` rises to 0.4*cd0 as M->inf, so Cd asymptotes to
+    // cd0*(1 - 0.4) = ~0.6*cd0 (the hypersonic plateau); it is ~0.9*cd0 just past
+    // the transonic bump near M=1.5.
     const double plateau = (M <= 1.0) ? 0.0 : 0.4 * (1.0 - std::exp(-(M - 1.0) / 2.0));
     return cd0 * (1.0 + bump) - cd0 * plateau;
 }

@@ -252,7 +252,7 @@ LRESULT Window::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam)
         GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
         if (size > 0 && size <= 256)
         {
-            uint8_t buffer[256];
+            alignas(RAWINPUT) uint8_t buffer[256]; // RAWINPUT has 8-byte-aligned members
             if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) == size)
             {
                 auto* raw = reinterpret_cast<RAWINPUT*>(buffer);
@@ -262,7 +262,8 @@ LRESULT Window::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam)
                 }
             }
         }
-        return 0;
+        // WM_INPUT requires DefWindowProc for system cleanup of the raw-input data.
+        return DefWindowProcA(m_hwnd, msg, wParam, lParam);
     }
 
     // Focus management — prevent stuck keys, release mouse on alt-tab

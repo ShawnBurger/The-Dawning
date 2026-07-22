@@ -338,11 +338,13 @@ struct Quatf
 };
 
 // =============================================================================
-// Mat4x4 — 4x4 matrix (float, column-major for D3D/GPU)
+// Mat4x4 — 4x4 matrix (float, ROW-MAJOR storage, ROW-VECTOR semantics)
 // =============================================================================
-// Storage: m[row][col] but builds column-major for GPU upload
-// Functions produce matrices compatible with D3D's row-vector convention
-// (multiply: vector * matrix, which is equivalent to matrix^T * vector)
+// Storage is m[row][col]; Data() returns those bytes in row order. Functions
+// produce matrices for D3D's row-vector convention (multiply: vector * matrix,
+// which is equivalent to matrix^T * vector). The column-major reinterpretation
+// happens on the GPU via HLSL's default cbuffer packing — see the MATRIX LAYOUT
+// header at the top of this file, which this comment must not contradict.
 struct Mat4x4
 {
     float m[4][4] = {};

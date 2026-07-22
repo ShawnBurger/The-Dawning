@@ -191,6 +191,17 @@ private:
     CameraMode m_cameraMode = CameraMode::ShipChase;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
 
+    // Set once the player ship has been placed on an orbit inside the seeded system
+    // (start camera mode 4). Gates the ship's live-orbit HUD/trace so they never read
+    // the ship's inert demo-sandbox state when it was never flown into the system.
+    bool       m_shipInSystem = false;
+    // The ship's osculating orbit about its current SOI primary, recomputed once per
+    // render frame (m_shipInSystem only) and consumed by the HUD and the orbit trace.
+    scene::OsculatingOrbit m_shipOrbit;
+    // Toggled with M: overlay a maneuver-node preview of the orbit a prograde burn
+    // would produce (amber), so the player can plan a burn before committing.
+    bool m_showManeuverPreview = false;
+
     ecs::Material m_smokeGrowthMaterial;
     uint32_t m_smokeSavedAlbedoTexture = UINT32_MAX;
     uint32_t m_smokeSavedNormalTexture = UINT32_MAX;

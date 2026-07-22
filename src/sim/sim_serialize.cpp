@@ -20,7 +20,6 @@ constexpr uint16_t kFormatMinor   = 1;
 constexpr uint32_t kHeaderBytes   = 32;
 constexpr uint32_t kSectionHeader = 20;
 constexpr size_t   kCrcFieldOffset = 12;
-constexpr size_t   kMinFileBytes  = kHeaderBytes; // header alone is a legal (0-section) file? no - EPOK+FRMS required
 constexpr size_t   kMaxBufferBytes = 512ull * 1024ull * 1024ull;
 constexpr uint32_t kFlagRequired  = 1u;
 
@@ -314,7 +313,7 @@ SimLoadStatus ValidateSnapshot(SimSnapshot& s, std::string& err)
         if (!Finite(c.momentum) || !Finite(c.restMass) || !Finite(c.coordinateTime) || !Finite(c.properTimeDeviation))
         { err = "clock non-finite"; return SimLoadStatus::InvalidData; }
         if (!(c.restMass > 0.0)) { err = "restMass <= 0"; return SimLoadStatus::InvalidData; }
-        if (!(c.properTimeDeviation <= 1e-6)) { err = "properTimeDeviation > 0"; return SimLoadStatus::InvalidData; }
+        if (!(c.properTimeDeviation <= 0.0)) { err = "properTimeDeviation > 0"; return SimLoadStatus::InvalidData; }
         if (!ids.insert(c.bodyId).second) { err = "duplicate clock bodyId"; return SimLoadStatus::InvalidData; }
     }
     return SimLoadStatus::Ok;

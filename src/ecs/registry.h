@@ -195,6 +195,13 @@ public:
     // Iterate all entities with BOTH component A and B.
     // Iterates the smaller pool and checks the larger.
     // Callback: void(uint32_t entityIndex, A&, B&)
+    //
+    // REENTRANCY: the callback receives references directly into the pools' dense
+    // arrays (this is the primary path — the physics integrator is Each<Transform,
+    // RigidBody>). Calling Assign<A/B>() from inside the callback can reallocate a
+    // dense array (see ComponentPool::EnsureDense) and dangle every reference the
+    // callback holds, including the loop's own. Queue structural changes and apply
+    // them after iteration finishes.
     template<typename A, typename B, typename Func>
     void Each(Func&& func)
     {

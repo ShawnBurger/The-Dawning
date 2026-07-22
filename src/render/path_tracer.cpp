@@ -128,7 +128,7 @@ bool PathTracer::Init(D3D12Device& device)
 
 void PathTracer::Shutdown()
 {
-    for (int i = 0; i < 3; i++)
+    for (uint32_t i = 0; i < kFrameCount; i++)
     {
         if (m_constantBuffer[i] && m_cbMapped[i])
         {
@@ -476,9 +476,7 @@ bool PathTracer::CreateConstantBuffer(ID3D12Device5* device)
     desc.SampleDesc       = { 1, 0 };
     desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    const wchar_t* names[] = { L"RT_CB[0]", L"RT_CB[1]", L"RT_CB[2]" };
-
-    for (int i = 0; i < 3; i++)
+    for (uint32_t i = 0; i < kFrameCount; i++)
     {
         HRESULT hr = device->CreateCommittedResource(
             &heapProps, D3D12_HEAP_FLAG_NONE,
@@ -486,7 +484,9 @@ bool PathTracer::CreateConstantBuffer(ID3D12Device5* device)
             nullptr, IID_PPV_ARGS(&m_constantBuffer[i]));
         if (FAILED(hr)) return false;
 
-        m_constantBuffer[i]->SetName(names[i]);
+        wchar_t name[16];
+        swprintf_s(name, L"RT_CB[%u]", i);
+        m_constantBuffer[i]->SetName(name);
         D3D12_RANGE readRange = { 0, 0 };
         hr = m_constantBuffer[i]->Map(0, &readRange,
                                       reinterpret_cast<void**>(&m_cbMapped[i]));

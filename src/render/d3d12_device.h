@@ -12,7 +12,8 @@
 //   - Fence-based CPU/GPU synchronization
 //
 // The frame cycle is:
-//   1. WaitForPreviousFrame() — CPU waits until GPU finishes frame N-2
+//   1. WaitForCurrentFrame() — CPU waits on this back-buffer slot's fence, i.e.
+//      until the GPU has finished the frame that last used this slot
 //   2. ResetCommandList() — reset allocator and command list for current frame
 //   3. ... record commands ...
 //   4. ExecuteAndPresent() — close list, execute, present, signal fence

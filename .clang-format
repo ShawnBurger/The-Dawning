@@ -1,0 +1,29 @@
+# Descriptive of the existing hand-maintained house style, so an editor's
+# format-on-save (or a future CI check) preserves it rather than churning it.
+#
+# The two options most likely to cause a destructive reflow are OFF on purpose:
+#   - ReflowComments: the design-rationale comment blocks are load-bearing (they
+#     document watched-failure tests and subtle correctness) and must not be
+#     rewrapped.
+#   - SortIncludes: include order is deliberate and interleaved with comments.
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 90
+BreakBeforeBraces: Allman
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+AccessModifierOffset: -4
+IndentCaseLabels: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+FixNamespaceComments: true
+ReflowComments: false
+SortIncludes: false

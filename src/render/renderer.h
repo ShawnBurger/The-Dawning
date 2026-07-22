@@ -2,9 +2,9 @@
 // =============================================================================
 // render/renderer.h — The Dawning V3 Renderer
 // =============================================================================
-// Manages the rendering pipeline for Layer 2:
+// Manages the rasterization pipeline (Layer 2 geometry + Layer 4 materials):
 //   - Root signature (v1.1 with fallback to v1.0)
-//   - Graphics PSO (classic API — stream upgrade in Layer 3)
+//   - Graphics PSO (classic D3D12_GRAPHICS_PIPELINE_STATE_DESC)
 //   - Per-frame constant buffer upload ring (persistently mapped, 256-byte aligned)
 //   - Draw dispatch for meshes with per-object transforms and materials
 //
@@ -419,6 +419,46 @@ public:
     // mapping would brighten pixels that are already display-saturated.
     void ResolveToBackBuffer(D3D12Device& device);
 
+    // One vertex of a colored world-space line segment, already in CAMERA-RELATIVE
+    // render space (RULE 1: the caller subtracts the camera in double and applies
+    // the render scale K before narrowing).
+    struct LineVertex
+    {
+        float pos[3];
+        float color[4]; // rgba; alpha drives the blend
+    };
+
+    // Draw a LINELIST of colored segments into the bound HDR target, using the
+    // camera-relative `viewProj`. Runs after RenderEntities (the HDR RTV + depth
+    // are already bound): depth-tested against the scene (reversed-Z) but no depth
+    // write, alpha-blended. `count` is the vertex count (must be even). No-op if
+    // count == 0. Used for orbit traces in the map/orrery view.
+    void DrawLines(D3D12Device& device, const LineVertex* verts, uint32_t count,
+                   const core::Mat4x4& viewProj);
+
+    // One vertex of a constant-pixel billboard marker. The body center is in
+    // CAMERA-RELATIVE render space (RULE 1, same as LineVertex); `corner` is the
+    // quad corner in [-1, 1] and billboard_vs.hlsl offsets it by `sizePixels` in
+    // screen space so the marker holds a fixed on-screen size at any distance. Six
+    // vertices (two triangles) make one marker; all six share center/color/size.
+    struct BillboardVertex
+    {
+        float center[3];
+        float color[4];   // rgba; alpha drives the blend
+        float sizePixels; // marker diameter in pixels
+        float corner[2];  // quad corner in [-1, 1]
+    };
+
+    // Draw a TRIANGLELIST of constant-pixel body markers into the bound HDR target
+    // (same slot as DrawLines: after RenderEntities, reversed-Z tested, no depth
+    // write, alpha-blended). `viewportW`/`viewportH` are the render-target pixel
+    // dimensions the vertex shader needs to hold a constant marker size. `count` is
+    // the vertex count (a multiple of 6). No-op if count == 0. Used for distant
+    // bodies / the star in the near-body and ship views.
+    void DrawBillboards(D3D12Device& device, const BillboardVertex* verts,
+                        uint32_t count, const core::Mat4x4& viewProj,
+                        float viewportW, float viewportH);
+
     // Post-process tuning. Exposure was a constant baked into
     // display_common.hlsli; it is now a parameter so auto-exposure has somewhere
     // to attach. Setting bloomIntensity to 0 skips the bloom passes entirely.
@@ -693,6 +733,27 @@ private:
     }
 
     ComPtr<ID3D12PipelineState> m_skyPSO;
+
+    // Line pipeline (orbit traces / map overlays). One root CBV (viewProj) and a
+    // per-frame dynamic UPLOAD vertex buffer that grows on demand.
+    ComPtr<ID3D12RootSignature> m_lineRootSig;
+    ComPtr<ID3D12PipelineState> m_linePSO;
+    ComPtr<ID3D12Resource>      m_lineVB[kFrameCount];
+    uint8_t*                    m_lineVBMapped[kFrameCount] = {};
+    uint32_t                    m_lineVBCapacity = 0; // in vertices
+    bool CreateLinePipeline(ID3D12Device* device);
+    bool EnsureLineVertexBuffer(D3D12Device& device, uint32_t vertexCount);
+
+    // Billboard pipeline (constant-pixel body markers / impostors). Same shape as
+    // the line pipeline: one root CBV (viewProj + viewport) and a per-frame dynamic
+    // UPLOAD vertex buffer that grows on demand.
+    ComPtr<ID3D12RootSignature> m_billboardRootSig;
+    ComPtr<ID3D12PipelineState> m_billboardPSO;
+    ComPtr<ID3D12Resource>      m_billboardVB[kFrameCount];
+    uint8_t*                    m_billboardVBMapped[kFrameCount] = {};
+    uint32_t                    m_billboardVBCapacity = 0; // in vertices
+    bool CreateBillboardPipeline(ID3D12Device* device);
+    bool EnsureBillboardVertexBuffer(D3D12Device& device, uint32_t vertexCount);
 
     // HDR scene target. Its own RTV and shader-visible SRV heaps rather than
     // slots in the texture table, so the tone-map pass stays independent of

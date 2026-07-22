@@ -174,10 +174,11 @@ void StepNBodyExplicitEuler(std::vector<NBodyParticle>& bodies, double dt);
 // -----------------------------------------------------------------------------
 // Fixed-step symplectic methods lose accuracy when a pair gets too close; Plummer
 // softening keeps the force finite but is NOT permission to integrate through a
-// collision. Returns true if any source pair is within
-// max(radius_i+radius_j, encounter fraction of the step's reach). The caller routes
-// flagged pairs to a collision/high-accuracy path. Reach uses the faster body's
-// speed * dt so a fast flyby is caught before it tunnels.
+// collision. Returns true if any source pair's separation is below
+// softening_i + softening_j + |v_i - v_j|*dt — i.e. contact (softening is a
+// >= physical-radius proxy) plus one step's RELATIVE closing distance, so a fast
+// flyby is caught before it tunnels. The caller routes flagged pairs to a
+// collision/high-accuracy path.
 bool DetectCloseEncounter(const std::vector<NBodyParticle>& bodies, double dt);
 
 // One-owner guard (RELATIVISTIC_SIM_ARCHITECTURE.md §5.1, revised). Returns true

@@ -214,14 +214,22 @@ StateVector PropagateUniversal(const StateVector& state, double mu, double dt, b
 
     const double alpha = -v0 * v0 / mu + 2.0 / r0; // = 1/a
 
-    // Initial guess for the universal anomaly chi.
+    // Initial guess for the universal anomaly chi. The conic is chosen on the
+    // SCALE-FREE ratio alpha*r0 = r0/a (dimensionless), not on alpha (units 1/m)
+    // directly: an absolute 1/length threshold misclassifies every solar-scale
+    // ellipse (a ~ 1e11 m => alpha ~ 1e-11 < 1e-9) as near-parabolic and denies it
+    // the ellipse seed. Newton still converges from the generic seed for benign
+    // cases, but the correct seed protects the eccentric/large-dt arcs the transfer
+    // planner propagates. (Same scale-free-threshold discipline as
+    // relative_motion.cpp's kConditioning.)
     double chi;
-    if (alpha > 1e-9)
+    const double alphaR0 = alpha * r0;
+    if (alphaR0 > 1e-9)
     {
         // Ellipse (and circle). chi0 = sqrt(mu) dt / a = sqrt(mu) dt alpha.
         chi = sqrtMu * dt * alpha;
     }
-    else if (alpha < -1e-9)
+    else if (alphaR0 < -1e-9)
     {
         // Hyperbola.
         const double a = 1.0 / alpha; // negative
