@@ -257,5 +257,22 @@ float4 main(PSInput input) : SV_TARGET
         col = lerp(col, cloudCol, saturate(cloudOpacity));
     }
 
+    // --- Night-side city lights (emissive, additive) ------------------------
+    // Warm clustered lights on the DARK side only, on land, off the ice caps, and
+    // dimmed under cloud. A coarse "population" field decides where civilisation
+    // clusters; a fine grain breaks it into individual lights. night.w == 0
+    // (Mars/Moon/generic) skips it.
+    if (night.w > 0.001)
+    {
+        float pop    = Fbm3(N * 9.0 + seedO * 5.0) * 0.5 + 0.5;
+        float grain  = ValueNoise(N * 95.0 + seedO * 7.0);
+        float cities = smoothstep(0.60, 0.80, pop) * smoothstep(0.45, 0.85, grain);
+        cities *= landMask;                                         // land only
+        cities *= 1.0 - smoothstep(iceColor.w - 0.08, iceColor.w, lat); // not polar
+        cities *= 1.0 - dayGate;                                    // dark side only
+        cities *= 1.0 - 0.7 * cloudDensity;                         // clouds occlude
+        col += night.rgb * night.w * cities;
+    }
+
     return float4(col, 1.0);
 }
