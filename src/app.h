@@ -212,6 +212,11 @@ private:
         Count
     };
     CameraMode m_cameraMode = CameraMode::ShipChase;
+    // First-person cockpit view, toggled with C while in ShipChase: the camera sits
+    // at the ship's pilot position looking along the ship's forward axis (the same
+    // aim ray the chase view uses, so the reticle does not move across the toggle).
+    // The modelled canopy is ship content (Codex's lane); the camera + HUD are here.
+    bool       m_cockpitView = false;
     uint64_t   m_focusBodyId = 0; // seeded bodyId the near-body/orrery view frames
 
     // Targeting (HUD): the seeded bodyId the player has locked as a target (0 = no

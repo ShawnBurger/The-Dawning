@@ -1593,6 +1593,14 @@ int App::RunMainLoop()
             core::Log::Info("Target cleared");
         }
 
+        // C toggles the first-person cockpit view (only takes effect in ShipChase).
+        if (input.KeyPressed('C'))
+        {
+            m_cockpitView = !m_cockpitView;
+            m_chaseCameraInitialized = false;
+            core::Log::Infof("View: %s", m_cockpitView ? "COCKPIT" : "CHASE");
+        }
+
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
         {
             m_exitCode = 12;
@@ -2789,6 +2797,19 @@ bool App::UpdateCamera(const core::TimeStep& timeStep)
         : nullptr;
     if (ship)
     {
+        // First-person cockpit view: camera at the pilot position, looking along the
+        // ship's forward axis (the same aim ray the chase pose uses, so the reticle
+        // does not jump across the toggle). Flying case only, not the demo probe.
+        if (m_cockpitView && m_options.starSystem)
+        {
+            const core::Vec3f fwd  = ship->rotation.Rotate({ 0.0f, 0.0f, 1.0f }).Normalized();
+            const core::Vec3f up   = ship->rotation.Rotate({ 0.0f, 1.0f, 0.0f }).Normalized();
+            const core::Vec3f seat = ship->rotation.Rotate({ 0.0f, 1.2f, 6.5f }); // pilot eye, ship-local
+            m_chaseCameraInitialized = false;
+            if (m_camera.InitBasis(ship->position + core::Vec3d::FromFloat(seat), fwd, up))
+                return true;
+        }
+
         if (m_options.smoke && !m_options.starSystem &&
             !IsReferenceRuntimeContent())
         {
