@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+#include <algorithm>
 
 namespace render
 {
@@ -403,14 +404,20 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
     const Pixel accent = state.pathTracing ? Pixel{ 89, 178, 255, 255 } : Pixel{ 118, 222, 172, 255 };
     const Pixel navAccent = { 255, 209, 102, 255 }; // warm amber for the nav heading
 
-    // The panel is only as tall as its content: the engine block always, the
-    // navigation block when a star system is active, and the ship-orbit sub-block on
-    // top of that when the ship is flown into the system. The unused lower region of
-    // the fixed-size texture stays transparent (alpha 0), so the compact engine-only
-    // overlay is pixel-identical to before these blocks existed.
-    const int usedHeight = !state.navActive ? 176
-                         : (state.shipOrbitActive ? static_cast<int>(kOverlayHeight)
-                                                  : 252);
+    // The panel is only as tall as its ACTIVE content. The navigation block bottoms out
+    // at y=209; each optional sub-block adds its own height below that, and the footer
+    // (40 px) follows. Computing it from the active flags keeps every block and the
+    // footer from overlapping no matter which are shown, and leaves the unused lower
+    // region of the fixed-size texture transparent (so the engine-only overlay is
+    // pixel-identical to before these blocks existed).
+    int contentBottom = 209;                              // after the nav core
+    if (state.shipOrbitActive) contentBottom += 66;       // +6 gap + 3 lines
+    if (state.targetActive)    contentBottom += 46;       // +6 gap + 2 lines
+    if (state.flightActive)    contentBottom += 46;       // +6 gap + 2 lines
+    if (state.dockActive)      contentBottom += 66;       // +6 gap + 3 lines
+    const int usedHeight = !state.navActive
+        ? 176
+        : (std::min)(contentBottom + 46, static_cast<int>(kOverlayHeight)); // +40 footer +6 margin
 
     DrawRect(0, 0, kOverlayWidth, kOverlayHeight, { 0, 0, 0, 0 });
     DrawRect(0, 0, kOverlayWidth, usedHeight, panel);
@@ -572,6 +579,38 @@ void DebugOverlay::RasterOverlay(const DebugOverlayState& state)
             std::snprintf(buf, sizeof(buf), "THR %+.0f%%   G %.1f   ROT %.1f deg/s",
                           state.flightThrottleFwd * 100.0f, state.flightGForce,
                           state.flightRotRateDeg);
+            DrawTextLine(buf, 16, y, muted); y += 20;
+        }
+
+        // Docking sub-block: dock state / range / closing vs governor limit / attitude.
+        if (state.dockActive)
+        {
+            const Pixel dockCol = (state.dockStateCode == 4) ? Pixel{ 118, 240, 150, 255 }  // docked
+                                : (state.dockStateCode == 3) ? Pixel{ 255,  90,  72, 255 }  // hold
+                                : (state.dockStateCode == 2) ? Pixel{ 255, 205, 120, 255 }  // aligning
+                                : (state.dockStateCode == 5) ? Pixel{ 150, 175, 255, 255 }  // undocking
+                                                             : Pixel{ 140, 216, 255, 255 }; // idle/approach
+            y += 6;
+            DrawRect(14, y - 4, kOverlayWidth - 28, 1, line);
+            char rng[32];
+            // Docking is a close-range operation, so show metres up to 10 km rather
+            // than fmtLength's km rounding (which would render 679 m as "1 km").
+            if (state.dockRange < 10000.0)
+                std::snprintf(rng, sizeof(rng), "%.0f m", state.dockRange);
+            else
+                fmtLength(rng, sizeof(rng), state.dockRange);
+            std::snprintf(buf, sizeof(buf), "DOCK  %-8s  RNG %s", state.dockStateName, rng);
+            DrawTextLine(buf, 16, y, dockCol, true); y += 20;
+
+            const Pixel rateCol = state.dockOverspeed ? Pixel{ 255, 90, 72, 255 } : text;
+            std::snprintf(buf, sizeof(buf), "CLOSING %+.1f / %.1f m/s%s",
+                          state.dockClosingSpeed, state.dockMaxSpeed,
+                          state.dockOverspeed ? "  REDUCE" : "");
+            DrawTextLine(buf, 16, y, rateCol, false); y += 20;
+
+            std::snprintf(buf, sizeof(buf), "ALIGN %.1f  ROLL %.1f  LAT %.0fm  %s",
+                          state.dockAlignErrorDeg, state.dockRollErrorDeg, state.dockLateral,
+                          state.dockInCorridor ? "IN CORRIDOR" : "OFF AXIS");
             DrawTextLine(buf, 16, y, muted); y += 20;
         }
 

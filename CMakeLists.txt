@@ -176,6 +176,7 @@ set(GAMEPLAY_SOURCES
     src/gameplay/on_foot_controller.cpp
     src/gameplay/pilot_possession.cpp
     src/gameplay/targeting.cpp
+    src/gameplay/docking.cpp
 )
 
 set(GAMEPLAY_HEADERS
@@ -183,6 +184,7 @@ set(GAMEPLAY_HEADERS
     src/gameplay/pilot_possession.h
     src/gameplay/playable_ship.h
     src/gameplay/targeting.h
+    src/gameplay/docking.h
 )
 
 # Ship-owned interior systems. These are renderer- and simulation-free: they
@@ -326,6 +328,7 @@ set(TEST_SOURCES
     tests/test_rigid_body.cpp
     tests/test_flight_control.cpp
     tests/test_targeting.cpp
+    tests/test_docking.cpp
     tests/test_on_foot_controller.cpp
     tests/test_pilot_possession.cpp
     tests/test_interior_state.cpp
@@ -674,6 +677,9 @@ add_executable(TheDawningTests
     # (lead-pip) math. GPU- and platform-free; drives the shipped HUD targeting.
     src/gameplay/targeting.cpp
     src/gameplay/targeting.h
+    # Docking-port guidance, closing-rate governor and dock/undock state machine.
+    src/gameplay/docking.cpp
+    src/gameplay/docking.h
     # Camera basis only: no D3D dependency. Tests pin local-up propagation for
     # rolled ship interiors through the same implementation the App calls.
     src/render/camera.cpp

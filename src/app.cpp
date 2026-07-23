@@ -36,6 +36,101 @@ constexpr double kSmokeFixedDeltaSeconds = 1.0 / 60.0;
 // hence the offset). Used to look the ship up for its live osculating orbit.
 constexpr uint64_t kPlayerShipBodyId = 1;
 
+// The dockable Orbital Platform's GravitationalBody id. Also distinct from the seeded
+// bodies (which live at kStarSystemBodyIdBase + local id) and from the ship. It is a
+// negligible source (mu 0) but carries a GravitationalBody so it appears as a target
+// candidate; GatherTargetCandidates names it explicitly rather than via SeededBodyName.
+constexpr uint64_t kStationBodyId = 2;
+
+// Local half-extents (metres) of the platform's docking collar plane relative to the
+// hull centre, along the hull's local +Z (the docking face). The world-space port
+// sits here after the platform's rotation is applied. Kept beside the mesh builder so
+// the visible collar and the gameplay port frame cannot drift apart.
+constexpr float kStationPortLocalZ = 21.0f;
+
+// Build a rotation that maps local +Z onto the unit direction `dir` (used to aim the
+// platform's docking face — and therefore its whole hull — back at the approaching
+// ship). Falls back to a clean 180deg flip about +Y when dir is nearly -Z, where the
+// cross product degenerates.
+core::Quatf LookRotationFromZ(const core::Vec3f& dir)
+{
+    const core::Vec3f f{ 0.0f, 0.0f, 1.0f };
+    const core::Vec3f t = dir.Normalized();
+    const float d = f.Dot(t);
+    if (d > 0.9999f) return core::Quatf::Identity();
+    if (d < -0.9999f) return core::Quatf::FromAxisAngle({ 0.0f, 1.0f, 0.0f }, 3.14159265358979f);
+    const core::Vec3f axis = f.Cross(t).Normalized();
+    const float angle = std::acos(d < -1.0f ? -1.0f : (d > 1.0f ? 1.0f : d));
+    return core::Quatf::FromAxisAngle(axis, angle);
+}
+
+// Append a transformed unit-cube box (centre + half-extents, one solid colour) into a
+// growing MeshData, reusing GenerateCube's correct winding/normals. Axis-aligned box
+// normals stay axis-aligned under the diagonal scale, so they only need renormalising.
+void AppendStationBox(render::MeshData& out, const core::Vec3f& centre,
+                      const core::Vec3f& half, const core::Color& color)
+{
+    const render::MeshData box = render::GenerateCube(color); // unit cube, [-0.5, 0.5]
+    const uint16_t base = static_cast<uint16_t>(out.vertices.size());
+    for (render::Vertex v : box.vertices)
+    {
+        v.position = { v.position.x * (half.x * 2.0f) + centre.x,
+                       v.position.y * (half.y * 2.0f) + centre.y,
+                       v.position.z * (half.z * 2.0f) + centre.z };
+        core::Vec3f n{ v.normal.x / (half.x > 1e-6f ? half.x : 1.0f),
+                       v.normal.y / (half.y > 1e-6f ? half.y : 1.0f),
+                       v.normal.z / (half.z > 1e-6f ? half.z : 1.0f) };
+        v.normal = n.Normalized();
+        out.vertices.push_back(v);
+    }
+    for (uint16_t i : box.indices)
+        out.indices.push_back(static_cast<uint16_t>(base + i));
+}
+
+// The dockable platform mesh, in local space with +Z as the docking face: a boxy hull,
+// two lateral panel wings for silhouette, and a bright square collar framing the port
+// opening on the +Z end so the docking target reads at a glance. One mesh, one material;
+// per-vertex colour distinguishes the parts (basic_ps multiplies albedo * vertex colour).
+render::MeshData BuildStationMeshData()
+{
+    render::MeshData m;
+    const core::Color hull { 0.42f, 0.46f, 0.52f, 1.0f };
+    const core::Color trim { 0.22f, 0.25f, 0.30f, 1.0f };
+    const core::Color panel{ 0.16f, 0.28f, 0.42f, 1.0f };
+    const core::Color collar{ 0.30f, 0.95f, 1.00f, 1.0f }; // cyan, matches the HUD port cue
+
+    // Central hull spanning z in [-18, 18], docking face at +Z.
+    AppendStationBox(m, { 0, 0, 0 }, { 7.5f, 7.5f, 18.0f }, hull);
+    // A stepped-down forward section leading to the collar.
+    AppendStationBox(m, { 0, 0, 16.0f }, { 5.0f, 5.0f, 3.0f }, trim);
+    // Lateral solar-panel wings.
+    AppendStationBox(m, {  15.5f, 0, -4.0f }, { 8.0f, 0.4f, 6.0f }, panel);
+    AppendStationBox(m, { -15.5f, 0, -4.0f }, { 8.0f, 0.4f, 6.0f }, panel);
+    AppendStationBox(m, { 0,  10.0f, -10.0f }, { 0.5f, 3.0f, 4.0f }, trim); // dorsal fin
+    // Square collar around the port opening on the +Z face (opening ~ 9x9).
+    const float cz = 20.0f, bar = 1.4f, arm = 6.5f, off = 5.5f;
+    AppendStationBox(m, { 0,  off, cz }, { arm, bar, 1.2f }, collar); // top
+    AppendStationBox(m, { 0, -off, cz }, { arm, bar, 1.2f }, collar); // bottom
+    AppendStationBox(m, {  off, 0, cz }, { bar, arm, 1.2f }, collar); // right
+    AppendStationBox(m, { -off, 0, cz }, { bar, arm, 1.2f }, collar); // left
+    return m;
+}
+
+// Short label for the dock state, shared by the log, the HUD and the overlay.
+const char* DockStateName(gameplay::DockState s)
+{
+    switch (s)
+    {
+        case gameplay::DockState::Idle:        return "IDLE";
+        case gameplay::DockState::Approaching: return "APPROACH";
+        case gameplay::DockState::Aligning:    return "ALIGN";
+        case gameplay::DockState::Hold:        return "HOLD";
+        case gameplay::DockState::Docked:      return "DOCKED";
+        case gameplay::DockState::Undocking:   return "UNDOCK";
+    }
+    return "IDLE";
+}
+
 // Per-body terrain configuration (mirrors PlanetParamsFor + the true radii). type:
 // 0 Earth-like, 1 Mars-like, 2 Moon-like, 3 generic. amplitude is exaggerated for a
 // readable single-body descent demo.
@@ -321,6 +416,7 @@ bool App::InitializeScene()
     ComPtr<ID3D12Resource> cubeVBUp, cubeIBUp;
     ComPtr<ID3D12Resource> planeVBUp, planeIBUp;
     ComPtr<ID3D12Resource> sphereVBUp, sphereIBUp;
+    ComPtr<ID3D12Resource> stationVBUp, stationIBUp;
     ComPtr<ID3D12Resource> groundTexUp, cubeTexUp;
     ComPtr<ID3D12Resource> groundNormalTexUp, cubeNormalTexUp;
 
@@ -356,6 +452,16 @@ bool App::InitializeScene()
         sphereData.vertices.data(), static_cast<uint32_t>(sphereData.vertices.size()),
         sphereData.indices.data(), static_cast<uint32_t>(sphereData.indices.size()),
         sphereVBUp, sphereIBUp);
+
+    // The dockable Orbital Platform (docking increment 4). Built here beside the other
+    // primitives so its upload copy rides the same command list that flushes below;
+    // it is only instantiated into the scene in the star-system run, next to the ship.
+    auto stationData = BuildStationMeshData();
+    auto stationMesh = render::CreateMesh(
+        m_device.Device(), m_device.CmdList(),
+        stationData.vertices.data(), static_cast<uint32_t>(stationData.vertices.size()),
+        stationData.indices.data(), static_cast<uint32_t>(stationData.indices.size()),
+        stationVBUp, stationIBUp);
 
     CreateDirectoryA("assets", nullptr);
     CreateDirectoryA("assets\\textures", nullptr);
@@ -613,6 +719,7 @@ bool App::InitializeScene()
     const auto cube = resources.AddMesh(std::move(cubeMesh), "Cube");
     const auto plane = resources.AddMesh(std::move(planeMesh), "Plane");
     const auto sphere = resources.AddMesh(std::move(sphereMesh), "Sphere");
+    m_stationMesh = resources.AddMesh(std::move(stationMesh), "OrbitalPlatform");
     const auto groundAlbedo = resources.AddTexture(std::move(groundTexture), "GroundGrid");
     const auto cubeAlbedo = resources.AddTexture(std::move(cubeTexture), "BluePanels");
     const auto groundNormal = resources.AddTexture(
@@ -626,7 +733,7 @@ bool App::InitializeScene()
     const auto cubeEmissive = resources.AddTexture(
         std::move(cubeEmissiveTexture), "CubePanelEmissive");
     if (!resources.IsValidMesh(cube) || !resources.IsValidMesh(plane) ||
-        !resources.IsValidMesh(sphere) ||
+        !resources.IsValidMesh(sphere) || !resources.IsValidMesh(m_stationMesh) ||
         !resources.IsValidTexture(groundAlbedo) ||
         !resources.IsValidTexture(cubeAlbedo) ||
         !resources.IsValidTexture(groundNormal) ||
@@ -957,6 +1064,72 @@ bool App::InitializeScene()
                         "Ship spawned on a circular orbit about Earth: alt %.0f km, "
                         "v_circular %.1f m/s (Newtonian flight)",
                         (r - earthRadius) / 1000.0, vCirc);
+                }
+
+                // Dockable Orbital Platform, ~700 m ahead of the ship along its nose,
+                // co-moving (same velocity, so relative motion is ~0 and docking is
+                // feasible). Its docking face is aimed back at the ship, so the player —
+                // who spawns nosed toward it — flies a straight-in approach. Capture the
+                // ship-derived values as locals BEFORE CreateRenderable (which mutates the
+                // registry and can invalidate the Transform reference `t`).
+                if (resources.IsValidMesh(m_stationMesh))
+                {
+                    const core::Vec3d shipPos = t.position;
+                    const core::Vec3f shipFwdF =
+                        core::Mat4x4::FromQuaternion(t.rotation.Normalized())
+                            .TransformDirection({ 0.0f, 0.0f, 1.0f });
+                    const core::Vec3d shipFwd{ shipFwdF.x, shipFwdF.y, shipFwdF.z };
+                    core::Vec3d shipVel{ 0, 0, 0 };
+                    if (auto* srb = reg.TryGet<ecs::RigidBody>(m_playerShip))
+                        shipVel = srb->linearVelocity;
+
+                    constexpr double kStationSpawnDist = 700.0; // m ahead of the ship
+                    const core::Vec3d stationPos = shipPos + shipFwd * kStationSpawnDist;
+                    // Aim the platform's local +Z (docking face) back toward the ship.
+                    const core::Vec3f faceDir{ -shipFwdF.x, -shipFwdF.y, -shipFwdF.z };
+                    const core::Quatf stationRot = LookRotationFromZ(faceDir);
+
+                    ecs::Material stationMat;
+                    stationMat.albedo    = { 1.0f, 1.0f, 1.0f, 1.0f }; // let vertex colours read through
+                    stationMat.roughness = 0.55f;
+                    stationMat.metallic  = 0.35f;
+                    m_stationEntity = m_scene.CreateRenderable(
+                        "OrbitalPlatform", m_stationMesh, stationMat,
+                        ecs::Transform{ stationPos, stationRot, { 1.0f, 1.0f, 1.0f } });
+
+                    if (reg.IsAlive(m_stationEntity))
+                    {
+                        // Co-orbital rigid body: force-integrated like the ship and
+                        // seeded with the ship's velocity, so it feels the same gravity
+                        // and stays on a near-identical orbit. Seeding a straight copy of
+                        // the ship's velocity at a 700 m radial offset is exactly co-moving
+                        // only instantaneously; the along-track drift is a few metres per
+                        // minute at this altitude — negligible for a dock and easily nulled
+                        // by the pilot. invMass MUST be > 0 or the integrator
+                        // skips gravity (physics_system.cpp) and it would fly straight
+                        // while the ship curves. Gravity is mass-independent, so the large
+                        // mass is cosmetic; a 500-tonne platform never rotates. The ship
+                        // cannot bounce it: a contact needs a source body and both the
+                        // ship and the platform are non-sources (collision.cpp).
+                        ecs::RigidBody srb;
+                        srb.linearVelocity = shipVel;
+                        srb.prevPosition   = stationPos;
+                        srb.invMass        = 1.0 / 5.0e5; // 500-tonne platform
+                        srb.invInertiaDiag = { 0.0f, 0.0f, 0.0f }; // rotation-locked
+                        reg.Assign<ecs::RigidBody>(m_stationEntity, srb);
+                        reg.Assign<ecs::SpatialFrame>(
+                            m_stationEntity, ecs::SpatialFrame{ m_scene.ActiveFrame() });
+                        ecs::GravitationalBody stationGrav;
+                        stationGrav.bodyId   = kStationBodyId;
+                        stationGrav.radius   = 22.0;
+                        stationGrav.isSource = false;
+                        stationGrav.owner    = ecs::OrbitOwner::ForceIntegrated;
+                        reg.Assign<ecs::GravitationalBody>(m_stationEntity, stationGrav);
+                        m_stationVelocity = shipVel;
+                        core::Log::Infof(
+                            "Orbital Platform spawned %.0f m ahead of the ship (dockable)",
+                            kStationSpawnDist);
+                    }
                 }
             }
         }
@@ -1601,6 +1774,11 @@ int App::RunMainLoop()
             core::Log::Infof("View: %s", m_cockpitView ? "COCKPIT" : "CHASE");
         }
 
+        // B: dock/undock intent. While Docked it releases the latch and pushes clear;
+        // otherwise it reports the docking status (approach + capture are automatic).
+        if (input.KeyPressed('B'))
+            HandleDockKey();
+
         if (!m_options.smoke && input.KeyPressed('F') && !HandleUseAction())
         {
             m_exitCode = 12;
@@ -1909,6 +2087,7 @@ int App::RunMainLoop()
         }
 
         UpdatePlayerShipVisuals();
+        UpdateDocking();
         if (!UpdateCamera(timeStep))
         {
             m_exitCode = 12;
@@ -3199,7 +3378,11 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
         if (m_hudTargetInfo.valid && m_targetBodyId != 0)
         {
             state.targetActive       = true;
-            state.targetName         = SeededBodyName(m_targetBodyId - scene::kStarSystemBodyIdBase);
+            // The platform is not a seeded body; name it directly to avoid the
+            // SeededBodyName(bodyId - base) underflow.
+            state.targetName         = (m_targetBodyId == kStationBodyId)
+                ? "Platform"
+                : SeededBodyName(m_targetBodyId - scene::kStarSystemBodyIdBase);
             state.targetRange        = m_hudTargetInfo.rangeMeters;
             state.targetClosingSpeed = m_hudTargetInfo.closingSpeed;
             state.targetRelation     = static_cast<int>(m_hudTargetInfo.relation);
@@ -3213,6 +3396,24 @@ render::DebugOverlayState App::BuildOverlayState(const core::TimeStep& timeStep)
             state.flightThrottleFwd = m_hudFlight.throttleFwd;
             state.flightGForce      = m_hudFlight.gForce;
             state.flightRotRateDeg  = m_hudFlight.rotRateDeg;
+        }
+
+        // Docking readout: mirrors the HUD widget (state / range / closing vs limit /
+        // attitude). Populated by UpdateDocking each frame; shown only near the platform.
+        if (m_dockRelevant)
+        {
+            constexpr double kRadToDeg = 57.2957795131;
+            state.dockActive        = true;
+            state.dockStateName     = DockStateName(m_dockState);
+            state.dockStateCode     = static_cast<int>(m_dockState);
+            state.dockRange         = m_dockApproach.range;
+            state.dockClosingSpeed  = m_dockApproach.closingSpeed;
+            state.dockMaxSpeed      = m_dockApproach.maxSpeed;
+            state.dockOverspeed     = m_dockApproach.overspeed;
+            state.dockInCorridor    = m_dockApproach.inCorridor;
+            state.dockAlignErrorDeg = static_cast<float>(m_dockApproach.alignError * kRadToDeg);
+            state.dockRollErrorDeg  = static_cast<float>(m_dockApproach.rollError * kRadToDeg);
+            state.dockLateral       = static_cast<float>(m_dockApproach.lateral);
         }
     }
 
@@ -3431,6 +3632,90 @@ void App::RenderTerrainPreview()
     }
 }
 
+void App::UpdateDocking()
+{
+    m_dockRelevant = false;
+    if (!m_options.starSystem || !m_shipInSystem)
+    {
+        m_dockState = gameplay::DockState::Idle;
+        m_dockApproach = {};
+        return;
+    }
+    ecs::Registry& reg = m_scene.GetRegistry();
+    if (!reg.IsAlive(m_stationEntity) || !reg.IsAlive(m_playerShip)) return;
+    const ecs::Transform* st = reg.TryGet<ecs::Transform>(m_stationEntity);
+    const ecs::Transform* pt = reg.TryGet<ecs::Transform>(m_playerShip);
+    if (!st || !pt) return;
+
+    // World-space port frame from the platform's pose (local +Z is the docking face).
+    const core::Quatf q = st->rotation.Normalized();
+    const core::Vec3f axisF    = q.Rotate({ 0.0f, 0.0f, 1.0f });
+    const core::Vec3f upF      = q.Rotate({ 0.0f, 1.0f, 0.0f });
+    const core::Vec3f portOffF = q.Rotate({ 0.0f, 0.0f, kStationPortLocalZ });
+    m_dockPort = gameplay::DockingPort{};
+    m_dockPort.position     = st->position + core::Vec3d{ portOffF.x, portOffF.y, portOffF.z };
+    m_dockPort.approachAxis = core::Vec3d{ axisF.x, axisF.y, axisF.z }.Normalized();
+    m_dockPort.up           = core::Vec3d{ upF.x, upF.y, upF.z }.Normalized();
+
+    // Ship pose + velocity relative to the (moving) platform, for the closing rate.
+    core::Vec3d shipVel{ 0, 0, 0 };
+    if (const ecs::RigidBody* prb = reg.TryGet<ecs::RigidBody>(m_playerShip))
+        shipVel = prb->linearVelocity;
+    if (const ecs::RigidBody* srb = reg.TryGet<ecs::RigidBody>(m_stationEntity))
+        m_stationVelocity = srb->linearVelocity;
+    const core::Quatf pq = pt->rotation.Normalized();
+    const core::Vec3f fF = pq.Rotate({ 0.0f, 0.0f, 1.0f });
+    const core::Vec3f uF = pq.Rotate({ 0.0f, 1.0f, 0.0f });
+    const core::Vec3d shipFwd{ fF.x, fF.y, fF.z };
+    const core::Vec3d shipUp { uF.x, uF.y, uF.z };
+    const core::Vec3d relVel = shipVel - m_stationVelocity;
+
+    m_dockApproach = gameplay::ComputeApproach(pt->position, relVel, shipFwd, shipUp, m_dockPort);
+    m_dockState    = gameplay::StepDockState(m_dockState, m_dockApproach, m_dockPort, kDockEngageRange);
+    m_dockRelevant = (m_dockApproach.range <= kDockEngageRange * 2.0);
+
+    // Soft latch: once docked, pin the ship on the port at the platform's velocity so it
+    // rides along instead of drifting or being pushed off by lingering thrust. Gated
+    // entirely on Docked — a state only this feature produces — so ordinary flight is
+    // untouched. Released by HandleDockKey (undock).
+    if (m_dockState == gameplay::DockState::Docked)
+    {
+        const core::Vec3d hold = m_dockPort.position +
+                                 m_dockPort.approachAxis * (m_dockPort.captureRadius * 0.5);
+        if (ecs::Transform* ptm = reg.TryGet<ecs::Transform>(m_playerShip))
+            ptm->position = hold;
+        if (ecs::RigidBody* prb = reg.TryGet<ecs::RigidBody>(m_playerShip))
+        {
+            prb->linearVelocity  = m_stationVelocity;
+            prb->angularVelocity = { 0.0f, 0.0f, 0.0f };
+            // Keep prevPosition on the pinned point too, so a future render-interpolation
+            // pass lerps within the latch rather than from the pre-dock position.
+            prb->prevPosition    = hold;
+        }
+    }
+}
+
+bool App::HandleDockKey()
+{
+    if (!m_shipInSystem || !m_scene.GetRegistry().IsAlive(m_stationEntity)) return false;
+    if (m_dockState == gameplay::DockState::Docked)
+    {
+        // Release the latch and push gently back out along the port axis. The Undocking
+        // state holds off re-capture until the ship has cleared the port envelope.
+        m_dockState = gameplay::DockState::Undocking;
+        if (ecs::RigidBody* prb =
+                m_scene.GetRegistry().TryGet<ecs::RigidBody>(m_playerShip))
+            prb->linearVelocity = m_stationVelocity + m_dockPort.approachAxis * 20.0;
+        core::Log::Info("Undocking: released, pushing clear of the platform");
+        return true;
+    }
+    // Not docked: the approach is flown manually and captured automatically. Report.
+    core::Log::Infof("Docking status: %s (range %.0f m, closing %.1f m/s)",
+                     DockStateName(m_dockState), m_dockApproach.range,
+                     m_dockApproach.closingSpeed);
+    return true;
+}
+
 std::vector<gameplay::TargetCandidate> App::GatherTargetCandidates()
 {
     std::vector<gameplay::TargetCandidate> out;
@@ -3450,12 +3735,22 @@ std::vector<gameplay::TargetCandidate> App::GatherTargetCandidates()
 
         gameplay::TargetCandidate c;
         c.id       = g.bodyId;
-        c.name     = SeededBodyName(g.bodyId - scene::kStarSystemBodyIdBase);
+        // The dockable platform is not a seeded body, so name it directly rather than
+        // via SeededBodyName (whose bodyId - base would underflow). It reads Friendly.
+        if (g.bodyId == kStationBodyId)
+        {
+            c.name     = "Platform";
+            c.relation = gameplay::TargetRelation::Friendly;
+        }
+        else
+        {
+            c.name     = SeededBodyName(g.bodyId - scene::kStarSystemBodyIdBase);
+            c.relation = gameplay::TargetRelation::Neutral; // bodies are neutral; ships later
+        }
         c.worldPos = t->position;
         if (const ecs::RigidBody* rb = reg.TryGet<ecs::RigidBody>(e))
             c.worldVel = rb->linearVelocity;
         c.radius   = g.radius;
-        c.relation = gameplay::TargetRelation::Neutral; // bodies are neutral; ships later
         out.push_back(c);
     }
     return out;
@@ -3674,6 +3969,71 @@ void App::RenderHud()
             const float fbX = tcx + box + 16.0f;
             m_hud.AddLine(fbX, tcy - box, fbX, tcy + box, faint, 2.0f);
             m_hud.AddRect(fbX - 5.0f, tcy - m_hudFlight.throttleFwd * box - 1.5f, 10.0f, 3.0f, live);
+        }
+    }
+
+    // --- docking guidance widget (ILS-style port marker + director + rate tape) ----
+    // Drawn only when the platform is within range (m_dockRelevant, set by UpdateDocking).
+    // The port marker says WHERE, the alignment director says WHICH WAY TO NOSE, the
+    // status ring turns green as the corridor/attitude tolerances are met, and the tape
+    // shows closing speed against the governor limit (red on overspeed).
+    if (m_dockRelevant)
+    {
+        const core::Color dockCol =
+            (m_dockState == gameplay::DockState::Docked)      ? core::Color{ 0.35f, 1.00f, 0.55f, 0.95f }
+          : (m_dockState == gameplay::DockState::Hold)        ? core::Color{ 1.00f, 0.35f, 0.28f, 0.95f }
+          : (m_dockState == gameplay::DockState::Aligning)    ? core::Color{ 1.00f, 0.78f, 0.30f, 0.95f }
+          : (m_dockState == gameplay::DockState::Approaching) ? core::Color{ 0.35f, 0.85f, 1.00f, 0.95f }
+          : (m_dockState == gameplay::DockState::Undocking)   ? core::Color{ 0.55f, 0.65f, 1.00f, 0.95f }
+                                                              : core::Color{ 0.66f, 0.73f, 0.80f, 0.85f };
+
+        const render::ScreenPoint pp = toScreen(m_dockPort.position);
+        if (pp.visible && pp.onScreen)
+        {
+            const bool aligned = m_dockApproach.inCorridor &&
+                                 m_dockApproach.alignError <= m_dockPort.alignTol &&
+                                 m_dockApproach.rollError  <= m_dockPort.rollTol;
+            const core::Color ringCol =
+                  m_dockApproach.overspeed    ? kHostile
+                : !m_dockApproach.inCorridor  ? core::Color{ 1.00f, 0.78f, 0.30f, 0.90f }
+                : aligned                     ? core::Color{ 0.35f, 1.00f, 0.55f, 0.95f }
+                                              : core::Color{ 0.35f, 0.85f, 1.00f, 0.90f };
+            m_hud.AddDiamondOutline(pp.x, pp.y, 16.0f, dockCol, 2.0f);
+            m_hud.AddBracket(pp.x, pp.y, 26.0f, 8.0f, ringCol, 2.0f);
+            m_hud.AddCircle(pp.x, pp.y, 30.0f, ringCol, 1.5f, 28);
+            m_hud.AddRect(pp.x - 1.5f, pp.y - 1.5f, 3.0f, 3.0f, dockCol);
+
+            // Closing-rate tape: fill = closingSpeed / governor limit, red on overspeed.
+            const float tapeX = pp.x + 42.0f, tapeTop = pp.y - 30.0f, tapeH = 60.0f;
+            m_hud.AddRect(tapeX, tapeTop, 4.0f, tapeH, core::Color{ 0.30f, 0.40f, 0.50f, 0.40f });
+            m_hud.AddRect(tapeX - 3.0f, tapeTop, 10.0f, 1.5f, core::Color{ 0.85f, 0.88f, 0.92f, 0.75f }); // limit tick
+            const double lim = (m_dockApproach.maxSpeed > 0.1) ? m_dockApproach.maxSpeed : 0.1;
+            const double cf = m_dockApproach.closingSpeed / lim;
+            const float fillH = static_cast<float>((cf < 0.0 ? 0.0 : (cf > 1.0 ? 1.0 : cf))) * tapeH;
+            const core::Color rateCol = m_dockApproach.overspeed
+                ? kHostile : core::Color{ 0.50f, 1.00f, 0.70f, 0.90f };
+            m_hud.AddRect(tapeX, tapeTop + tapeH - fillH, 4.0f, fillH, rateCol);
+        }
+        else if (pp.visible)
+        {
+            float ex, ey, ang; clampToBorder(pp.x, pp.y, ex, ey, ang);
+            m_hud.AddChevron(ex, ey, 14.0f, ang, dockCol, 3.0f);
+        }
+
+        // Alignment director: the point the nose must aim at to null the attitude error
+        // (far along -approachAxis from the ship). Fly the boresight reticle onto it.
+        if (haveShip && pp.visible && pp.onScreen)
+        {
+            const core::Vec3d aim{ shipPos.x - m_dockPort.approachAxis.x * 1.0e6,
+                                   shipPos.y - m_dockPort.approachAxis.y * 1.0e6,
+                                   shipPos.z - m_dockPort.approachAxis.z * 1.0e6 };
+            const render::ScreenPoint ap = toScreen(aim);
+            if (ap.visible && ap.onScreen)
+            {
+                m_hud.AddCircle(ap.x, ap.y, 9.0f, dockCol, 2.0f, 20);
+                m_hud.AddLine(ap.x - 13.0f, ap.y, ap.x - 5.0f, ap.y, dockCol, 1.5f);
+                m_hud.AddLine(ap.x + 5.0f, ap.y, ap.x + 13.0f, ap.y, dockCol, 1.5f);
+            }
         }
     }
 

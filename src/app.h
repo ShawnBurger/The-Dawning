@@ -5,6 +5,7 @@
 #include "core/window.h"
 #include "gameplay/pilot_possession.h"
 #include "gameplay/targeting.h"
+#include "gameplay/docking.h"
 #include "render/camera.h"
 #include "render/d3d12_device.h"
 #include "render/debug_overlay.h"
@@ -114,6 +115,19 @@ private:
     // The current set of targetable things (seeded celestial bodies for now; the
     // player ship excluded). Shared by the T/G target keybinds and RenderHud.
     std::vector<gameplay::TargetCandidate> GatherTargetCandidates();
+
+    // Recompute the docking guidance (world-space port frame + DockApproach) and
+    // advance the dock state machine one step. Deterministic and render-mode
+    // independent: called once per rendered frame from the main loop so docking
+    // progresses in the orrery / path-tracing views too, where RenderHud is skipped.
+    // A no-op until the ship has been flown into a star system beside the platform.
+    void UpdateDocking();
+
+    // The dock/undock intent key (B). While Docked it releases the latch and pushes
+    // the ship gently back out along the approach axis; otherwise it is a no-op — the
+    // approach itself is flown manually and captured automatically by UpdateDocking.
+    // Returns true if it consumed the key (so the caller does not also treat it).
+    bool HandleDockKey();
 
     AppOptions m_options;
 
@@ -246,6 +260,23 @@ private:
         float rotRateDeg = 0.0f;    // |angularVelocity| in deg/s
     };
     HudFlightStatus m_hudFlight;
+
+    // Docking (increment 4): a co-orbital "Orbital Platform" the player can approach
+    // and soft-dock. The platform is a normal renderable entity (visible in raster and
+    // path tracing, targetable like a body); the docking PORT is a frame carried on its
+    // hull, and gameplay::docking supplies the ILS-style guidance + capture logic. The
+    // math is GPU-free and unit-tested (tests/test_docking.cpp); this is the wiring.
+    ecs::Entity            m_stationEntity;             // platform hull renderable (null until spawned)
+    scene::MeshHandle      m_stationMesh;               // registered at scene init
+    gameplay::DockingPort  m_dockPort;                  // world-space port frame, recomputed each frame
+    gameplay::DockApproach m_dockApproach;              // guidance, recomputed each frame (all render modes)
+    gameplay::DockState    m_dockState = gameplay::DockState::Idle;
+    bool                   m_dockRelevant = false;      // platform exists AND within widget range this frame
+    core::Vec3d            m_stationVelocity{ 0, 0, 0 };// platform world velocity (for the closing rate)
+    // Idle -> Approaching gate. The platform spawns ~700 m ahead so the ship starts
+    // OUTSIDE this and the player flies in, watching the state progress Idle ->
+    // Approaching -> Aligning -> Docked (and Hold when too fast / off the corridor).
+    static constexpr double kDockEngageRange = 400.0;   // m
 
     // Chunked-LOD terrain preview (Surface camera mode): the quadtree-selected leaf
     // set on the focus body (the Moon), each a displaced cube-sphere patch built

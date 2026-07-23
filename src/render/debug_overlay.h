@@ -70,6 +70,21 @@ struct DebugOverlayState
     float        flightThrottleFwd = 0.0f;  // -1..1
     float        flightGForce = 0.0f;
     float        flightRotRateDeg = 0.0f;
+
+    // Docking sub-block — the ILS-style guidance for the dockable platform, mirroring
+    // the HUD widget: the dock state, range to the port, closing speed vs the governor
+    // limit, and the attitude errors in degrees. Shown only near the platform.
+    bool         dockActive = false;
+    const char*  dockStateName = "";
+    int          dockStateCode = 0;         // 0 Idle,1 Approach,2 Align,3 Hold,4 Docked,5 Undock
+    double       dockRange = 0.0;           // m, ship -> port
+    double       dockClosingSpeed = 0.0;    // m/s toward the port (+ = closing)
+    double       dockMaxSpeed = 0.0;        // m/s, governor limit at this distance
+    bool         dockOverspeed = false;
+    bool         dockInCorridor = false;
+    float        dockAlignErrorDeg = 0.0f;  // nose vs port axis
+    float        dockRollErrorDeg = 0.0f;   // roll vs port up
+    float        dockLateral = 0.0f;        // m off the centreline
 };
 
 class DebugOverlay
@@ -102,11 +117,11 @@ private:
     void UploadTexture(D3D12Device& device);
 
     static constexpr uint32_t kOverlayWidth = 520;
-    // Tall enough for the navigation block plus the optional ship-orbit sub-block.
-    // When navActive is false (or the ship block is absent) the lower region is left
-    // transparent (the panel background is drawn only as tall as the content), so the
-    // compact engine-only overlay is unchanged in look.
-    static constexpr uint32_t kOverlayHeight = 320;
+    // Tall enough for the navigation block plus every optional sub-block stacked at
+    // once: ship-orbit, target, flight AND docking, then the footer. RasterOverlay sizes
+    // the drawn panel to the actual active content (usedHeight), so the unused lower
+    // region stays transparent and the compact engine-only overlay is unchanged in look.
+    static constexpr uint32_t kOverlayHeight = 512;
 
     bool m_initialized = false;
     uint32_t m_uploadPitch = 0;
